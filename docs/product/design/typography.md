@@ -7,7 +7,7 @@ Lorume uses a two-role typography system: Sans for product reading and interacti
 | Role | Token | Use |
 |---|---|---|
 | Sans | `--font-sans` / `--lorume-font-body` | Page titles, Chinese body, buttons, forms, work items, details |
-| Mono | `--font-mono` / `--lorume-font-mono` | Runtime names, technical labels, numbers, timestamps, short IDs |
+| Mono | `--font-mono` / `--lorume-font-mono` | Command fragments, timestamps, short IDs, compact machine values |
 
 ## Sans Rules
 
@@ -26,12 +26,12 @@ Use weight, spacing, and layout for hierarchy. Do not use display-size type insi
 
 Mono is used only when alignment or technical recognition matters:
 
-- Numeric metrics.
 - Short runtime, agent, channel, and operation type values.
 - Command fragments.
 - Short hashes and timestamps.
+- Dense numeric runs where alignment matters.
 
-Mono is not used for long Chinese sentences.
+Mono is not used for long Chinese sentences, primary navigation, form labels, status badges, or general UI chrome.
 
 ## Hierarchy
 
@@ -44,8 +44,8 @@ Mono is not used for long Chinese sentences.
 
 ## Implementation Mapping
 
-- `.homeTitle`, `.auth-layout__title`, `h1`, `h2`, `.detailHeader h2`, `.workCard strong`, `.primaryButton`, `.secondaryButton`, `.quickRangeButton`, `.toolbarField select`, `.detailBlock p`, and `.detailBlock li` use `--lorume-font-body`.
-- `.navItem`, `.metricCard strong`, `.tableSummary`, `.assetHeader`, `.badge`, `.refPill`, `.statusBadge`, and timestamps use `--lorume-font-mono`.
+- `.homeTitle`, `.auth-layout__title`, `h1`, `h2`, `.detailHeader h2`, `.workCard strong`, `.primaryButton`, `.secondaryButton`, `.quickRangeButton`, `.toolbarField select`, `.detailBlock p`, `.detailBlock li`, `.navItem`, `.metricCard strong`, `.tableSummary`, `.assetHeader`, `.badge`, `.refPill`, and `.statusBadge` use `--lorume-font-body`.
+- Timestamps, short IDs, command fragments, and invite links use `--lorume-font-mono`.
 - `src/ui/ui-tokens.test.tsx` locks the core mapping; update this spec and the harness together.
 
 ## Line Length

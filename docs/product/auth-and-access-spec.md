@@ -148,11 +148,10 @@ Runtime / Runs 读取 API：
 
 ## UI 规则
 
-- 登录、验证码、创建组织、邀请加入页面使用更强的 Cream Arcade 视觉语言：像素 logo、奶油底、黑色硬边、像素阴影、高饱和按钮和克制游戏装饰。
+- 登录、验证码、创建组织、邀请加入页面使用 Glacier Premium Precision 身份面：现代 Lorume mark、冷白/冰川灰背景、发光但低噪声的产品预览、发散但不空洞的首屏信息。
 - Console 页面使用相同 token 系统，但优先保证 Runtime Fleet、Runs、组织设置，以及任务中心、通知中心工具抽屉的数据扫描效率。
-- 品牌标题、按钮、状态短标签可使用 Fusion Pixel；身份页短说明和表单也可以使用 Fusion Pixel，Console 的长正文和表格内容仍以可读性为先。
-- 身份页和 Console 的图标都通过共享 `PixelIcon` 入口和像素装饰组件渲染；表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚装饰不得使用零散图标体系。
-- 像素风只作为视觉语言，不改变信息架构和权限边界。
+- 身份页和 Console 的图标都通过共享 `PixelIcon` 入口渲染；表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚不得使用零散图标体系或复古像素图标。
+- 当前组织在 Console 左侧栏顶部；个人身份入口在左侧栏底部头像菜单中。头像菜单承载邮箱、退出登录和后续个人偏好，不重复当前组织和角色。
 - 登录页的 `/api/me` 匿名会话探测返回 `401` 或 `404` 属于正常未登录状态，不能直接把 `Not Found`、接口错误或调试字段暴露在页面上；其他后端故障仍应展示可读错误，避免把真实服务异常吞掉。
 
 ## Harness
@@ -169,7 +168,7 @@ Runtime / Runs 读取 API：
 
 - 登录页、验证码页、创建组织页和邀请加入页必须有组件测试。
 - Console 必须被 `/api/me` gate 保护。
-- Cream Arcade 组件测试必须覆盖像素 logo、基础面板/button/badge/token 类名和身份页装饰层，防止后续页面绕开共享 token。
+- Glacier 组件测试必须覆盖现代 logo、共享 icon、基础面板/button/badge/token 类名、Sans / Mono 字体角色和身份页装饰层，防止后续页面绕开共享 token。
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。
 - Playwright Console harness 可以通过 `VITE_LORUME_AUTH_MODE=disabled` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
 - 已验收的 Runtime Fleet 和 Runs 交互不得因 auth 和视觉改造回退。

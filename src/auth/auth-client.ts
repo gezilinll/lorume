@@ -77,5 +77,6 @@ async function readErrorMessage(response: Response): Promise<string> {
   } catch {
     // Fall through to the status text.
   }
+  if (response.status >= 500) return "认证服务暂时不可用，请稍后再试";
   return response.statusText || "request_failed";
 }

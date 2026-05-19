@@ -19,7 +19,8 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 ## Console Shell
 
 - Desktop Console uses compact left rail navigation.
-- Topbar contains breadcrumbs/search and utility buttons for tasks and notifications.
+- The left rail has three zones: brand + current organization at the top, primary navigation in the middle, and the personal account avatar/menu at the bottom.
+- Topbar utility buttons are only for tasks and notifications; page-specific primary actions stay in the page header.
 - Main pages use summary rail + primary workspace + detail inspector when the data model supports it.
 - Utility drawers open from the right and preserve the current Console context.
 - Operations and Notifications drawers target `min(440px, calc(100vw - 16px))` on desktop unless a specific workflow proves more width is required.

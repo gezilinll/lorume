@@ -9,7 +9,7 @@ interface OrganizationSettingsPageProps {
 const roleLabels: Record<AuthMemberRole, string> = {
   admin: "管理员",
   member: "成员",
-  owner: "Owner",
+  owner: "所有者",
 };
 
 /** Organization settings entry for member visibility and invitation link creation. */
@@ -69,6 +69,12 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
             <p className="pageSubtitle">请选择组织后管理成员与权限。</p>
           </div>
         </header>
+        <section className="emptyState emptyStatePanel" aria-label="组织设置空状态">
+          <div>
+            <h2>当前没有组织上下文</h2>
+            <p>登录并选择组织后，可以在这里管理成员、邀请链接和权限边界。</p>
+          </div>
+        </section>
       </section>
     );
   }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthProvider, useOptionalAuthSession } from "./auth/AuthProvider";
+import type { AuthOrganizationMembership } from "./auth/auth-store";
 import {
   ConsoleUtilityBar,
   ConsoleUtilityDrawer,
@@ -107,6 +108,7 @@ function ConsoleApp() {
         <div className="brandMark">
           <PixelLogo />
         </div>
+        <OrganizationSwitcher onSettings={() => navigateToPage("settings")} />
         <nav className="navList" aria-label="主导航">
           {navItems.map((item) => {
             const isActive = item.page === activePage;
@@ -126,7 +128,7 @@ function ConsoleApp() {
             );
           })}
         </nav>
-        <AuthSessionActions />
+        <AccountMenu />
       </aside>
       <ConsoleUtilityBar activeView={utilityView} organizationId={organizationId} onOpen={openUtility} />
 
@@ -164,16 +166,102 @@ function utilityViewFromPath(path: string): ConsoleUtilityView | null {
   return null;
 }
 
-function AuthSessionActions() {
+function OrganizationSwitcher({ onSettings }: { onSettings: () => void }) {
   const auth = useOptionalAuthSession();
+  const [isOpen, setIsOpen] = useState(false);
+  const organization = auth?.session.organizations[0];
+  if (!organization) return null;
+
+  return (
+    <div className="navOrgSwitcher">
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label={`当前组织 ${organization.name}`}
+        className="orgSwitcherButton"
+        type="button"
+        onClick={() => setIsOpen((value) => !value)}
+      >
+        <span className="orgAvatar" aria-hidden="true">
+          {formatOrganizationInitial(organization)}
+        </span>
+        <span className="orgSwitcherText">
+          <span className="orgSwitcherLabel">当前组织</span>
+          <span className="orgSwitcherName">{organization.name}</span>
+        </span>
+        <PixelIcon name="chevron-down" size={16} />
+      </button>
+      {isOpen ? (
+        <div className="orgSwitcherMenu" role="menu" aria-label="组织菜单">
+          <div className="orgMenuSummary">
+            <span>已选组织</span>
+            <strong>{organization.name}</strong>
+          </div>
+          <button
+            className="orgMenuItem"
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setIsOpen(false);
+              onSettings();
+            }}
+          >
+            <PixelIcon name="settings" size={16} />
+            <span>组织设置</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenu() {
+  const auth = useOptionalAuthSession();
+  const [isOpen, setIsOpen] = useState(false);
   if (!auth) return null;
+
+  const displayName = auth.session.user.displayName?.trim() || auth.session.user.email;
 
   return (
     <div className="navFooter">
-      <span>{auth.session.user.email}</span>
-      <button type="button" className="navItem navItemCompact" onClick={() => void auth.logout()}>
-        退出登录
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label={`打开个人菜单 ${displayName}`}
+        className="accountButton"
+        type="button"
+        onClick={() => setIsOpen((value) => !value)}
+      >
+        <span className="accountAvatar" aria-hidden="true">
+          {formatUserInitial(displayName)}
+        </span>
+        <span className="accountButtonText">
+          <span>个人入口</span>
+          <small>账户与偏好</small>
+        </span>
       </button>
+      {isOpen ? (
+        <div className="accountMenu" role="menu" aria-label="个人菜单">
+          <div className="accountMenuHeader">
+            <strong>{displayName}</strong>
+            {displayName === auth.session.user.email ? null : <span>{auth.session.user.email}</span>}
+          </div>
+          <button className="accountMenuItem" role="menuitem" type="button" onClick={() => void auth.logout()}>
+            退出登录
+          </button>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function formatOrganizationInitial(organization: AuthOrganizationMembership): string {
+  return (organization.name.trim()[0] || organization.slug.trim()[0] || "L").toUpperCase();
+}
+
+function formatUserInitial(displayName: string): string {
+  const text = displayName.trim();
+  if (!text) return "U";
+  if (text.includes("@")) return text[0]?.toUpperCase() || "U";
+  return text.slice(0, 2).toUpperCase();
 }

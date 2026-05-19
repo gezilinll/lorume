@@ -168,7 +168,7 @@ export function ConsoleUtilityDrawer({ organizationId, view, onClose }: ConsoleU
             <h2>{title}</h2>
           </div>
           <button className="iconButton" type="button" aria-label={`关闭${title}`} onClick={onClose}>
-            ×
+            <PixelIcon name="close" size={18} />
           </button>
         </header>
         {view === "operations" ? (

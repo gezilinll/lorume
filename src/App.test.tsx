@@ -146,6 +146,7 @@ describe("Console shell", () => {
     expect(within(nav).getByRole("button", { name: "组织设置" })).toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "任务中心" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
+    expect(screen.queryByText("@")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "任务 0" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知 0" })).toBeInTheDocument();
 

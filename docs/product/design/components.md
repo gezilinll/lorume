@@ -13,6 +13,8 @@ The following primitives keep their current filenames during this redesign:
 - `PixelIcon`: shared product icon entry.
 - `PixelLogo`: brand mark.
 - `PixelDecorations`: optional low-noise grid/trace decoration, not pixel sprites.
+- Console shell organization switcher: top-left current organization entry, future-ready for organization switching without adding fake options.
+- Console account menu: bottom-left avatar entry for personal account actions.
 
 ## Buttons
 
@@ -40,7 +42,7 @@ The following primitives keep their current filenames during this redesign:
 ## Metrics
 
 - Metrics appear in summary rails or compact metric grids.
-- The label explains the object; the number uses Mono.
+- The label explains the object; the value uses Sans by default and Mono only when fixed-width numeric scanning is required.
 - A metric may have a top accent line, but it should not dominate the page.
 
 ## Rows And Cards
@@ -62,6 +64,14 @@ The following primitives keep their current filenames during this redesign:
 - Drawers are narrow by default and use vertical list + selected detail.
 - Drawers have no internal task/notification tabs; each route represents one active drawer state.
 - Closing returns users to the page they opened the drawer from.
+
+## Organization And Account Chrome
+
+- Current organization belongs in the upper-left Console rail, directly below the brand mark.
+- The organization entry can open a small menu for current organization actions; do not invent unavailable organization switching data.
+- Personal identity belongs at the lower-left rail as an avatar/account menu.
+- The account menu contains personal account actions such as logout; it must not repeat current organization or role when that information is already visible elsewhere.
+- Raw email should not be permanently exposed in the rail; show it inside the account menu where it confirms identity.
 
 ## Empty And Error States
 

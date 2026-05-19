@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -164,7 +164,15 @@ describe("auth pages", () => {
     render(<App authMode="required" />);
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "退出登录" }));
+    expect(screen.getByRole("button", { name: /当前组织 Lorume Team/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /打开个人菜单/ }));
+    const userMenu = screen.getByRole("menu", { name: "个人菜单" });
+    expect(within(userMenu).getByText("zhangliang@gaoding.com")).toBeInTheDocument();
+    expect(within(userMenu).queryByText("Lorume Team")).not.toBeInTheDocument();
+    expect(within(userMenu).queryByText("Owner")).not.toBeInTheDocument();
+    await user.click(within(userMenu).getByRole("menuitem", { name: "退出登录" }));
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();

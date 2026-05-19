@@ -22,7 +22,7 @@ Rules:
 
 - The page focuses one identity task.
 - The operations preview is compact and shows current product concepts, not live organization data.
-- Backend session probe errors are surfaced only when unexpected; anonymous probe errors stay quiet.
+- Backend session probe errors are surfaced only when unexpected; anonymous probe errors stay quiet, and generic gateway failures use human-readable Chinese copy.
 - Form labels are visible and controls have clear focus/loading/error states.
 
 ## Verify Code
@@ -118,3 +118,4 @@ Rules:
 - No-organization state points users to create or accept invitation flows.
 - Owner/admin can create invitation links; other roles see read-only identity.
 - Invitation links display only to the current operator and must not be logged or copied into committed screenshots.
+- When no organization context is available in a harness or disabled-auth review mode, show a bounded empty state instead of leaving the page blank.

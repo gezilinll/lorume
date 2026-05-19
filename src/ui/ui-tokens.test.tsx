@@ -33,6 +33,8 @@ describe("Glacier Premium Precision UI primitives", () => {
   it("defines the current sans, mono, color, radius, border, and shadow roles", () => {
     const tokens = readFileSync("src/ui/tokens.css", "utf8");
     const appStyles = readFileSync("src/styles.css", "utf8");
+    const iconSource = readFileSync("src/ui/PixelIcon.tsx", "utf8");
+    const decorationsSource = readFileSync("src/ui/PixelDecorations.tsx", "utf8");
     const styles = `${tokens}\n${appStyles}`;
 
     expect(tokens).toContain("--font-sans:");
@@ -47,13 +49,17 @@ describe("Glacier Premium Precision UI primitives", () => {
     expect(styles).toMatch(/\.auth-layout\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.auth-copy\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.auth-preview__metric\s*{[^}]*font-family:\s*var\(--font-mono\)/s);
-    expect(styles).toMatch(/\.navItem\s*{[^}]*font-family:\s*var\(--font-mono\)/s);
+    expect(styles).toMatch(/\.navItem\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.primaryButton\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.toolbarField select\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
-    expect(styles).toMatch(/\.metricCard strong\s*{[^}]*font-family:\s*var\(--font-mono\)/s);
+    expect(styles).toMatch(/\.metricCard strong\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.workCard strong\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.detailBlock p,\n\.detailBlock li\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).not.toContain("box-shadow: 7px 7px 0");
+    expect(iconSource).not.toContain("pixelarticons");
+    expect(iconSource).not.toContain("crispEdges");
+    expect(decorationsSource).not.toContain("shapeRendering");
+    expect(decorationsSource).not.toContain("PixelSprite");
   });
 
   it("renders buttons, badges, panels, and fields with token classes", () => {
@@ -72,11 +78,13 @@ describe("Glacier Premium Precision UI primitives", () => {
     expect(screen.getByLabelText("邮箱")).toHaveAttribute("name", "email");
     expect(screen.getByLabelText("邮箱").parentElement?.querySelector('[data-pixel-icon="mail"]')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送验证码" })).toHaveClass("pixel-button");
-    expect(screen.getByTestId("pixel-button-icon").querySelector("svg")).toHaveAttribute("data-pixel-icon", "paper-plane");
+    const buttonIcon = screen.getByTestId("pixel-button-icon").querySelector("svg");
+    expect(buttonIcon).toHaveAttribute("data-pixel-icon", "paper-plane");
+    expect(buttonIcon).not.toHaveAttribute("shape-rendering");
     expect(screen.getByText("在线")).toHaveClass("pixel-badge--success");
   });
 
-  it("renders operational preview icons from the shared pixel icon system", () => {
+  it("renders operational preview icons from the shared product icon system", () => {
     render(<AuthOperationsPreview />);
 
     expect(screen.getByLabelText("运营概览").querySelector('[data-pixel-icon="server"]')).toBeInTheDocument();

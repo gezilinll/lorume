@@ -20,6 +20,7 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 - 标题、按钮、badge、详情面板是否溢出。
 - 字体分工是否符合 Sans / Mono 规则。
 - Icon 是否统一。
+- 左侧栏是否遵循“组织在上、导航居中、个人入口在下”，且个人入口不重复组织/角色信息。
 - 装饰是否遮挡内容、造成视觉疲劳，或让页面显得空洞。
 - Console 页面是否仍然能快速扫描。
 - 任务/通知是否从右上角入口打开窄抽屉，而不是变成主导航页面。
@@ -43,8 +44,9 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 
 当前视觉 harness 锚点：
 
-- `src/ui/ui-tokens.test.tsx` 锁定 Logo / favicon 同源、共享按钮图标、Sans / Mono 字体角色、登录布局和运营概览 icon。
+- `src/ui/ui-tokens.test.tsx` 锁定 Logo / favicon 同源、共享按钮图标、Sans / Mono 字体角色、非像素化图标、低噪声装饰、登录布局和运营概览 icon。
 - `src/App.test.tsx` 锁定首页入口、已实现 Console 导航、不可用入口隐藏、Runtime Fleet / Runs / 组织设置的核心交互，以及任务/通知工具抽屉的打开、关闭和路由边界。
+- `src/auth/auth-pages.test.tsx` 锁定登录 gate、组织上下文入口、底部个人菜单、退出登录和身份信息去重。
 - `src/console/ConsoleUtilityDrawer.test.tsx`、`src/settings/OrganizationSettingsPage.test.tsx` 锁定任务/通知抽屉、已读状态、组织邀请入口的 API 读取、权限显示和详情查看。
 - `e2e/runtime-fleet.spec.ts` 锁定 Runtime Fleet 的动态筛选、详情面板、响应式和无 Channel 筛选。
 - `e2e/runtime-work-board.spec.ts` 锁定 Runs 的 Runtime / Channel / 阶段 / 时间筛选、长文本不横滚、卡片不显示调试内容、监听缺口不变成任务卡。

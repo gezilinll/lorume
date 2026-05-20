@@ -1,0 +1,4 @@
+ALTER TABLE devices
+  DROP COLUMN IF EXISTS name,
+  DROP COLUMN IF EXISTS status,
+  DROP COLUMN IF EXISTS connection_mode;

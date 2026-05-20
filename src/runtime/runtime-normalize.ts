@@ -65,18 +65,12 @@ export interface RuntimeDeviceNetwork {
 export interface RuntimeDevice {
   /** Stable Lorume device id. */
   id: string;
-  /** Human-readable device name. */
-  name: string;
   /** Hostname reported by the device. */
   hostname: string;
   /** Operating system name such as darwin or linux. */
   os: string;
   /** CPU architecture such as arm64 or x64. */
   architecture?: string;
-  /** Device health rolled up from collector and runtime reports. */
-  status: RuntimeHealthStatus;
-  /** Product connection mode; SSH is only a developer transport for testing installs. */
-  connectionMode: "collector";
   /** ISO timestamp when the device was last observed. */
   lastSeenAt?: string;
   /** Optional local OS user metadata reported by the CLI. */
@@ -254,7 +248,7 @@ export interface RuntimeInventorySnapshot {
   observedAt: string;
   /** Collector metadata. */
   collector: RuntimeCollectorInfo;
-  /** Device metadata and rolled-up status. */
+  /** Device facts reported by the collector. */
   device: RuntimeDevice;
   /** Optional aggregate device list used by backend fleet queries. */
   devices?: RuntimeDevice[];
@@ -268,7 +262,7 @@ export interface RuntimeInventorySnapshot {
 
 /** Input for creating a normalized runtime inventory snapshot. */
 export interface CreateRuntimeInventorySnapshotInput {
-  /** Device metadata before status rollup. */
+  /** Device facts before runtime and agent normalization. */
   device: RuntimeDevice;
   /** ISO timestamp when the full snapshot was observed. */
   observedAt: string;
@@ -310,8 +304,6 @@ export interface ManagedAgentStatusCounts {
 
 /** Small inventory summary for cards, tests, and health checks. */
 export interface RuntimeInventorySummary {
-  /** Device health state. */
-  deviceStatus: RuntimeHealthStatus;
   /** Runtime status counts. */
   runtimes: RuntimeStatusCounts;
   /** Managed agent status counts. */
@@ -334,18 +326,6 @@ function runtimeId(deviceId: string, source: RuntimeSource, externalId: string):
 
 function agentId(resolvedRuntimeId: string, externalId: string): string {
   return `${resolvedRuntimeId}:agent:${slugPart(externalId)}`;
-}
-
-function rollupDeviceStatus(
-  collector: RuntimeCollectorInfo,
-  runtimes: LorumeRuntime[],
-): RuntimeHealthStatus {
-  if (collector.status === "offline") return "offline";
-  if (collector.status === "degraded") return "degraded";
-  if (runtimes.some((runtime) => runtime.status === "degraded")) return "degraded";
-  if (runtimes.some((runtime) => runtime.status === "online")) return "online";
-  if (runtimes.some((runtime) => runtime.status === "offline")) return "offline";
-  return "unknown";
 }
 
 function sourceRefsForRuntime(source: RuntimeSource, runtime: RuntimeDiscovery): ExternalRuntimeRef[] {
@@ -409,15 +389,17 @@ export function createRuntimeInventorySnapshot(
     }),
   );
 
-  const deviceStatus = rollupDeviceStatus(input.collector, runtimes);
-
   return {
     observedAt: input.observedAt,
     collector: input.collector,
     device: {
-      ...input.device,
-      status: deviceStatus,
+      id: input.device.id,
+      hostname: input.device.hostname,
+      os: input.device.os,
+      architecture: input.device.architecture,
       lastSeenAt: input.observedAt,
+      user: input.device.user,
+      network: input.device.network,
     },
     runtimes,
     agents,
@@ -455,7 +437,6 @@ export function summarizeRuntimeInventory(snapshot: RuntimeInventorySnapshot): R
   ).sort();
 
   return {
-    deviceStatus: snapshot.device.status,
     runtimes,
     agents,
     channelKinds,

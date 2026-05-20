@@ -137,12 +137,9 @@ function createDevice(config, observedAt) {
   const localIps = collectLocalIps();
   return {
     id: config.deviceId || defaultId,
-    name: config.deviceName || config.deviceId || hostname(),
     hostname: hostname(),
     os: platform(),
     architecture: arch(),
-    status: "unknown",
-    connectionMode: "collector",
     lastSeenAt: observedAt,
     user: { username: safeUsername() },
     ...(localIps.length ? { network: { localIps } } : {}),
@@ -197,15 +194,6 @@ function createAgent({ runtimeId, source, externalId, name, origin, status, chan
     ...(load ? { load } : {}),
     ...(Array.isArray(paths) && paths.length ? { paths } : {}),
   };
-}
-
-function rollupDeviceStatus(collectorStatus, runtimes) {
-  if (collectorStatus === "offline") return "offline";
-  if (collectorStatus === "degraded") return "degraded";
-  if (runtimes.some((runtime) => runtime.status === "degraded")) return "degraded";
-  if (runtimes.some((runtime) => runtime.status === "online")) return "online";
-  if (runtimes.some((runtime) => runtime.status === "offline")) return "offline";
-  return "unknown";
 }
 
 function readOpenClawConfig() {
@@ -453,11 +441,10 @@ function mergeParts(parts) {
 }
 
 function applyDeviceOverrides(snapshot, config) {
-  if (!config.deviceId && !config.deviceName) return snapshot;
+  if (!config.deviceId) return snapshot;
   const nextDevice = {
     ...snapshot.device,
-    id: config.deviceId || snapshot.device.id,
-    name: config.deviceName || snapshot.device.name,
+    id: config.deviceId,
   };
   const idReplacements = new Map();
   const runtimes = snapshot.runtimes.map((runtime) => {
@@ -1982,13 +1969,11 @@ export function collectInventorySnapshot(config = {}, args = {}) {
     ...config,
     ...(args.serverUrl ? { serverUrl: args.serverUrl } : {}),
     ...(args.deviceId ? { deviceId: args.deviceId } : {}),
-    ...(args.deviceName ? { deviceName: args.deviceName } : {}),
   };
 
   if (args.fixturePath) {
     return applyDeviceOverrides(readJsonFile(args.fixturePath), {
       deviceId: mergedConfig.deviceId,
-      deviceName: mergedConfig.deviceName,
     });
   }
 
@@ -2006,12 +1991,10 @@ export function collectInventorySnapshot(config = {}, args = {}) {
     collectCliRuntime(device.id, observedAt, "codex", "codex", "Codex CLI"),
     collectCliRuntime(device.id, observedAt, "claude", "claude_code", "Claude Code"),
   ]);
-  const deviceStatus = rollupDeviceStatus(collector.status, collected.runtimes);
-
   return {
     observedAt,
     collector,
-    device: { ...device, status: deviceStatus },
+    device,
     runtimes: collected.runtimes,
     agents: collected.agents,
     reports: [],
@@ -2022,7 +2005,6 @@ export async function collectWorkStateSnapshot(config = {}, args = {}) {
   const mergedConfig = {
     ...config,
     ...(args.deviceId ? { deviceId: args.deviceId } : {}),
-    ...(args.deviceName ? { deviceName: args.deviceName } : {}),
   };
   const observedAt = isoNow();
   let device;

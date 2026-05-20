@@ -6,12 +6,9 @@
   },
   "device": {
     "id": "fixture-mac",
-    "name": "Fixture Mac",
     "hostname": "fixture-mac.local",
     "os": "darwin",
     "architecture": "arm64",
-    "status": "online",
-    "connectionMode": "collector",
     "lastSeenAt": "2026-05-08T08:00:01.000Z"
   },
   "runtimes": [

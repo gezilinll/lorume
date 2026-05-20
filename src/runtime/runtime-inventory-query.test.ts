@@ -165,10 +165,15 @@ describe("runtime inventory query", () => {
     if (!slockRuntime) throw new Error("missing Slock runtime fixture");
     const offlineSnapshot: RuntimeInventorySnapshot = {
       ...snapshot,
-      device: { ...snapshot.device, status: "offline" },
+      runtimes: snapshot.runtimes.map((runtime) =>
+        runtime.id === slockRuntime.id ? { ...runtime, status: "offline" } : runtime,
+      ),
     };
+    const offlineRuntime = offlineSnapshot.runtimes.find((runtime) => runtime.id === slockRuntime.id);
+    if (!offlineRuntime) throw new Error("missing offline Slock runtime fixture");
 
-    expect(deriveRuntimeOperatingStatus(offlineSnapshot, slockRuntime, undefined)).toBe("offline");
+    expect(deriveRuntimeOperatingStatus(offlineSnapshot, offlineRuntime, undefined)).toBe("offline");
+    expect(deriveDeviceFleetStatus(offlineSnapshot, offlineSnapshot.device)).toBe("working");
   });
 
   it("filters runtimes and agents by query", () => {
@@ -193,12 +198,9 @@ describe("runtime inventory query", () => {
         snapshot.device,
         {
           id: "edge-node-2",
-          name: "Edge Node 2",
           hostname: "edge-node-2.local",
           os: "linux",
           architecture: "x64",
-          status: "online",
-          connectionMode: "collector",
           lastSeenAt: "2026-05-19T10:00:00.000Z",
         },
       ],
@@ -231,12 +233,12 @@ describe("runtime inventory query", () => {
     };
 
     expect(summarizeRuntimeFleet(multiDeviceSnapshot).devices).toBe(2);
-    const result = filterRuntimeFleet(multiDeviceSnapshot, { query: "edge node" });
+    const result = filterRuntimeFleet(multiDeviceSnapshot, { query: "edge-node" });
     expect(result.devices.map((device) => device.id)).toEqual(["edge-node-2"]);
     expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["Codex Runtime"]);
 
     const detail = getRuntimeFleetDetail(multiDeviceSnapshot, "runtime", "edge-node-2:codex:runtime-main");
-    expect(sectionItems(detailSections(detail), "归属关系")).toContain("所属设备: Edge Node 2");
+    expect(sectionItems(detailSections(detail), "归属关系")).toContain("所属设备: edge-node-2");
   });
 
   it("resolves selected agent detail with its runtime", () => {
@@ -391,7 +393,7 @@ describe("runtime inventory query", () => {
       "状态: 异常",
       `最近同步: ${fixtureLastSeenAt}`,
     ]);
-    expect(sectionItems(sections, "归属关系")).toEqual(["所属设备: Fixture Mac", "Agent 数量: 1"]);
+    expect(sectionItems(sections, "归属关系")).toEqual(["所属设备: fixture-mac", "Agent 数量: 1"]);
     expect(sectionItems(sections, "运行入口")).toEqual([]);
     expect(sectionItems(sections, "运行统计")).toEqual([]);
     expect((detail as { capabilities?: string[] })?.capabilities).toBeUndefined();
@@ -409,7 +411,7 @@ describe("runtime inventory query", () => {
     ]);
     expect(sectionItems(sections, "归属关系")).toEqual([
       "所属 Runtime: Slock daemon",
-      "所属设备: Fixture Mac",
+      "所属设备: fixture-mac",
     ]);
     expect(sectionItems(sections, "关联渠道")).toEqual(["Slock"]);
     expect(sectionItems(sections, "运行统计")).toEqual([

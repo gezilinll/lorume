@@ -20,10 +20,6 @@ const fixtureSnapshot = JSON.parse(
 const inventorySnapshot: RuntimeInventorySnapshot = {
   ...fixtureSnapshot,
   observedAt: "2026-05-20T08:00:00.000Z",
-  device: {
-    ...fixtureSnapshot.device,
-    name: "Backend E2E Mac",
-  },
 };
 
 const workStateSnapshot: RuntimeWorkStateSnapshot = {
@@ -84,7 +80,7 @@ test.describe("Runtime backend API", () => {
     const fleetResponse = await request.get("/api/runtime-fleet");
     expect(fleetResponse.status()).toBe(200);
     await expect(fleetResponse.json()).resolves.toMatchObject({
-      devices: [expect.objectContaining({ id: "fixture-mac", name: "Backend E2E Mac" })],
+      devices: [expect.objectContaining({ id: "fixture-mac", hostname: "fixture-mac.local" })],
       summary: { deviceCount: 1 },
     });
 
@@ -112,7 +108,6 @@ test.describe("Runtime backend API", () => {
   test("accepts inventory and work-state uploaded by a real collector process", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     const deviceId = "collector-e2e-device";
-    const deviceName = "Collector E2E Device";
     const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
       deviceId,
       name: "Collector E2E Token",
@@ -125,8 +120,6 @@ test.describe("Runtime backend API", () => {
       backendBaseUrl,
       "--device-id",
       deviceId,
-      "--device-name",
-      deviceName,
       "--device-token",
       deviceToken,
       "--fixture",
@@ -143,7 +136,7 @@ test.describe("Runtime backend API", () => {
     });
 
     try {
-      await waitForCollectorDevice(request, collector, deviceId, deviceName);
+      await waitForCollectorDevice(request, collector, deviceId);
       await waitForCollectorHealth(request, collector, deviceId);
     } finally {
       await stopCollector(collector);
@@ -189,13 +182,12 @@ async function waitForCollectorDevice(
   request: APIRequestContext,
   collector: ChildProcessWithoutNullStreams,
   deviceId: string,
-  deviceName: string,
 ): Promise<void> {
   await pollCollector("collector inventory upload", collector, async () => {
     const fleetResponse = await request.get("/api/runtime-fleet");
     if (!fleetResponse.ok()) return false;
-    const body = await fleetResponse.json() as { devices?: Array<{ id?: string; name?: string }> };
-    return body.devices?.some((device) => device.id === deviceId && device.name === deviceName) ?? false;
+    const body = await fleetResponse.json() as { devices?: Array<{ id?: string; hostname?: string }> };
+    return body.devices?.some((device) => device.id === deviceId && Boolean(device.hostname)) ?? false;
   });
 }
 
@@ -285,7 +277,6 @@ async function expectDeviceHeartbeatAccepted(deviceToken: string): Promise<void>
       socket.send(JSON.stringify({
         type: "hello",
         deviceId: "fixture-mac",
-        deviceName: "Backend E2E Mac",
         deviceToken,
         collectorVersion: "0.1.0",
       }));

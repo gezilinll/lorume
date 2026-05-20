@@ -17,18 +17,19 @@ describe("lorume CLI", () => {
       "--json",
       "--device-id",
       "test-device",
-      "--device-name",
-      "Test Device",
     ]);
 
     expect(output.command).toBe("device.identify");
     expect(output.device).toMatchObject({
       architecture: process.arch,
-      connectionMode: "collector",
+      hostname: expect.any(String),
       id: "test-device",
-      name: "Test Device",
       os: process.platform,
     });
+    expect(output.device).not.toHaveProperty("name");
+    expect(output.device).not.toHaveProperty("status");
+    expect(output.device).not.toHaveProperty("connectionMode");
+    expect(output.device.lastSeenAt).toEqual(expect.any(String));
     expect(output.observedAt).toEqual(expect.any(String));
   });
 
@@ -193,6 +194,50 @@ describe("lorume CLI", () => {
 
     expect(output).toMatchObject({ command: "files.copy", status: "copied" });
     expect(readFileSync(destination, "utf8")).toBe("hello from lorume cli");
+  });
+
+  it("delegates collector uninstall to the installer capability", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-collector-"));
+    const fakeInstaller = path.join(root, "install-device-collector.sh");
+    const callsPath = path.join(root, "calls.jsonl");
+    writeExecutable(fakeInstaller, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+`);
+
+    const output = runCli([
+      "collector",
+      "uninstall",
+      "--json",
+      "--install-dir",
+      path.join(root, "collector"),
+    ], {
+      env: { LORUME_COLLECTOR_INSTALLER_PATH: fakeInstaller },
+    });
+
+    expect(output).toMatchObject({ command: "collector.uninstall", status: "succeeded" });
+    expect(readFileSync(callsPath, "utf8")).toContain(`--install-dir ${path.join(root, "collector")} --uninstall`);
+  });
+
+  it("delegates collector stop to the installer capability", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-collector-"));
+    const fakeInstaller = path.join(root, "install-device-collector.sh");
+    const callsPath = path.join(root, "calls.jsonl");
+    writeExecutable(fakeInstaller, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+`);
+
+    const output = runCli([
+      "collector",
+      "stop",
+      "--json",
+      "--install-dir",
+      path.join(root, "collector"),
+    ], {
+      env: { LORUME_COLLECTOR_INSTALLER_PATH: fakeInstaller },
+    });
+
+    expect(output).toMatchObject({ command: "collector.stop", status: "succeeded" });
+    expect(readFileSync(callsPath, "utf8")).toContain(`--install-dir ${path.join(root, "collector")} --stop`);
   });
 
   it("refuses path traversal outside allowed roots", () => {

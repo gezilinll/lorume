@@ -15,10 +15,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function runtimeFleetQueryResponse(snapshot: RuntimeInventorySnapshot, deviceName?: string) {
+function runtimeFleetQueryResponse(snapshot: RuntimeInventorySnapshot) {
   return {
     observedAt: snapshot.observedAt,
-    devices: [{ ...snapshot.device, name: deviceName ?? snapshot.device.name }],
+    devices: [snapshot.device],
     runtimes: snapshot.runtimes,
     agents: snapshot.agents,
     summary: {
@@ -545,7 +545,7 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    expect(within(screen.getByLabelText("设备")).getByText("Fixture Mac")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("设备")).getByText("fixture-mac")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Runtime 列表" })).getByText("OpenClaw Gateway")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Agent 列表" })).getByText("tester")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "所属设备" })).toBeInTheDocument();
@@ -566,7 +566,7 @@ describe("Console shell", () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();
       if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot, "Backend DB Mac")), {
+        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -589,7 +589,7 @@ describe("Console shell", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
-    expect((await screen.findAllByText("Backend DB Mac")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("fixture-mac")).length).toBeGreaterThan(0);
     expect(screen.getByText("查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。")).toBeInTheDocument();
     expect(screen.queryByLabelText("采集健康")).not.toBeInTheDocument();
     expect(within(screen.getByLabelText("运行资产概览")).queryByText("异常")).not.toBeInTheDocument();
@@ -624,7 +624,7 @@ describe("Console shell", () => {
       const url = input.toString();
       requests.push(url);
       if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot, "Backend DB Mac")), {
+        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -1040,7 +1040,7 @@ describe("Console shell", () => {
     expect(within(detail).getByRole("heading", { name: "tester" })).toBeInTheDocument();
     expect(within(detail).getByText("归属关系")).toBeInTheDocument();
     expect(within(detail).getByText("所属 Runtime: Slock daemon")).toBeInTheDocument();
-    expect(within(detail).getByText("所属设备: Fixture Mac")).toBeInTheDocument();
+    expect(within(detail).getByText("所属设备: fixture-mac")).toBeInTheDocument();
     expect(within(detail).getByText("关联渠道")).toBeInTheDocument();
     expect(within(detail).getByText("Slock")).toBeInTheDocument();
     expect(within(detail).queryByText("slock: tester")).not.toBeInTheDocument();
@@ -1102,7 +1102,7 @@ describe("Console shell", () => {
           ...(fixtureSnapshot as RuntimeInventorySnapshot),
           device: {
             ...(fixtureSnapshot as RuntimeInventorySnapshot).device,
-            name: `Auto Refresh Mac ${latestRequests}`,
+            lastSeenAt: `2026-05-08T08:00:0${latestRequests}.000Z`,
           },
           observedAt: `2026-05-08T08:00:0${latestRequests}.000Z`,
         };
@@ -1126,14 +1126,14 @@ describe("Console shell", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getAllByText("Auto Refresh Mac 1")).toHaveLength(3);
+    expect(screen.getAllByText("fixture-mac").length).toBeGreaterThan(0);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
       await Promise.resolve();
     });
 
-    expect(screen.getAllByText("Auto Refresh Mac 2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("fixture-mac").length).toBeGreaterThan(0);
     expect(latestRequests).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/上次刷新/)).toBeInTheDocument();
   });

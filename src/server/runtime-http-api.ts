@@ -169,7 +169,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       let body: unknown = undefined;
       try {
         body = await readJsonBody(request);
-        const snapshot = options.store.writeLatestSnapshot(body);
+        const snapshot = options.store.writeLatestSnapshot(enrichInventorySnapshotWithRequestNetwork(body, request));
         await options.postgresStore?.upsertInventorySnapshot(snapshot);
         sendJson(response, 201, {
           ok: true,
@@ -248,7 +248,6 @@ interface AgentSkillProbeRequestContext {
   targetAgentId: string;
   targetAgentName?: string;
   deviceId: string;
-  deviceName?: string;
   runtimeId: string;
   runtimeName?: string;
 }
@@ -295,14 +294,13 @@ async function resolveAgentSkillProbeRequestContext(
     targetAgentId: agentId,
     ...(agent?.name ? { targetAgentName: agent.name } : {}),
     deviceId,
-    ...(device?.name ? { deviceName: device.name } : {}),
     runtimeId,
     ...(runtime?.name ? { runtimeName: runtime.name } : {}),
   };
 }
 
 async function readRuntimeFleetForProbe(options: RuntimeHttpApiHandlerOptions): Promise<{
-  devices: Array<{ id: string; name?: string }>;
+  devices: Array<{ id: string }>;
   runtimes: Array<{ id: string; deviceId: string; name?: string }>;
   agents: Array<{ id: string; name?: string; runtimeId: string }>;
 }> {
@@ -325,7 +323,6 @@ function createAgentSkillProbeSnapshot(
     targetAgentId: context.targetAgentId,
     ...(context.targetAgentName ? { targetAgentName: context.targetAgentName } : {}),
     deviceId: context.deviceId,
-    ...(context.deviceName ? { deviceName: context.deviceName } : {}),
     runtimeId: context.runtimeId,
     ...(context.runtimeName ? { runtimeName: context.runtimeName } : {}),
     status,
@@ -397,7 +394,6 @@ async function notifyAgentSkillProbeSnapshot(
       targetAgentId: snapshot.targetAgentId,
       targetAgentName: snapshot.targetAgentName,
       deviceId: snapshot.deviceId,
-      deviceName: snapshot.deviceName,
       runtimeId: snapshot.runtimeId,
       runtimeName: snapshot.runtimeName,
     },
@@ -451,6 +447,39 @@ function readString(value: unknown, key: string): string {
   if (!isRecord(value)) return "";
   const candidate = value[key];
   return typeof candidate === "string" ? candidate.trim() : "";
+}
+
+function enrichInventorySnapshotWithRequestNetwork(value: unknown, request: IncomingMessage): unknown {
+  const publicIp = readCollectorPublicIp(request);
+  if (!publicIp || !isRecord(value) || !isRecord(value.device)) return value;
+  const device = value.device;
+  const network = isRecord(device.network) ? device.network : {};
+  return {
+    ...value,
+    device: {
+      ...device,
+      network: {
+        ...network,
+        publicIp,
+      },
+    },
+  };
+}
+
+function readCollectorPublicIp(request: IncomingMessage): string {
+  const forwardedFor = readHeaderValue(request.headers["x-forwarded-for"]);
+  const forwardedCandidate = forwardedFor.split(",").map((part) => normalizeIpAddress(part)).find(Boolean);
+  if (forwardedCandidate) return forwardedCandidate;
+  return normalizeIpAddress(request.socket.remoteAddress ?? "");
+}
+
+function readHeaderValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value.join(",");
+  return value ?? "";
+}
+
+function normalizeIpAddress(value: string): string {
+  return value.trim().replace(/^::ffff:/, "");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

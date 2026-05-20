@@ -18,7 +18,6 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AuthMemberRole>("member");
   const [inviteLink, setInviteLink] = useState("");
-  const [deviceName, setDeviceName] = useState("");
   const [deviceId, setDeviceId] = useState("");
   const [deviceToken, setDeviceToken] = useState("");
   const [installCommand, setInstallCommand] = useState("");
@@ -75,7 +74,7 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
     setCopiedInstallCommand(false);
     try {
       const response = await fetch(`/api/organizations/${encodeURIComponent(organization.organizationId)}/device-tokens`, {
-        body: JSON.stringify({ deviceId: deviceId.trim(), name: deviceName.trim() }),
+        body: JSON.stringify({ deviceId: deviceId.trim(), name: deviceId.trim() }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -85,12 +84,10 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
       }
       const token = typeof payload?.deviceToken?.token === "string" ? payload.deviceToken.token : "";
       const registeredDeviceId = typeof payload?.deviceToken?.deviceId === "string" ? payload.deviceToken.deviceId : deviceId.trim();
-      const registeredDeviceName = typeof payload?.deviceToken?.name === "string" ? payload.deviceToken.name : deviceName.trim();
       if (!token) throw new Error("设备 token 创建失败");
       setDeviceToken(token);
       setInstallCommand(buildInstallCommand({
         deviceId: registeredDeviceId,
-        deviceName: registeredDeviceName,
         origin: window.location.origin,
         token,
       }));
@@ -228,14 +225,6 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
           <div className="skillForm">
             <div className="deviceRegistrationGrid">
               <label className="toolbarField">
-                <span className="controlLabel">设备名称</span>
-                <input
-                  value={deviceName}
-                  onChange={(event) => setDeviceName(event.target.value)}
-                  placeholder="Fixture Mac"
-                />
-              </label>
-              <label className="toolbarField">
                 <span className="controlLabel">Device ID</span>
                 <input
                   value={deviceId}
@@ -247,7 +236,7 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
             <button
               className="primaryButton"
               type="button"
-              disabled={isCreatingDeviceToken || !deviceName.trim() || !deviceId.trim()}
+              disabled={isCreatingDeviceToken || !deviceId.trim()}
               onClick={() => void createDeviceInstallCommand()}
             >
               生成安装命令
@@ -302,7 +291,7 @@ function Metric({ label, value, tone }: { label: string; value: number | string;
   );
 }
 
-function buildInstallCommand(input: { deviceId: string; deviceName: string; origin: string; token: string }): string {
+function buildInstallCommand(input: { deviceId: string; origin: string; token: string }): string {
   const installerUrl = `${input.origin}/api/device-collector/install.sh`;
   return [
     `curl -fsSL ${shellQuote(installerUrl)} | bash -s --`,
@@ -310,8 +299,6 @@ function buildInstallCommand(input: { deviceId: string; deviceName: string; orig
     shellQuote(input.origin),
     "--device-id",
     shellQuote(input.deviceId),
-    "--device-name",
-    shellQuote(input.deviceName),
     "--device-token",
     shellQuote(input.token),
   ].join(" ");

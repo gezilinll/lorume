@@ -57,6 +57,7 @@ describeDb("database migrations", () => {
           "0005_operations_notifications",
           "0008_notification_read_state",
           "0009_agent_skill_probing",
+          "0010_narrow_device_facts",
         ]);
       } finally {
         await client.end();

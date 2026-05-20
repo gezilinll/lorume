@@ -1,11 +1,8 @@
 CREATE TABLE IF NOT EXISTS devices (
   id text PRIMARY KEY,
-  name text NOT NULL,
   hostname text NOT NULL,
   os text NOT NULL,
   architecture text,
-  status text NOT NULL,
-  connection_mode text NOT NULL DEFAULT 'collector',
   collector jsonb NOT NULL DEFAULT '{}'::jsonb,
   last_seen_at timestamptz,
   observed_at timestamptz NOT NULL,

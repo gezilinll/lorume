@@ -114,7 +114,6 @@ function createProbeSnapshot(status: string, errorSummary?: string) {
     targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
     targetAgentName: "tester",
     deviceId: "fixture-mac",
-    deviceName: "Fixture Mac",
     runtimeId: "fixture-mac:slock:slock-daemon",
     runtimeName: "Slock daemon",
     status,

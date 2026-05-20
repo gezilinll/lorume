@@ -117,6 +117,9 @@ link_pattern = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 forbidden_phrases = [
     ("docs/product/cli-device-capability-spec.md", "回传命令状态", "collector must not describe backend command result reporting"),
     ("docs/product/cli-device-capability-spec.md", "后端下发的授权 context", "connector status context is explicit local/test input, not backend-triggered collection"),
+    ("docs/product/runtime-device-registration-spec.md", "展示名", "Device must not document a collected display name"),
+    ("docs/product/runtime-device-registration-spec.md", "connectionMode", "Device must not document collected connectionMode"),
+    ("docs/product/runtime-device-registration-spec.md", "Runtime 不可达或设备", "Device status must not roll up runtime health"),
 ]
 
 for md_path in markdown_files:

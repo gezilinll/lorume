@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -40,7 +40,7 @@ console.log(JSON.stringify({
   command: "collect.inventory",
   observedAt: "2026-05-19T00:00:00.000Z",
   collector: { version: "test", status: "online" },
-  device: { id: "cli-device", name: "CLI Device", hostname: "cli.local", os: "darwin", status: "online", connectionMode: "collector" },
+  device: { id: "cli-device", hostname: "cli.local", os: "darwin", architecture: "arm64", lastSeenAt: "2026-05-19T00:00:00.000Z" },
   runtimes: [],
   agents: [],
   reports: []
@@ -61,6 +61,9 @@ console.log(JSON.stringify({
     const calls = readFileSync(callsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 
     expect(snapshot.device.id).toBe("cli-device");
+    expect(snapshot.device).not.toHaveProperty("name");
+    expect(snapshot.device).not.toHaveProperty("status");
+    expect(snapshot.device).not.toHaveProperty("connectionMode");
     expect(calls).toContainEqual(["collect", "inventory", "--json"]);
   });
 
@@ -112,8 +115,6 @@ console.log(JSON.stringify({
       installDir,
       "--device-id",
       "test-device",
-      "--device-name",
-      "Test Device",
       "--ws-url",
       "ws://lorume.local/api/device-control/ws",
       "--slock-server-url",
@@ -134,12 +135,69 @@ console.log(JSON.stringify({
     expect(existsSync(installedAdapters)).toBe(true);
     expect(config).toMatchObject({
       deviceId: "test-device",
-      deviceName: "Test Device",
       wsUrl: "ws://lorume.local/api/device-control/ws",
       slockServerUrl: "https://api.slock.ai",
     });
     expect(snapshot.device.id).toBe("test-device");
-    expect(snapshot.device.name).toBe("Test Device");
+    expect(snapshot.device).not.toHaveProperty("name");
+    expect(snapshot.device).not.toHaveProperty("status");
+    expect(snapshot.device).not.toHaveProperty("connectionMode");
+  });
+
+  it("uninstalls the collector through the installer without manual file removal", () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-home-"));
+    const installDir = path.join(homeDir, "collector");
+
+    execFileSync("bash", [
+      installerScript,
+      "--source-dir",
+      repoRoot,
+      "--install-dir",
+      installDir,
+      "--device-id",
+      "test-device",
+      "--no-service",
+    ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+    expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
+
+    execFileSync("bash", [
+      installerScript,
+      "--install-dir",
+      installDir,
+      "--uninstall",
+    ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+    expect(existsSync(installDir)).toBe(false);
+    rmSync(homeDir, { force: true, recursive: true });
+  });
+
+  it("stops the collector through the installer without removing installed files", () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-home-"));
+    const installDir = path.join(homeDir, "collector");
+
+    execFileSync("bash", [
+      installerScript,
+      "--source-dir",
+      repoRoot,
+      "--install-dir",
+      installDir,
+      "--device-id",
+      "test-device",
+      "--no-service",
+    ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+    expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
+
+    execFileSync("bash", [
+      installerScript,
+      "--install-dir",
+      installDir,
+      "--stop",
+    ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+    expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
+    rmSync(homeDir, { force: true, recursive: true });
   });
 
   it("posts during installer once mode when a server url is configured", async () => {
@@ -178,7 +236,6 @@ console.log(JSON.stringify({
     const configPath = path.join(configDir, "config.json");
     writeFileSync(configPath, JSON.stringify({
       deviceId: "config-device",
-      deviceName: "Config Device",
       intervalMs: 60_000,
     }));
 
@@ -196,7 +253,9 @@ console.log(JSON.stringify({
     const snapshot = JSON.parse(output);
 
     expect(snapshot.device.id).toBe("config-device");
-    expect(snapshot.device.name).toBe("Config Device");
+    expect(snapshot.device).not.toHaveProperty("name");
+    expect(snapshot.device).not.toHaveProperty("status");
+    expect(snapshot.device).not.toHaveProperty("connectionMode");
   });
 
   it("posts a once snapshot to the Lorume backend when server url is configured", async () => {

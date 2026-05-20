@@ -8,7 +8,7 @@
 
 - 提供一个本地 `lorume` CLI 入口，用于暴露设备侧确定性能力。
 - 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
-- 允许读取本机设备身份。
+- 允许读取本机设备事实。
 - 允许 live-first 采集 Runtime / Agent inventory、work-state 和 Agent Skill metadata。
 - 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent，用于测试、迁移和离线诊断。
 - 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
@@ -35,17 +35,16 @@
 返回当前设备事实：
 
 - `device.id`
-- `device.name`
 - `device.hostname`
 - `device.os`
 - `device.architecture`
-- `device.connectionMode`
-- `device.network.privateIp`（可选，来自本机网络接口）
+- `device.lastSeenAt`
+- `device.network.localIps`（可选，来自本机非 internal 网络接口）
 - `device.network.publicIp`（可选，只能来自后端观测或显式配置，CLI 不主动访问外部探测服务）
 - `device.user.username`（可选）
 - `observedAt`
 
-测试和安装脚本可以通过 `--device-id`、`--device-name` 覆盖展示身份。
+测试和安装脚本可以通过 `--device-id` 覆盖稳定设备身份。Device 不返回额外显示名、存储状态或连接模式字段。
 
 ### `lorume collect inventory --json [--snapshot <path>]`
 
@@ -72,6 +71,14 @@ Runtime 和 Agent 可附带 `paths`：
 ### `lorume collect work-state --json`
 
 返回 `RuntimeWorkStateSnapshot`。CLI 内部 adapter 必须把平台原始状态转换成 Lorume-owned `RuntimeWorkItem`、`RuntimeConversation`、`RuntimeExecution` 和 capability model。collector 不能读取平台原始字段再做状态推断。
+
+### `lorume collector stop --json --install-dir <path>`
+
+停止本机 Lorume collector 服务，但不删除安装文件或配置。该命令必须幂等：服务不存在或已经停止时仍返回成功状态，并在 JSON 中说明没有可停止的服务。
+
+### `lorume collector uninstall --json --install-dir <path>`
+
+停止本机 Lorume collector 服务、移除 launchd / systemd 服务定义，并删除指定安装目录。该命令必须幂等：服务定义或安装目录不存在时仍返回成功状态。命令不得输出 device token、collector config 明文或平台 token。
 
 ### `lorume agent skill-probe --json --agent-id <id>`
 

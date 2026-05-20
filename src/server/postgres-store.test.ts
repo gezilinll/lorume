@@ -155,7 +155,6 @@ describeDb("Postgres runtime store", () => {
           targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
           targetAgentName: "tester",
           deviceId: "fixture-mac",
-          deviceName: "Fixture Mac",
           runtimeId: "fixture-mac:slock:slock-daemon",
           runtimeName: "Slock daemon",
           status: "succeeded" as const,

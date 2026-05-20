@@ -14,16 +14,12 @@ describe("runtime inventory store", () => {
     const store = createRuntimeInventoryStore({
       snapshotPath: path.join(dataDir, "latest.json"),
     });
-    const snapshot = {
-      ...fixture,
-      device: { ...fixture.device, name: "Backend Fixture Mac" },
-    };
-
     expect(store.readLatestSnapshot()).toBeNull();
 
-    store.writeLatestSnapshot(snapshot);
+    store.writeLatestSnapshot(fixture);
 
-    expect(store.readLatestSnapshot()?.device.name).toBe("Backend Fixture Mac");
+    expect(store.readLatestSnapshot()?.device.id).toBe("fixture-mac");
+    expect(store.readLatestSnapshot()?.device.hostname).toBe("fixture-mac.local");
   });
 
   it("rejects malformed snapshots before persistence", () => {

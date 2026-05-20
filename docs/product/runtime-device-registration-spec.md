@@ -53,7 +53,7 @@ flowchart LR
 
 ## 对象边界
 
-- Device：一台可注册设备，记录稳定 device id、展示名、hostname、OS、架构、collector、last seen 和健康状态。
+- Device：一台可注册设备，只记录稳定 device id、hostname、OS、架构、last seen、本地用户、本地 IP / 后端观测公网 IP 和 collector 元信息。
 - DeviceConnection：设备侧 Lorume collector 与后端之间的连接状态，记录在线、失联、最后心跳、collector version 和最近错误。
 - Runtime：设备上的可识别运行或平台入口。`kind` 用于表达 OpenClaw、Codex、Claude Code、Slock、Multica 等具象来源。
 - ManagedAgent：Lorume 管理视角下的 Agent。它可以来源于 OpenClaw 本机 Agent、Slock 平台 Agent、Multica 平台 Agent 或手动注册对象。
@@ -67,7 +67,7 @@ flowchart LR
 
 分层原则：
 
-- Device 是连接和承载层，只回答设备是否在线、collector 是否连着、有哪些 Runtime 注册在这台设备上；Device 不拥有任务、会话或泳道。
+- Device 是连接和承载层，只回答这台机器是谁、collector 是否连着、有哪些 Runtime 注册在这台设备上；Device 不拥有任务、会话或泳道，Device 事实对象不保存由 Runtime 或 Agent 推导出来的状态。
 - Runtime 是执行环境层，只回答执行环境是否可用、离线、空闲或工作中；Runtime 可以作为采集入口，但不拥有项目管理级任务或泳道。Adapter 内部可以保留可用性与工作态两个维度，Runtime Fleet 展示层必须折叠为统一对象状态，避免让用户同时理解两套近似标签。
 - ManagedAgent 是工作主体层，负责承接用户请求和任务；待处理、处理中、待验收、已关闭、需关注等项目管理级阶段只归 Agent。
 - WorkItem、Conversation、Execution 是 Agent 工作态证据。它们可以通过 Runtime adapter 采集，但必须在 adapter / query 层关联回 ManagedAgent。
@@ -79,9 +79,23 @@ Adapter 必须把外部平台字段转换成 Lorume 自己的统一模型，不�
 
 `lastSeenAt` 表示 Lorume 最近一次从对象来源采集到该对象状态的时间。Device、Runtime、ManagedAgent 都使用同一语义。外部 `updated_at`、`last_seen_at`、snapshot observed time 等字段只能在 adapter 中转换为 `lastSeenAt`。
 
+Device 事实字段：
+
+- `id`：Lorume 稳定 device id，来自安装配置或 hostname fallback。
+- `hostname`：设备系统 hostname。
+- `os`：设备操作系统。
+- `architecture`：CPU 架构。
+- `lastSeenAt`：最近一次 inventory snapshot 观察时间。
+- `user.username`：可读取时的本地 OS 用户名。
+- `network.localIps`：本地非 internal 网卡地址。
+- `network.publicIp`：后端从可信转发头或连接 remote address 观测到的公网 / 出口地址。
+- `collector`：collector version、状态、安装路径和最近错误。
+
+Device 不包含 `name`、存储状态或连接模式字段。Runtime 和 ManagedAgent 状态必须独立归一，不得 roll up 写回 Device 事实对象。
+
 Runtime 运行状态：
 
-- `offline`：Runtime 不可达或设备 / collector 失联。
+- `offline`：Runtime 明确不可达。
 - `working`：Runtime 可达，且关联 Agent 有 `processing` 工作项，或存在 `queued/running` execution。Slock 以 task board `in_progress` 作为工作中依据，不要求实时 activity。
 - `idle`：Runtime 可达，adapter 能判断没有处理中工作项或运行中 execution。
 - `unknown`：仅允许作为 adapter 内部原始归一结果。进入 Runtime Fleet 展示前必须折叠为 `异常`，不得向用户展示未知状态。
@@ -108,9 +122,9 @@ Agent 工作负载统计：
 
 Lorume 只展示对识别设备、排查连接和理解 runtime 来源有用的字段。
 
-- 设备身份：优先展示 Lorume `deviceId` 和用户可读 `deviceName`，hostname 作为系统上报信息保留。
+- 设备身份：展示 Lorume `deviceId` 和系统上报的 hostname，不维护额外设备显示名。
 - 平台身份：可以记录 Slock machine/server 标识、Multica daemon id、OpenClaw gateway id 等平台标识。
-- IP 地址：只保留主连接 IP 或后端观测到的公网出口 IP；不默认列出所有网卡地址。
+- IP 地址：保留本地非 internal IP 列表和后端观测到的公网 / 出口 IP。公网 / 出口 IP 优先由后端从可信转发头或连接 remote address 推导，CLI 不主动访问第三方探测服务。
 - MAC 地址：默认不展示。确有设备识别需求时，只允许采集主网卡 MAC 并脱敏展示。
 - 端口：只在有明确管理动作时作为 runtime 诊断字段保留，不作为 Device 的通用字段。设备侧采用 outbound 连接时，不要求开放入站端口。
 
@@ -139,7 +153,7 @@ WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lor
 
 消息 envelope：
 
-- `hello`：设备连接后声明 `deviceId`、`deviceName`、collector version 和 hostname。
+- `hello`：设备连接后声明 `deviceId`、collector version 和 hostname。
 - `hello.ack`：后端确认连接已登记。
 - `heartbeat`：设备周期性上报 collector 状态、负载摘要和最近错误。
 - `error`：任何一方回传可解释错误。
@@ -160,6 +174,12 @@ WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lor
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或后端入库失败时，必须产出规范化错误码和用户可读 message；Runtime Fleet 展示层将相关对象折叠为 `异常`。
 - 后端和 collector 日志必须使用结构化 JSON，不记录 device token、session token、邀请 token、邮箱验证码或平台 API key。
 - 当前低成本本地方案使用 collector 侧 JSONL 日志和后端结构化日志；后续接入 SLS 时复用同一 error code / message 语义。
+
+真实设备清理约束：
+
+- 真实设备验收时，agent 可以运行 Lorume stop、uninstall、install 命令，也可以读取日志、服务状态和文件状态。
+- agent 不能手动删除残留的 Lorume 文件、launchd plist、systemd unit 或进程状态来掩盖卸载缺陷。
+- 如果 uninstall 后仍有残留，必须停止真实设备流程，分析卸载能力缺陷，在项目中修复并重新执行 uninstall 验证。
 
 ## Runtime Adapter
 
@@ -196,7 +216,7 @@ Lorume 把业务任务、会话线程和真实运行执行分开建模。TypeScr
 
 ## 安装方式
 
-组织 owner / admin 可以在组织设置中生成 device token，并得到一条包含 server URL、device id、device name 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
+组织 owner / admin 可以在组织设置中生成 device token，并得到一条包含 server URL、device id 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
 
 当前远程安装命令形态：
 
@@ -204,7 +224,6 @@ Lorume 把业务任务、会话线程和真实运行执行分开建模。TypeScr
 curl -fsSL https://lorume.example/api/device-collector/install.sh | bash -s -- \
   --server-url https://lorume.example \
   --device-id <device-id> \
-  --device-name <device-name> \
   --device-token <device-token>
 ```
 
@@ -217,7 +236,6 @@ bash scripts/install-device-collector.sh \
   --source-dir /path/to/lorume \
   --install-dir ~/.lorume/collector \
   --device-id gezilinll-claw \
-  --device-name gezilinll-claw \
   --server-url http://127.0.0.1:4173 \
   --slock-server-url https://api.slock.ai \
   --once \
@@ -231,7 +249,6 @@ bash scripts/install-device-collector.sh \
   --source-dir /path/to/lorume \
   --install-dir ~/.lorume/collector \
   --device-id gezilinll-claw \
-  --device-name gezilinll-claw \
   --server-url http://lorume.local \
   --slock-server-url https://api.slock.ai
 ```
@@ -247,6 +264,7 @@ bash scripts/install-device-collector.sh \
 - 能通过后端 harness 验证 device WebSocket 连接、heartbeat、断连和 stale 判定。
 - 能通过 collector harness 验证 daemon 启动和周期刷新都会同时上报 inventory snapshot 与 work-state snapshot。
 - 能通过安装脚本 harness 验证本地路径安装、配置写入、一次性采集运行。
+- 能通过安装脚本 harness 验证 stop / uninstall 幂等，并且卸载只通过 Lorume 产品能力完成服务停止、服务定义移除和安装目录清理。
 - 能通过 Runtime harness 验证 adapter 把平台字段转换成 Lorume 状态、`lastSeenAt` 和 Agent 工作负载统计语义。
 - 能通过前端 harness 验证 Runtime Fleet 当前不展示 `请求设备刷新` 入口。
 - 能通过前端 harness 验证页面自动读取后端查询 API，且不展示原始 UTC ISO 时间。

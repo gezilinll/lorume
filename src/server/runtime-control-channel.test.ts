@@ -27,7 +27,6 @@ describe("runtime control channel", () => {
     channel.receive(socket, JSON.stringify({
       type: "hello",
       deviceId: "fixture-mac",
-      deviceName: "Fixture Mac",
       collectorVersion: "0.1.0",
       hostname: "fixture-mac.local",
     }));

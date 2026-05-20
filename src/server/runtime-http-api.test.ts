@@ -32,17 +32,39 @@ describe("runtime HTTP API", () => {
 
   it("does not expose legacy latest snapshot APIs", async () => {
     const { baseUrl, store } = await startRuntimeApi();
-    const snapshot = {
-      ...(fixtureSnapshot as RuntimeInventorySnapshot),
-      device: { ...(fixtureSnapshot as RuntimeInventorySnapshot).device, name: "Backend Device" },
-    };
-    store.writeLatestSnapshot(snapshot);
+    store.writeLatestSnapshot(fixtureSnapshot);
 
     const inventoryResponse = await fetch(`${baseUrl}/api/runtime-inventory/latest`);
     const workStateResponse = await fetch(`${baseUrl}/api/runtime-work-state/latest`);
 
     expect(inventoryResponse.status).toBe(404);
     expect(workStateResponse.status).toBe(404);
+  });
+
+  it("enriches inventory snapshots with the collector public IP from request headers", async () => {
+    const { baseUrl, store } = await startRuntimeApi();
+    const snapshot = {
+      ...(fixtureSnapshot as RuntimeInventorySnapshot),
+      device: {
+        ...(fixtureSnapshot as RuntimeInventorySnapshot).device,
+        network: { localIps: ["192.168.1.10"] },
+      },
+    };
+
+    const response = await fetch(`${baseUrl}/api/device-snapshots`, {
+      body: JSON.stringify(snapshot),
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": "203.0.113.9, 10.0.0.4",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(201);
+    expect(store.readLatestSnapshot()?.device.network).toEqual({
+      localIps: ["192.168.1.10"],
+      publicIp: "203.0.113.9",
+    });
   });
 
   it("accepts runtime work state snapshots without exposing a latest GET API", async () => {

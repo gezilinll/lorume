@@ -30,7 +30,6 @@ export interface AgentSkillProbeSnapshot {
   targetAgentId: string;
   targetAgentName?: string;
   deviceId: string;
-  deviceName?: string;
   runtimeId: string;
   runtimeName?: string;
   status: AgentSkillProbeStatus;
@@ -56,7 +55,6 @@ export interface AgentSkillProbeParseInput {
   targetAgentId: string;
   targetAgentName?: string;
   deviceId: string;
-  deviceName?: string;
   runtimeId: string;
   runtimeName?: string;
   observedAt: string;
@@ -91,7 +89,6 @@ export function parseAgentSkillProbeEntries(input: AgentSkillProbeParseInput): A
     targetAgentId: input.targetAgentId,
     ...(input.targetAgentName ? { targetAgentName: input.targetAgentName } : {}),
     deviceId: input.deviceId,
-    ...(input.deviceName ? { deviceName: input.deviceName } : {}),
     runtimeId: input.runtimeId,
     ...(input.runtimeName ? { runtimeName: input.runtimeName } : {}),
     status: "succeeded",
@@ -117,7 +114,6 @@ export function normalizeAgentSkillProbeSnapshot(value: unknown): AgentSkillProb
     targetAgentId,
     ...(readString(value.targetAgentName) ? { targetAgentName: readString(value.targetAgentName) } : {}),
     deviceId,
-    ...(readString(value.deviceName) ? { deviceName: readString(value.deviceName) } : {}),
     runtimeId,
     ...(readString(value.runtimeName) ? { runtimeName: readString(value.runtimeName) } : {}),
     status,

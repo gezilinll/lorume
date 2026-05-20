@@ -12,10 +12,6 @@ const fixtureSnapshot = JSON.parse(
 
 const backendSnapshot: RuntimeInventorySnapshot = {
   ...fixtureSnapshot,
-  device: {
-    ...fixtureSnapshot.device,
-    name: "Backend Fixture Mac",
-  },
   agents: fixtureSnapshot.agents.map((agent) => {
     if (agent.id !== "fixture-mac:slock:slock-daemon:agent:tester") return agent;
     const { lastSeenAt, ...agentWithoutLastSeenAt } = agent;
@@ -58,7 +54,6 @@ test.describe("Runtime Fleet", () => {
         targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
         targetAgentName: "tester",
         deviceId: "fixture-mac",
-        deviceName: "Backend Fixture Mac",
         runtimeId: "fixture-mac:slock:slock-daemon",
         runtimeName: "Slock daemon",
         status: "succeeded",
@@ -94,7 +89,7 @@ test.describe("Runtime Fleet", () => {
 
     await page.getByRole("button", { name: "Runtime Fleet" }).click();
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
-    await expect(page.getByLabel("设备").getByText("Backend Fixture Mac")).toBeVisible();
+    await expect(page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ })).toBeVisible();
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("工作中");

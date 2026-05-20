@@ -1,8 +1,12 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { hostname, arch, platform, userInfo, networkInterfaces } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { collectInventorySnapshot, collectWorkStateSnapshot } from "./lorume-runtime-adapters.mjs";
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function parseFlags(argv) {
   const positionals = [];
@@ -62,6 +66,10 @@ async function main() {
     writeJson(readConnectorStatus(flags));
     return;
   }
+  if (group === "collector" && (command === "stop" || command === "uninstall")) {
+    writeJson(runCollectorLifecycleCommand(command, flags));
+    return;
+  }
   if (group === "files" && command === "copy") {
     writeJson(copyExplicitPath(flags));
     return;
@@ -73,17 +81,15 @@ async function main() {
 function identifyDevice(flags) {
   const observedAt = new Date().toISOString();
   const deviceId = stringFlag(flags, "device-id") || process.env.LORUME_DEVICE_ID || sanitizeId(hostname());
-  const deviceName = stringFlag(flags, "device-name") || process.env.LORUME_DEVICE_NAME || deviceId;
   const localIps = collectLocalIps();
   return {
     command: "device.identify",
     observedAt,
     device: {
       architecture: arch(),
-      connectionMode: "collector",
       hostname: hostname(),
       id: deviceId,
-      name: deviceName,
+      lastSeenAt: observedAt,
       ...(localIps.length ? { network: { localIps } } : {}),
       user: { username: safeUsername() },
       os: platform(),
@@ -150,7 +156,6 @@ function probeAgentSkills(flags) {
     targetAgentId,
     ...(stringFlag(flags, "agent-name") ? { targetAgentName: stringFlag(flags, "agent-name") } : {}),
     deviceId: identity.device.id,
-    ...(identity.device.name ? { deviceName: identity.device.name } : {}),
     runtimeId,
     ...(stringFlag(flags, "runtime-name") ? { runtimeName: stringFlag(flags, "runtime-name") } : {}),
     status,
@@ -176,6 +181,31 @@ function readConnectorStatus(flags) {
   };
 }
 
+function runCollectorLifecycleCommand(command, flags) {
+  const installDir = stringFlag(flags, "install-dir");
+  const installerPath = process.env.LORUME_COLLECTOR_INSTALLER_PATH || path.join(SCRIPT_DIR, "install-device-collector.sh");
+  const installerArgs = [];
+  if (installDir) installerArgs.push("--install-dir", installDir);
+  installerArgs.push(command === "stop" ? "--stop" : "--uninstall");
+  const result = spawnSync("bash", [installerPath, ...installerArgs], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw createCliError(
+      "collector_lifecycle_failed",
+      result.stderr.trim() || `Collector ${command} failed with exit code ${result.status}`,
+      result.status || 1,
+    );
+  }
+  return {
+    command: `collector.${command}`,
+    ...(installDir ? { installDir } : {}),
+    status: "succeeded",
+  };
+}
+
 function readRuntimeInventorySnapshot(snapshotPath) {
   const snapshot = readJson(snapshotPath);
   if (!snapshot || typeof snapshot !== "object") {
@@ -193,13 +223,11 @@ function readRuntimeInventorySnapshot(snapshotPath) {
 
 function applyInventoryDeviceOverrides(snapshot, flags) {
   const deviceId = stringFlag(flags, "device-id");
-  const deviceName = stringFlag(flags, "device-name");
-  if (!deviceId && !deviceName) return snapshot;
+  if (!deviceId) return snapshot;
   const currentDeviceId = snapshot.device?.id;
   const nextDevice = {
     ...snapshot.device,
-    ...(deviceId ? { id: deviceId } : {}),
-    ...(deviceName ? { name: deviceName } : {}),
+    id: deviceId,
   };
   if (!currentDeviceId || !deviceId || currentDeviceId === deviceId) return { ...snapshot, device: nextDevice };
   const runtimeIdReplacements = new Map();
@@ -275,7 +303,6 @@ function collectorAdapterArgs(flags) {
   return {
     configPath: stringFlag(flags, "config"),
     deviceId: stringFlag(flags, "device-id"),
-    deviceName: stringFlag(flags, "device-name"),
     fixturePath: stringFlag(flags, "snapshot"),
   };
 }
@@ -401,10 +428,12 @@ function helpText() {
   return `Usage: lorume <command> [options]
 
 Commands:
-  lorume device identify --json [--device-id <id>] [--device-name <name>]
+  lorume device identify --json [--device-id <id>]
   lorume collect inventory --json [--snapshot <path>]
   lorume collect work-state --json [--snapshot <path>]
   lorume agent skill-probe --json --agent-id <id> [--runtime-id <id>] [--device-id <id>] [--skill-root <path>]
+  lorume collector stop --json [--install-dir <path>]
+  lorume collector uninstall --json [--install-dir <path>]
   lorume runtime list --json --snapshot <path>
   lorume connector status --json --context <path> --target <id>
   lorume files copy --json --from <path> --to <path> --allow-root <path>

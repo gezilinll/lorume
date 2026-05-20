@@ -20,12 +20,9 @@ const backendInventory: RuntimeInventorySnapshot = {
   collector: { version: "0.1.0", status: "online" },
   device: {
     id: "fixture-device",
-    name: "Fixture Device",
     hostname: "fixture-device.local",
     os: "darwin",
     architecture: "arm64",
-    status: "online",
-    connectionMode: "collector",
     lastSeenAt: "2026-05-09T08:00:00.000Z",
   },
   runtimes: [

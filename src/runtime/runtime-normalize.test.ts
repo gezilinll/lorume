@@ -8,15 +8,55 @@ import {
 
 const fixtureDevice: RuntimeDevice = {
   id: "gezilinll-claw",
-  name: "gezilinll-claw",
   hostname: "gezilinll-clawdeMacBook-Pro.local",
   os: "darwin",
   architecture: "arm64",
-  status: "unknown",
-  connectionMode: "collector",
 };
 
 describe("runtime inventory normalization", () => {
+  it("keeps device facts narrow and independent from runtime health", () => {
+    const snapshot = createRuntimeInventorySnapshot({
+      observedAt: "2026-05-20T00:00:00.000Z",
+      collector: { version: "0.1.0", status: "online", installPath: "/tmp/lorume" },
+      device: {
+        id: "device-a",
+        name: "Device A",
+        hostname: "device-a.local",
+        os: "darwin",
+        architecture: "arm64",
+        status: "unknown",
+        lastSeenAt: "2026-05-19T00:00:00.000Z",
+        user: { username: "gezilinll-claw" },
+        network: { localIps: ["10.1.67.125"], publicIp: "203.0.113.10" },
+      } as RuntimeDevice,
+      reports: [{
+        source: "codex",
+        collectedAt: "2026-05-20T00:00:00.000Z",
+        runtimes: [{
+          externalId: "runtime-main",
+          kind: "codex",
+          name: "Codex CLI",
+          status: "degraded",
+          capabilities: [],
+        }],
+        agents: [],
+      }],
+    });
+
+    expect(snapshot.device).toEqual({
+      id: "device-a",
+      hostname: "device-a.local",
+      os: "darwin",
+      architecture: "arm64",
+      lastSeenAt: "2026-05-20T00:00:00.000Z",
+      user: { username: "gezilinll-claw" },
+      network: { localIps: ["10.1.67.125"], publicIp: "203.0.113.10" },
+    });
+    expect(snapshot.device).not.toHaveProperty("name");
+    expect(snapshot.device).not.toHaveProperty("status");
+    expect(snapshot.device).not.toHaveProperty("connectionMode");
+  });
+
   it("normalizes runtime and agent reports into stable Lorume ids", () => {
     const reports: RuntimeAdapterReport[] = [
       {
@@ -55,7 +95,7 @@ describe("runtime inventory normalization", () => {
       reports,
     });
 
-    expect(snapshot.device.status).toBe("online");
+    expect(snapshot.device).not.toHaveProperty("status");
     expect(snapshot.runtimes[0]).toMatchObject({
       id: "gezilinll-claw:openclaw:gateway-18789",
       deviceId: "gezilinll-claw",
@@ -203,9 +243,7 @@ describe("runtime inventory normalization", () => {
 
     const summary = summarizeRuntimeInventory(snapshot);
 
-    expect(snapshot.device.status).toBe("degraded");
     expect(summary).toEqual({
-      deviceStatus: "degraded",
       runtimes: { total: 1, online: 0, degraded: 1, offline: 0, unknown: 0 },
       agents: { total: 0, active: 0, idle: 0, inactive: 0, degraded: 0, unknown: 0 },
       channelKinds: [],

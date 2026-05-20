@@ -49,11 +49,10 @@ describe("OrganizationSettingsPage", () => {
     globalThis.fetch = vi.fn(async (input, init) => {
       expect(input.toString()).toBe("/api/organizations/org_1/device-tokens");
       expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual({ deviceId: "fixture-mac", name: "Fixture Mac" });
+      expect(JSON.parse(String(init?.body))).toEqual({ deviceId: "fixture-mac", name: "fixture-mac" });
       return jsonResponse({
         deviceToken: {
           deviceId: "fixture-mac",
-          name: "Fixture Mac",
           token: "agt_device_secret_123",
           tokenPrefix: "agt_device_s",
         },
@@ -62,7 +61,6 @@ describe("OrganizationSettingsPage", () => {
 
     render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
 
-    await user.type(screen.getByLabelText("设备名称"), "Fixture Mac");
     await user.type(screen.getByLabelText("Device ID"), "fixture-mac");
     await user.click(screen.getByRole("button", { name: "生成安装命令" }));
 
@@ -72,7 +70,7 @@ describe("OrganizationSettingsPage", () => {
     expect(installCommand.value).toContain(`${window.location.origin}/api/device-collector/install.sh`);
     expect(installCommand.value).toContain("--device-token 'agt_device_secret_123'");
     expect(installCommand.value).toContain("--device-id 'fixture-mac'");
-    expect(installCommand.value).toContain("--device-name 'Fixture Mac'");
+    expect(installCommand.value).not.toContain("--device-name");
   });
 
   it("hides invitation creation from regular members", () => {

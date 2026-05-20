@@ -30,7 +30,6 @@ describe("standalone Lorume backend server", () => {
     socket.send(JSON.stringify({
       type: "hello",
       deviceId: "standalone-device",
-      deviceName: "Standalone Device",
       collectorVersion: "0.1.0",
     }));
     const helloAck = await helloAckPromise;

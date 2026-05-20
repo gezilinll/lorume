@@ -11,12 +11,13 @@ Options:
   --server-url <url>      Optional Lorume server URL
   --ws-url <url>          Optional Lorume device control WebSocket URL
   --device-id <id>        Device id to register
-  --device-name <name>    Human-readable device name
   --device-token <token>  Lorume device token for ingestion and control
   --slock-server-url <url> Optional Slock server URL for task-board discovery
   --interval-ms <ms>      Collector interval for service mode (default: 60000)
   --once                  Run a one-time collection after install
   --no-service            Do not install launchd/systemd service
+  --stop                  Stop the installed collector service and keep files
+  --uninstall             Stop service, remove service file, and remove install directory
   --fixture <path>        Fixture snapshot for one-time test mode
   -h, --help              Show help
 EOF
@@ -27,13 +28,13 @@ INSTALL_DIR="$HOME/.lorume/collector"
 SERVER_URL=""
 WS_URL=""
 DEVICE_ID=""
-DEVICE_NAME=""
 DEVICE_TOKEN=""
 SLOCK_SERVER_URL=""
 INTERVAL_MS="60000"
 ONCE="false"
 NO_SERVICE="false"
 FIXTURE=""
+ACTION="install"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,10 +58,6 @@ while [[ $# -gt 0 ]]; do
       DEVICE_ID="$2"
       shift 2
       ;;
-    --device-name)
-      DEVICE_NAME="$2"
-      shift 2
-      ;;
     --device-token)
       DEVICE_TOKEN="$2"
       shift 2
@@ -81,6 +78,14 @@ while [[ $# -gt 0 ]]; do
       NO_SERVICE="true"
       shift
       ;;
+    --stop)
+      ACTION="stop"
+      shift
+      ;;
+    --uninstall)
+      ACTION="uninstall"
+      shift
+      ;;
     --fixture)
       FIXTURE="$2"
       shift 2
@@ -96,6 +101,53 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+MACOS_PLIST_PATH="$HOME/Library/LaunchAgents/ai.lorume.collector.plist"
+LINUX_SERVICE_PATH="$HOME/.config/systemd/user/lorume-collector.service"
+
+stop_collector_service() {
+  case "$(uname -s)" in
+    Darwin)
+      launchctl bootout "gui/$(id -u)" "$MACOS_PLIST_PATH" >/dev/null 2>&1 || true
+      ;;
+    Linux)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user stop lorume-collector.service >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
+}
+
+remove_collector_service() {
+  stop_collector_service
+  case "$(uname -s)" in
+    Darwin)
+      rm -f "$MACOS_PLIST_PATH"
+      ;;
+    Linux)
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user disable lorume-collector.service >/dev/null 2>&1 || true
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+      fi
+      rm -f "$LINUX_SERVICE_PATH"
+      ;;
+  esac
+}
+
+if [[ "$ACTION" == "stop" ]]; then
+  stop_collector_service
+  exit 0
+fi
+
+if [[ "$ACTION" == "uninstall" ]]; then
+  if [[ -z "$INSTALL_DIR" || "$INSTALL_DIR" == "/" ]]; then
+    echo "Refusing to uninstall unsafe install dir: $INSTALL_DIR" >&2
+    exit 1
+  fi
+  remove_collector_service
+  rm -rf "$INSTALL_DIR"
+  exit 0
+fi
 
 if [[ -z "$SOURCE_DIR" ]]; then
   SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -160,16 +212,15 @@ install -m 0755 "$SOURCE_COLLECTOR" "$INSTALL_DIR/lorume-device-collector.mjs"
 install -m 0755 "$SOURCE_CLI" "$INSTALL_DIR/lorume.mjs"
 install -m 0644 "$SOURCE_RUNTIME_ADAPTERS" "$INSTALL_DIR/lorume-runtime-adapters.mjs"
 
-"$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_NAME" "$DEVICE_TOKEN" "$SLOCK_SERVER_URL" "$INTERVAL_MS" <<'NODE'
+"$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_TOKEN" "$SLOCK_SERVER_URL" "$INTERVAL_MS" <<'NODE'
 const fs = require("node:fs");
 
-const [configPath, installDir, serverUrl, wsUrl, deviceId, deviceName, deviceToken, slockServerUrl, intervalMs] = process.argv.slice(2);
+const [configPath, installDir, serverUrl, wsUrl, deviceId, deviceToken, slockServerUrl, intervalMs] = process.argv.slice(2);
 const config = {
   installDir,
   serverUrl,
   wsUrl,
   deviceId,
-  deviceName,
   deviceToken,
   slockServerUrl,
   intervalMs: Number(intervalMs),
@@ -183,7 +234,7 @@ COLLECTOR_PATH="$INSTALL_DIR/lorume-device-collector.mjs"
 
 install_macos_service() {
   local plist_dir="$HOME/Library/LaunchAgents"
-  local plist_path="$plist_dir/ai.lorume.collector.plist"
+  local plist_path="$MACOS_PLIST_PATH"
   mkdir -p "$plist_dir"
   cat > "$plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -218,7 +269,7 @@ EOF
 
 install_linux_service() {
   local service_dir="$HOME/.config/systemd/user"
-  local service_path="$service_dir/lorume-collector.service"
+  local service_path="$LINUX_SERVICE_PATH"
   mkdir -p "$service_dir"
   cat > "$service_path" <<EOF
 [Unit]

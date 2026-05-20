@@ -408,11 +408,8 @@ function createEmptyRuntimeInventorySnapshot(): RuntimeInventorySnapshot {
     collector: { version: "unknown", status: "unknown" },
     device: {
       id: "backend",
-      name: "暂无设备数据",
       hostname: "backend",
       os: "unknown",
-      status: "unknown",
-      connectionMode: "collector",
     },
     devices: [],
     runtimes: [],
@@ -563,7 +560,7 @@ function DevicePanel({
               <PixelIcon name="monitor" size={18} />
             </span>
             <span>
-              <strong>{device.name}</strong>
+              <strong>{device.id}</strong>
               <small>{device.hostname}</small>
               <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}</small>
             </span>
@@ -636,7 +633,7 @@ function RuntimeTable({
                   <Badge>{runtimeKindLabels[runtime.kind]}</Badge>
                 </span>
                 <span className="mutedAssetText" role="cell">
-                  {deviceById.get(runtime.deviceId)?.name ?? runtime.deviceId}
+                  {deviceById.get(runtime.deviceId)?.id ?? runtime.deviceId}
                 </span>
                 <span role="cell">
                   <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />

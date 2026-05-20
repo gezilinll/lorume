@@ -34,7 +34,6 @@ function parseArgs(argv) {
     serverUrl: "",
     wsUrl: "",
     deviceId: "",
-    deviceName: "",
     deviceToken: "",
     intervalMs: DEFAULT_INTERVAL_MS,
   };
@@ -55,7 +54,6 @@ function parseArgs(argv) {
     else if (arg === "--server-url") args.serverUrl = next();
     else if (arg === "--ws-url") args.wsUrl = next();
     else if (arg === "--device-id") args.deviceId = next();
-    else if (arg === "--device-name") args.deviceName = next();
     else if (arg === "--device-token") args.deviceToken = next();
     else if (arg === "--interval-ms") args.intervalMs = Number(next());
     else if (arg === "--help" || arg === "-h") {
@@ -81,7 +79,6 @@ Options:
   --server-url <url>     Lorume server URL
   --ws-url <url>         Lorume device control WebSocket URL
   --device-id <id>       Override device id
-  --device-name <name>   Override device name
   --device-token <token> Lorume device token for ingestion and control
   --interval-ms <ms>     Collection interval when not using --once
 `);
@@ -187,12 +184,9 @@ function createDevice(config, observedAt) {
   const localIps = collectLocalIps();
   return {
     id: config.deviceId || defaultId,
-    name: config.deviceName || config.deviceId || hostname(),
     hostname: hostname(),
     os: platform(),
     architecture: arch(),
-    status: "unknown",
-    connectionMode: "collector",
     lastSeenAt: observedAt,
     user: { username: safeUsername() },
     ...(localIps.length ? { network: { localIps } } : {}),
@@ -219,11 +213,10 @@ function collectLocalIps() {
 }
 
 function applyDeviceOverrides(snapshot, config) {
-  if (!config.deviceId && !config.deviceName) return snapshot;
+  if (!config.deviceId) return snapshot;
   const nextDevice = {
     ...snapshot.device,
-    id: config.deviceId || snapshot.device.id,
-    name: config.deviceName || snapshot.device.name,
+    id: config.deviceId,
   };
   const idReplacements = new Map();
   const runtimes = snapshot.runtimes.map((runtime) => {
@@ -256,7 +249,6 @@ function collectSnapshotViaLorumeCli(config, args) {
   if (args.fixturePath) cliArgs.push("--snapshot", args.fixturePath);
   const identity = resolveCliDeviceIdentity(config, args);
   if (identity.deviceId) cliArgs.push("--device-id", identity.deviceId);
-  if (identity.deviceName) cliArgs.push("--device-name", identity.deviceName);
   return stripCliCommand(runLorumeCliJson(config, cliArgs));
 }
 
@@ -324,10 +316,9 @@ async function collectWorkStateViaLorumeCli(config, args) {
 }
 
 function resolveCliDeviceIdentity(config, args) {
-  if (args.deviceId || config.deviceId || args.deviceName || config.deviceName) {
+  if (args.deviceId || config.deviceId) {
     return {
       deviceId: args.deviceId || config.deviceId || "",
-      deviceName: args.deviceName || config.deviceName || "",
     };
   }
   if (args.fixturePath) {
@@ -335,13 +326,12 @@ function resolveCliDeviceIdentity(config, args) {
       const device = readJsonFile(args.fixturePath)?.device;
       return {
         deviceId: typeof device?.id === "string" ? device.id : "",
-        deviceName: typeof device?.name === "string" ? device.name : "",
       };
     } catch {
-      return { deviceId: "", deviceName: "" };
+      return { deviceId: "" };
     }
   }
-  return { deviceId: "", deviceName: "" };
+  return { deviceId: "" };
 }
 
 function resolveLorumeCliPath(config) {
@@ -432,7 +422,6 @@ function heartbeatPayload(config, args) {
   return {
     type: "heartbeat",
     deviceId: device.id,
-    deviceName: device.name,
     hostname: device.hostname,
     collectorVersion: COLLECTOR_VERSION,
   };
@@ -442,7 +431,6 @@ function mergedControlConfig(config, args) {
   return {
     ...config,
     ...(args.deviceId ? { deviceId: args.deviceId } : {}),
-    ...(args.deviceName ? { deviceName: args.deviceName } : {}),
   };
 }
 
@@ -478,7 +466,6 @@ function startControlChannel(config, args) {
       sendControlMessage(socket, {
         type: "hello",
         deviceId: device.id,
-        deviceName: device.name,
         ...(resolveDeviceToken(config, args) ? { deviceToken: resolveDeviceToken(config, args) } : {}),
         hostname: device.hostname,
         collectorVersion: COLLECTOR_VERSION,

@@ -29,7 +29,6 @@ export interface RuntimeControlChannel {
 type ControlMessage = {
   type?: string;
   deviceId?: string;
-  deviceName?: string;
   collectorVersion?: string;
   hostname?: string;
   summary?: Record<string, unknown>;
@@ -70,7 +69,6 @@ export function createRuntimeControlChannel(options: RuntimeControlChannelOption
           lastHeartbeatAt: now().toISOString(),
           collectorVersion: message.collectorVersion,
           hostname: message.hostname,
-          deviceName: message.deviceName,
         });
         send(socket, { type: "hello.ack", deviceId });
         return;
@@ -89,7 +87,6 @@ export function createRuntimeControlChannel(options: RuntimeControlChannelOption
           lastHeartbeatAt: now().toISOString(),
           collectorVersion: message.collectorVersion ?? current.collectorVersion,
           hostname: message.hostname ?? current.hostname,
-          deviceName: message.deviceName ?? current.deviceName,
           summary: message.summary ?? current.summary,
           lastError: message.error ?? current.lastError,
         });

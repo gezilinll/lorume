@@ -317,7 +317,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
     },
     async readRuntimeFleet() {
       const [deviceResult, runtimeResult, agentResult] = await Promise.all([
-        pool.query<{ raw: RuntimeDevice; observed_at: Date | null }>("SELECT raw, observed_at FROM devices ORDER BY name"),
+        pool.query<{ raw: RuntimeDevice; observed_at: Date | null }>("SELECT raw, observed_at FROM devices ORDER BY hostname, id"),
         pool.query<{ raw: LorumeRuntime }>("SELECT raw FROM runtimes ORDER BY name"),
         pool.query<{ raw: ManagedRuntimeAgent }>("SELECT raw FROM agents ORDER BY name"),
       ]);
@@ -481,16 +481,13 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
 async function upsertDevice(client: pg.PoolClient, snapshot: RuntimeInventorySnapshot): Promise<void> {
   await client.query(`
     INSERT INTO devices (
-      id, name, hostname, os, architecture, status, connection_mode, collector, last_seen_at, observed_at, raw, updated_at
+      id, hostname, os, architecture, collector, last_seen_at, observed_at, raw, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
-      name = excluded.name,
       hostname = excluded.hostname,
       os = excluded.os,
       architecture = excluded.architecture,
-      status = excluded.status,
-      connection_mode = excluded.connection_mode,
       collector = excluded.collector,
       last_seen_at = excluded.last_seen_at,
       observed_at = excluded.observed_at,
@@ -498,12 +495,9 @@ async function upsertDevice(client: pg.PoolClient, snapshot: RuntimeInventorySna
       updated_at = now()
   `, [
     snapshot.device.id,
-    snapshot.device.name,
     snapshot.device.hostname,
     snapshot.device.os,
     snapshot.device.architecture ?? null,
-    snapshot.device.status,
-    snapshot.device.connectionMode,
     toJson(snapshot.collector),
     toDate(snapshot.device.lastSeenAt),
     toDate(snapshot.observedAt),

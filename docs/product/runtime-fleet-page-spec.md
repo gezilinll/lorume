@@ -8,19 +8,19 @@ Runtime Fleet 是 Lorume 用来查看设备、runtime、agent 和 channel bindin
 
 Runtime Fleet 必须区分“数据从哪里采集”和“产品上归属哪一层”。
 
-- Device 管设备连接和承载状态：在线、最近心跳、连接方式、collector 状态、已注册 Runtime。Device 不拥有任务、会话或泳道。
+- Device 管机器事实和 collector 连接状态：device id、hostname、OS、架构、最近心跳、本地 / 出口 IP、collector 状态和已注册 Runtime。Device 不拥有任务、会话或泳道，也不保存由 Runtime / Agent 推导出来的状态字段。
 - Runtime 管执行环境状态：是否可用、是否离线、是否闲置、是否有工作负载。Runtime 可以是采集任务和会话数据的入口，但不拥有项目管理级任务或泳道。
 - Agent 管用户可理解的工作状态：待处理、处理中、待验收、已关闭、需关注，以及发起人、承接 Agent、会话/群组、消息摘要和执行结果。
 - Adapter 负责把 OpenClaw、Multica、Slock 等平台差异转成 Lorume 统一模型。UI 不能直接解释平台原始字段，也不能把平台状态原样暴露成产品语义。
 
 ## 目标
 
-- 展示已注册设备的基本状态、hostname、OS、最后同步时间和连接状态。
+- 展示已注册设备的 device id、hostname、OS、架构、最后同步时间、本地 / 出口 IP 和 collector 连接状态。
 - 展示设备上的 runtime，包括 OpenClaw、Codex、Claude Code、Slock、Multica 等 `kind`。
 - 展示 runtime 下的 managed agents、归属 runtime、统一状态、channel binding 和最近同步。
 - 支持按关键词、runtime kind、同步时间过滤。Runtime kind 候选项必须从当前 snapshot 中真实存在的 runtime 动态生成；不展示当前设备没有上报的 Runtime 类型。
 - Runtime Fleet 不提供 Channel 筛选，避免把 Slock、Multica、OpenClaw、Codex 等 Runtime / 平台入口误当成触达渠道。
-- 点击设备、runtime 或 agent 后，在右侧详情面板查看身份信息、连接状态、归属关系、已注册 Runtime 和关联渠道。
+- 点击设备、runtime 或 agent 后，在右侧详情面板查看身份信息、collector 连接状态、归属关系、已注册 Runtime 和关联渠道。
 - Agent 列表行提供目标 Agent 本地 Skill 探测入口；该能力只展示探测状态、Skill root / entry path、Markdown 文件名和非 Markdown 文件名，不提供编辑、导入、分配、同步或迁移。
 - Runtime Fleet 不暴露手动远端刷新入口；页面只展示后端已有数据、collector 定时上报和自动轮询后的结果。
 - 页面自动轮询最新 snapshot，使运行资产管理视图持续更新。
@@ -46,7 +46,7 @@ Runtime Fleet 必须区分“数据从哪里采集”和“产品上归属哪一
 
 Adapter 必须把外部平台差异转换成 Lorume 自己的数据语义，UI 不直接解释平台原始字段。
 
-`lastSeenAt` 表示 Lorume 最近一次从对应对象采集到状态的时间。Device、Runtime、Agent 都使用同一字段语义，页面以本地化时间展示，不展示原始 UTC ISO 字符串。
+`lastSeenAt` 表示 Lorume 最近一次从对应对象采集到事实或状态的时间。Device、Runtime、Agent 都使用同一字段语义，页面以本地化时间展示，不展示原始 UTC ISO 字符串。
 
 Collector 必须上报足够的对象同步时间。开发期历史数据如果缺字段，优先清理数据和 fixture；Runtime Fleet 不为了旧数据长期堆兼容逻辑。
 
@@ -61,7 +61,7 @@ Runtime 运行状态必须从 Lorume 统一 WorkStage / ExecutionStatus 推导�
 
 Runtime Fleet 展示层只向用户暴露统一对象状态：
 
-- `working` / `工作中`：对象可识别且有可接收或正在处理工作的证据。Device 正常展示为 `工作中`，不展示 `正常`。
+- `working` / `工作中`：Runtime / Agent 可识别且有可接收或正在处理工作的证据；Device 的正常状态仅来自 collector 连接 / 采集健康，不来自 Runtime / Agent 工作证据。
 - `idle` / `空闲`：对象可识别，当前没有处理中工作或运行中 execution。
 - `offline` / `离线`：对象明确离线或不可达。
 - `exception` / `异常`：采集失败、adapter 异常、数据结构不可用、对象 degraded，或内部状态不能可靠判断。
@@ -94,9 +94,9 @@ Adapter 拿不到某个非关键字段时不伪造数据，页面展示 `不支�
 
 Device：
 
-- 列表/卡片展示设备名、连接状态、最近同步、Runtime 数、Agent 数。
+- 列表/卡片展示 device id、hostname、collector 连接状态、最近同步、Runtime 数、Agent 数。
 - 详情展示 `概览`、`基础信息`、`网络`、`运行资产`、`已注册 Runtime`。
-- 详情中的最近同步只在概览中展示一次，连接状态不重复展示同一时间。
+- 详情中的最近同步只在概览中展示一次，collector 连接状态不重复展示同一时间。
 - 可以展示 CLI 已上报的局域网 IP、公网 IP 来源和用户名；不展示所有网络接口、所有 MAC 或未经采集确认的猜测信息。
 - 不展示独立采集健康区块。inventory / work-state 采集失败、adapter 异常和结构不可用折叠到 Device / Runtime / Agent 自身状态；最近同步时间用于表达数据新鲜度。
 
@@ -134,8 +134,8 @@ Agent：
 - 当后端工作项查询中 Slock Runtime 关联的 Agent 有 `in_progress` 工作项时，Runtime 运行状态显示为 `工作中`。
 - 当 Runtime 相关工作项落在后端查询第二页或更后面时，Runtime Fleet 仍能读取后续 cursor 页面并正确推导运行状态。
 - 当后端工作项查询中 Slock task board 的 assignee 指向某个 Agent 且任务为 `in_progress` 时，该 Agent 状态显示为 `工作中`；已可观测但无处理中任务时显示为空闲。
-- 用户可以点击 Device 卡片并在详情面板看到身份信息、连接状态和已注册 Runtime。
-- 当后端已有最新 snapshot 时，页面展示后端设备名称而不是 fixture 设备名称。
+- 用户可以点击 Device 卡片并在详情面板看到身份信息、collector 连接状态和已注册 Runtime。
+- 当后端已有最新 snapshot 时，页面展示后端 device id / hostname 而不是 fixture 设备。
 - Production 构建下，后端查询失败时页面展示后端错误状态，不展示 fixture 设备、Runtime 或 Agent。
 - 页面自动读取后端查询结果，并展示上次刷新时间。
 - Runtime Fleet 页面不展示 `请求设备刷新` 按钮，不暴露远端刷新命令轮询状态。

@@ -25,8 +25,6 @@ export interface RuntimeDeviceConnection {
   collectorVersion?: string;
   /** Hostname reported by the device agent. */
   hostname?: string;
-  /** Human-readable device name reported by the device agent. */
-  deviceName?: string;
   /** Small load/status summary reported by heartbeat. */
   summary?: Record<string, unknown>;
   /** Latest control-plane error for this device. */
@@ -136,7 +134,12 @@ export function validateRuntimeInventorySnapshot(value: unknown): value is Runti
   if (!isRecord(value)) return false;
   if (typeof value.observedAt !== "string") return false;
   if (!isRecord(value.collector) || typeof value.collector.version !== "string") return false;
-  if (!isRecord(value.device) || typeof value.device.id !== "string" || typeof value.device.name !== "string") {
+  if (
+    !isRecord(value.device) ||
+    typeof value.device.id !== "string" ||
+    typeof value.device.hostname !== "string" ||
+    typeof value.device.os !== "string"
+  ) {
     return false;
   }
   if (

@@ -47,6 +47,20 @@ export interface RuntimeCollectorInfo {
   lastError?: string;
 }
 
+/** Optional device user metadata reported by the Lorume CLI. */
+export interface RuntimeDeviceUser {
+  /** Local operating-system username when the CLI can read it. */
+  username?: string;
+}
+
+/** Optional device network metadata reported by the Lorume CLI. */
+export interface RuntimeDeviceNetwork {
+  /** Public IP only when the CLI or a configured endpoint explicitly provides it. */
+  publicIp?: string;
+  /** Local non-internal IPv4/IPv6 addresses reported by the host. */
+  localIps?: string[];
+}
+
 /** Registered device viewed by Lorume. */
 export interface RuntimeDevice {
   /** Stable Lorume device id. */
@@ -65,6 +79,18 @@ export interface RuntimeDevice {
   connectionMode: "collector";
   /** ISO timestamp when the device was last observed. */
   lastSeenAt?: string;
+  /** Optional local OS user metadata reported by the CLI. */
+  user?: RuntimeDeviceUser;
+  /** Optional network metadata reported by the CLI. */
+  network?: RuntimeDeviceNetwork;
+}
+
+/** Optional local path owned by a runtime or Agent. */
+export interface RuntimeObjectPath {
+  /** Human-readable path label such as Workspace, Config, or Install. */
+  label: string;
+  /** Local path as reported by the device-side CLI. */
+  path: string;
 }
 
 /** Runtime view after adapter reports are normalized. */
@@ -104,6 +130,8 @@ export interface LorumeRuntime {
     /** Optional configured concurrency capacity after adapter normalization. */
     maxConcurrency?: number;
   };
+  /** Optional local paths reported by the device-side CLI. */
+  paths?: RuntimeObjectPath[];
 }
 
 /** Channel/platform exposure for a managed Agent. */
@@ -152,6 +180,8 @@ export interface ManagedRuntimeAgent {
   lastSeenAt?: string;
   /** Optional normalized load and concurrency summary. */
   load?: RuntimeActivityStats;
+  /** Optional local paths reported by the device-side CLI. */
+  paths?: RuntimeObjectPath[];
 }
 
 /** Runtime discovery reported by one adapter before normalization. */
@@ -176,6 +206,8 @@ export interface RuntimeDiscovery {
   sourceRefs?: ExternalRuntimeRef[];
   /** Optional runtime health detail using Lorume-owned statistic semantics. */
   health?: LorumeRuntime["health"];
+  /** Optional local paths discovered by the runtime adapter. */
+  paths?: RuntimeObjectPath[];
 }
 
 /** Agent discovery reported by one adapter before normalization. */
@@ -198,6 +230,8 @@ export interface AgentDiscovery {
   lastSeenAt?: string;
   /** Optional normalized load and concurrency summary. */
   load?: ManagedRuntimeAgent["load"];
+  /** Optional local paths discovered by the runtime adapter. */
+  paths?: RuntimeObjectPath[];
 }
 
 /** Read-only discovery report returned by a runtime adapter. */
@@ -222,6 +256,8 @@ export interface RuntimeInventorySnapshot {
   collector: RuntimeCollectorInfo;
   /** Device metadata and rolled-up status. */
   device: RuntimeDevice;
+  /** Optional aggregate device list used by backend fleet queries. */
+  devices?: RuntimeDevice[];
   /** Normalized runtimes on the device. */
   runtimes: LorumeRuntime[];
   /** Normalized agents on the device. */
@@ -347,6 +383,7 @@ export function createRuntimeInventorySnapshot(
         lastSeenAt: runtime.lastSeenAt ?? report.collectedAt,
         sourceRefs: sourceRefsForRuntime(report.source, runtime),
         health: runtime.health,
+        paths: runtime.paths,
       };
     }),
   );
@@ -367,6 +404,7 @@ export function createRuntimeInventorySnapshot(
         sourceRefs: sourceRefsForAgent(report.source, agent),
         lastSeenAt: agent.lastSeenAt ?? report.collectedAt,
         load: agent.load,
+        paths: agent.paths,
       };
     }),
   );

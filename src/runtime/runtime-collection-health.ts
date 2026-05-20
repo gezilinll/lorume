@@ -1,16 +1,13 @@
 /** Snapshot types that the device collector reports independently. */
 export type CollectionHealthSnapshotType = "inventory" | "work_state";
 
-/** Product-level collection health shown to users and used by backend diagnostics. */
-export type CollectionHealthStatus = "healthy" | "warning" | "stale" | "failed" | "unknown";
+/** Product-level collection health used by backend diagnostics and Runtime Fleet status folding. */
+export type CollectionHealthStatus = "healthy" | "failed";
 
 /** Human-readable labels for collection health states. */
 export const collectionHealthStatusLabels: Record<CollectionHealthStatus, string> = {
   healthy: "正常",
-  warning: "有警告",
-  stale: "延迟",
-  failed: "失败",
-  unknown: "未知",
+  failed: "异常",
 };
 
 /** Collector ingestion row needed to derive product-level collection health. */
@@ -33,7 +30,7 @@ export interface CollectionHealthIngestion {
   error?: string | null;
 }
 
-/** One health check rendered in the Runtime Fleet collection diagnostics. */
+/** One collection diagnostic check persisted for backend, logs, and status folding. */
 export interface CollectionHealthCheck {
   /** Stable check id. */
   id: CollectionHealthSnapshotType;
@@ -55,7 +52,7 @@ export interface CollectionHealthCheck {
   message: string;
 }
 
-/** Device-level health summary derived from collector ingestion history. */
+/** Device-level collection diagnostic summary derived from collector ingestion history. */
 export interface DeviceCollectionHealth {
   /** Device this health record belongs to. */
   deviceId: string;
@@ -73,13 +70,12 @@ export interface DeviceCollectionHealth {
 
 /** Options for deterministic tests and future policy tuning. */
 export interface DeviceCollectionHealthOptions {
-  /** Clock used to evaluate staleness. */
+  /** Kept for caller compatibility; recency is displayed as data and does not create a separate status. */
   now?: Date;
-  /** Maximum receive age before a snapshot is considered stale. */
+  /** Kept for caller compatibility; recency is displayed as data and does not create a separate status. */
   staleAfterMs?: number;
 }
 
-const defaultStaleAfterMs = 5 * 60 * 1000;
 const snapshotTypes: CollectionHealthSnapshotType[] = ["inventory", "work_state"];
 const snapshotLabels: Record<CollectionHealthSnapshotType, string> = {
   inventory: "设备资产",
@@ -87,10 +83,7 @@ const snapshotLabels: Record<CollectionHealthSnapshotType, string> = {
 };
 const statusSeverity: Record<CollectionHealthStatus, number> = {
   healthy: 0,
-  unknown: 1,
-  warning: 2,
-  stale: 3,
-  failed: 4,
+  failed: 1,
 };
 
 /** Derive the product-level collection health for one device from raw ingestion rows. */
@@ -99,10 +92,9 @@ export function deriveDeviceCollectionHealth(
   ingestions: CollectionHealthIngestion[],
   options: DeviceCollectionHealthOptions = {},
 ): DeviceCollectionHealth {
-  const now = options.now ?? new Date();
-  const staleAfterMs = options.staleAfterMs ?? defaultStaleAfterMs;
+  void options;
   const checks = snapshotTypes.map((snapshotType) =>
-    deriveCheck(snapshotType, latestIngestion(ingestions, snapshotType), now, staleAfterMs),
+    deriveCheck(snapshotType, latestIngestion(ingestions, snapshotType)),
   );
   const status = checks.reduce<CollectionHealthStatus>(
     (current, check) => statusSeverity[check.status] > statusSeverity[current] ? check.status : current,
@@ -122,15 +114,13 @@ export function deriveDeviceCollectionHealth(
 function deriveCheck(
   snapshotType: CollectionHealthSnapshotType,
   ingestion: CollectionHealthIngestion | undefined,
-  now: Date,
-  staleAfterMs: number,
 ): CollectionHealthCheck {
   const label = snapshotLabels[snapshotType];
   if (!ingestion) {
     return {
       id: snapshotType,
       label,
-      status: "unknown",
+      status: "failed",
       counts: {},
       warnings: [],
       message: "尚未收到采集记录",
@@ -153,25 +143,11 @@ function deriveCheck(
     };
   }
 
-  if (Date.parse(lastReceivedAt) + staleAfterMs < now.getTime()) {
-    return {
-      id: snapshotType,
-      label,
-      status: "stale",
-      lastObservedAt,
-      lastReceivedAt,
-      counts: ingestion.counts,
-      warnings: ingestion.warnings,
-      error: ingestion.error ?? null,
-      message: `最近一次采集已超过 ${Math.round(staleAfterMs / 60_000)} 分钟`,
-    };
-  }
-
   if (ingestion.warnings.length > 0) {
     return {
       id: snapshotType,
       label,
-      status: "warning",
+      status: "healthy",
       lastObservedAt,
       lastReceivedAt,
       counts: ingestion.counts,
@@ -214,9 +190,6 @@ function createSummary(checks: CollectionHealthCheck[]): string {
 
 function summarySuffix(status: CollectionHealthStatus): string {
   if (status === "failed") return "采集失败";
-  if (status === "stale") return "采集延迟";
-  if (status === "warning") return "采集有警告";
-  if (status === "unknown") return "采集未知";
   return "采集正常";
 }
 

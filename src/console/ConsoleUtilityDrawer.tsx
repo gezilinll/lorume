@@ -46,11 +46,13 @@ interface NotificationThread {
 interface ConsoleUtilityBarProps {
   activeView: ConsoleUtilityView | null;
   organizationId?: string;
+  utilityDataEnabled?: boolean;
   onOpen: (view: ConsoleUtilityView) => void;
 }
 
 interface ConsoleUtilityDrawerProps {
   organizationId?: string;
+  utilityDataEnabled?: boolean;
   view: ConsoleUtilityView | null;
   onClose: () => void;
   onViewChange: (view: ConsoleUtilityView) => void;
@@ -82,12 +84,12 @@ const notificationStatusLabels: Record<NotificationStatus, string> = {
 const activeOperationStatuses = new Set<OperationStatus>(["queued", "running", "requires_manual_step"]);
 
 /** Compact utility entry for async tasks and in-app notifications. */
-export function ConsoleUtilityBar({ activeView, organizationId, onOpen }: ConsoleUtilityBarProps) {
+export function ConsoleUtilityBar({ activeView, organizationId, utilityDataEnabled = true, onOpen }: ConsoleUtilityBarProps) {
   const [operationCount, setOperationCount] = useState(0);
   const [notificationCount, setNotificationCount] = useState(0);
 
   useEffect(() => {
-    if (!organizationId) {
+    if (!organizationId || !utilityDataEnabled) {
       setOperationCount(0);
       setNotificationCount(0);
       return;
@@ -124,7 +126,7 @@ export function ConsoleUtilityBar({ activeView, organizationId, onOpen }: Consol
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [organizationId]);
+  }, [organizationId, utilityDataEnabled]);
 
   return (
     <div className="consoleUtilityBar" aria-label="控制台工具">
@@ -155,7 +157,7 @@ export function ConsoleUtilityBar({ activeView, organizationId, onOpen }: Consol
 }
 
 /** Right-side utility drawer for operation and notification status without expanding primary navigation. */
-export function ConsoleUtilityDrawer({ organizationId, view, onClose }: ConsoleUtilityDrawerProps) {
+export function ConsoleUtilityDrawer({ organizationId, utilityDataEnabled = true, view, onClose }: ConsoleUtilityDrawerProps) {
   if (!view) return null;
   const title = view === "operations" ? "任务" : "通知";
 
@@ -172,23 +174,23 @@ export function ConsoleUtilityDrawer({ organizationId, view, onClose }: ConsoleU
           </button>
         </header>
         {view === "operations" ? (
-          <OperationsDrawer organizationId={organizationId} />
+          <OperationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
         ) : (
-          <NotificationsDrawer organizationId={organizationId} />
+          <NotificationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
         )}
       </aside>
     </div>
   );
 }
 
-function OperationsDrawer({ organizationId }: { organizationId?: string }) {
+function OperationsDrawer({ organizationId, utilityDataEnabled }: { organizationId?: string; utilityDataEnabled: boolean }) {
   const [operations, setOperations] = useState<OperationListItem[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!organizationId) return;
+    if (!organizationId || !utilityDataEnabled) return;
     const scopedOrganizationId = organizationId;
     let cancelled = false;
     async function loadOperations() {
@@ -214,7 +216,7 @@ function OperationsDrawer({ organizationId }: { organizationId?: string }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [organizationId]);
+  }, [organizationId, utilityDataEnabled]);
 
   const selectedOperation = operations.find((operation) => operation.id === selectedId) ?? operations[0] ?? null;
   const summary = useMemo(() => ({
@@ -225,6 +227,9 @@ function OperationsDrawer({ organizationId }: { organizationId?: string }) {
 
   if (!organizationId) {
     return <p className="utilityDrawerEmpty">请选择组织后查看任务。</p>;
+  }
+  if (!utilityDataEnabled) {
+    return <p className="utilityDrawerEmpty">本地调试模式不读取远端任务。</p>;
   }
 
   return (
@@ -266,14 +271,14 @@ function OperationsDrawer({ organizationId }: { organizationId?: string }) {
   );
 }
 
-function NotificationsDrawer({ organizationId }: { organizationId?: string }) {
+function NotificationsDrawer({ organizationId, utilityDataEnabled }: { organizationId?: string; utilityDataEnabled: boolean }) {
   const [notifications, setNotifications] = useState<NotificationThread[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!organizationId) return;
+    if (!organizationId || !utilityDataEnabled) return;
     const scopedOrganizationId = organizationId;
     let cancelled = false;
     async function loadNotifications() {
@@ -299,7 +304,7 @@ function NotificationsDrawer({ organizationId }: { organizationId?: string }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [organizationId]);
+  }, [organizationId, utilityDataEnabled]);
 
   const selectedNotification = notifications.find((notification) => notification.id === selectedId) ?? notifications[0] ?? null;
   const summary = useMemo(() => ({
@@ -324,6 +329,9 @@ function NotificationsDrawer({ organizationId }: { organizationId?: string }) {
 
   if (!organizationId) {
     return <p className="utilityDrawerEmpty">请选择组织后查看通知。</p>;
+  }
+  if (!utilityDataEnabled) {
+    return <p className="utilityDrawerEmpty">本地调试模式不读取远端通知。</p>;
   }
 
   return (

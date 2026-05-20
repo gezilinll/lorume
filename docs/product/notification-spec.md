@@ -141,8 +141,8 @@ runtime:collector:${deviceId}:${snapshotType}:failed
 - Device 离线。
 - Device 恢复在线。
 - Collector 版本过旧。
-- Inventory 采集延迟或失败。
-- Work-state 采集延迟或失败。
+- Inventory 采集失败。
+- Work-state 采集失败。
 - 数据同步完成。
 - 数据同步失败。
 - Runtime 探测异常。
@@ -154,6 +154,8 @@ runtime:collector:${deviceId}:${snapshotType}:failed
 - 组织 owner / admin，限采集失败、持续失败或 critical 场景。
 
 普通数据同步完成默认只进入 in-app，不主动发 email。人工触发的刷新、迁移或下发完成可以发 email 给申请人。
+
+最近同步时间过旧可以作为排查线索进入诊断视图或后续运维报告，但不单独生成“采集过期”通知；只有采集失败、adapter 异常、payload 结构不可用或持续失败升级才进入通知模型。
 
 Collector 上报失败进入统一通知模型：
 

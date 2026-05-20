@@ -7,9 +7,9 @@ import {
   type ManagedAgentStatus,
   type ManagedRuntimeAgent,
   type RuntimeDevice,
-  type RuntimeHealthStatus,
   type RuntimeInventorySnapshot,
   type RuntimeKind,
+  type RuntimeObjectPath,
 } from "./runtime-normalize";
 import type {
   RuntimeObservationCapability,
@@ -21,6 +21,7 @@ import {
   type RuntimeWorkItem,
   type RuntimeWorkStateSnapshot,
 } from "./runtime-work-state";
+import type { DeviceCollectionHealth } from "./runtime-collection-health";
 
 /** Runtime kind labels used by the Runtime Fleet page. */
 export const runtimeKindLabels: Record<RuntimeKind, string> = {
@@ -29,7 +30,7 @@ export const runtimeKindLabels: Record<RuntimeKind, string> = {
   claude_code: "Claude Code",
   slock: "Slock",
   multica: "Multica",
-  unknown: "Unknown",
+  unknown: "未识别",
 };
 
 /** Channel labels used when an Agent is exposed through a chat or platform surface. */
@@ -43,36 +44,41 @@ export const channelKindLabels: Record<ChannelKind, string> = {
   other: "Other",
 };
 
-/** Runtime health labels for filters, badges, and summaries. */
-export const runtimeHealthLabels: Record<RuntimeHealthStatus, string> = {
-  online: "在线",
-  degraded: "降级",
-  offline: "离线",
-  unknown: "未知",
-};
-
 /** Runtime operating state derived by Lorume from linked Agent work evidence. */
 export type RuntimeOperatingStatus = "working" | "idle" | "offline" | "unknown";
+
+/** User-facing object status after availability, work evidence, and collection diagnostics are folded together. */
+export type RuntimeFleetObjectStatus = "working" | "idle" | "offline" | "exception";
+
+/** Coarse observation time range for Runtime Fleet filtering. */
+export type RuntimeFleetLastSeenRange = "all" | "24h" | "7d" | "30d";
 
 /** Runtime operating labels for Runtime Fleet. */
 export const runtimeOperatingStatusLabels: Record<RuntimeOperatingStatus, string> = {
   working: "工作中",
   idle: "空闲",
   offline: "离线",
-  unknown: "未知",
+  unknown: "异常",
+};
+
+/** Compact Runtime Fleet status labels. These are the only status labels shown for assets. */
+export const runtimeFleetObjectStatusLabels: Record<RuntimeFleetObjectStatus, string> = {
+  working: "工作中",
+  idle: "空闲",
+  offline: "离线",
+  exception: "异常",
 };
 
 /** Agent status labels after source-specific states are normalized. */
 export const managedAgentStatusLabels: Record<ManagedAgentStatus, string> = {
-  active: "活跃",
+  active: "工作中",
   idle: "空闲",
-  inactive: "停用",
-  degraded: "降级",
-  unknown: "未知",
+  inactive: "离线",
+  degraded: "异常",
+  unknown: "异常",
 };
 
 const unsupportedStatLabel = "不支持采集";
-const runtimeHealthOptionOrder: RuntimeHealthStatus[] = ["online", "degraded", "offline", "unknown"];
 
 /** Runtime kind option shown by Runtime Fleet. */
 export interface RuntimeFleetRuntimeKindOption {
@@ -82,17 +88,9 @@ export interface RuntimeFleetRuntimeKindOption {
   label: string;
 }
 
-/** Runtime availability option shown by Runtime Fleet. */
-export interface RuntimeFleetHealthOption {
-  /** Filter value. */
-  value: RuntimeHealthStatus;
-  /** Human-readable label. */
-  label: string;
-}
-
 /** Format runtime timestamps for Chinese-first UI without leaking raw UTC ISO strings. */
 export function formatRuntimeTimestamp(value?: string): string {
-  if (!value) return "未知";
+  if (!value) return "未上报";
   const timestamp = new Date(value);
   if (Number.isNaN(timestamp.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", {
@@ -126,14 +124,6 @@ export function listRuntimeFleetRuntimeKindOptions(snapshot: RuntimeInventorySna
   return RUNTIME_KINDS
     .filter((kind) => kinds.has(kind))
     .map((kind) => ({ value: kind, label: runtimeKindLabels[kind] }));
-}
-
-/** List runtime availability states actually present in the current Runtime Fleet snapshot. */
-export function listRuntimeFleetHealthOptions(snapshot: RuntimeInventorySnapshot): RuntimeFleetHealthOption[] {
-  const statuses = new Set(snapshot.runtimes.map((runtime) => runtime.status));
-  return runtimeHealthOptionOrder
-    .filter((status) => statuses.has(status))
-    .map((status) => ({ value: status, label: runtimeHealthLabels[status] }));
 }
 
 /** Derive a runtime's coarse operating state without exposing source-platform raw states. */
@@ -201,16 +191,16 @@ export interface RuntimeFleetFilters {
   query?: string;
   /** Runtime or platform kind to keep. */
   runtimeKind?: RuntimeKind | "all";
-  /** Runtime health state to keep. */
-  runtimeStatus?: RuntimeHealthStatus | "all";
-  /** Agent activity state to keep. */
-  agentStatus?: ManagedAgentStatus | "all";
+  /** Optional last-observed range for device/runtime/agent rows. */
+  lastSeenRange?: RuntimeFleetLastSeenRange;
 }
 
 /** Filtered device inventory shown by Runtime Fleet. */
 export interface RuntimeFleetResult {
   /** Device that produced the latest snapshot. */
   device: RuntimeDevice;
+  /** Devices represented by the active filters. */
+  devices: RuntimeDevice[];
   /** Runtimes matching the active filters. */
   runtimes: LorumeRuntime[];
   /** Agents matching the active filters. */
@@ -223,12 +213,8 @@ export interface RuntimeFleetSummary {
   devices: number;
   /** Total runtime count represented by the snapshot. */
   runtimes: number;
-  /** Online runtime count represented by the snapshot. */
-  onlineRuntimes: number;
   /** Total managed agent count represented by the snapshot. */
   agents: number;
-  /** Runtime or agent health issues represented by the snapshot. */
-  issues: number;
 }
 
 /** Detail panel model for device, runtime, or agent selections. */
@@ -247,7 +233,7 @@ interface RuntimeFleetDetailBase {
   /** Detail subtitle. */
   subtitle: string;
   /** Normalized status used for badge styling and automation. */
-  status: RuntimeHealthStatus | ManagedAgentStatus | RuntimeOperatingStatus;
+  status: RuntimeFleetObjectStatus;
   /** Human-readable status label. */
   statusLabel: string;
   /** Sectioned details for display. */
@@ -279,22 +265,69 @@ export type RuntimeFleetDetail =
 /** Summarize one device snapshot for Runtime Fleet cards. */
 export function summarizeRuntimeFleet(
   snapshot: RuntimeInventorySnapshot,
-  workState?: RuntimeWorkStateSnapshot | null,
+  _workState?: RuntimeWorkStateSnapshot | null,
 ): RuntimeFleetSummary {
-  const runtimeIssues = snapshot.runtimes.filter((runtime) =>
-    ["degraded", "offline", "unknown"].includes(runtime.status),
-  ).length;
-  const agentIssues = snapshot.agents.filter((agent) =>
-    ["inactive", "degraded", "unknown"].includes(deriveManagedAgentDisplayStatus(snapshot, agent, workState)),
-  ).length;
-
   return {
-    devices: snapshot.device ? 1 : 0,
+    devices: runtimeFleetDevices(snapshot).length,
     runtimes: snapshot.runtimes.length,
-    onlineRuntimes: snapshot.runtimes.filter((runtime) => runtime.status === "online").length,
     agents: snapshot.agents.length,
-    issues: runtimeIssues + agentIssues,
   };
+}
+
+/** Fold collection health and normalized inventory into one device status for Runtime Fleet. */
+export function deriveDeviceFleetStatus(
+  _snapshot: RuntimeInventorySnapshot,
+  device: RuntimeDevice,
+  collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
+): RuntimeFleetObjectStatus {
+  if (collectionHealthByDeviceId?.get(device.id)?.status === "failed") return "exception";
+  if (device.status === "offline") return "offline";
+  if (device.status === "degraded" || device.status === "unknown") return "exception";
+  return "working";
+}
+
+/** Fold runtime availability, work evidence, and collection diagnostics into one Runtime status. */
+export function deriveRuntimeFleetStatus(
+  snapshot: RuntimeInventorySnapshot,
+  runtime: LorumeRuntime,
+  workState?: RuntimeWorkStateSnapshot | null,
+  collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
+): RuntimeFleetObjectStatus {
+  const device = deviceForRuntime(snapshot, runtime);
+  if (device) {
+    const deviceStatus = deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
+    if (deviceStatus === "exception" || deviceStatus === "offline") return deviceStatus;
+  }
+  if (runtime.status === "offline") return "offline";
+  if (runtime.status === "degraded" || runtime.status === "unknown") return "exception";
+
+  const operatingStatus = deriveRuntimeOperatingStatus(snapshot, runtime, workState);
+  if (operatingStatus === "working" || operatingStatus === "idle" || operatingStatus === "offline") {
+    return operatingStatus;
+  }
+  return "exception";
+}
+
+/** Fold Agent inventory state, work evidence, and parent object health into one Agent status. */
+export function deriveAgentFleetStatus(
+  snapshot: RuntimeInventorySnapshot,
+  agent: ManagedRuntimeAgent,
+  workState?: RuntimeWorkStateSnapshot | null,
+  collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
+): RuntimeFleetObjectStatus {
+  const runtime = snapshot.runtimes.find((candidate) => candidate.id === agent.runtimeId);
+  if (runtime) {
+    const runtimeStatus = deriveRuntimeFleetStatus(snapshot, runtime, workState, collectionHealthByDeviceId);
+    if (runtimeStatus === "exception" || runtimeStatus === "offline") return runtimeStatus;
+  } else {
+    return "exception";
+  }
+
+  const displayStatus = deriveManagedAgentDisplayStatus(snapshot, agent, workState);
+  if (displayStatus === "active") return "working";
+  if (displayStatus === "idle") return "idle";
+  if (displayStatus === "inactive") return "offline";
+  return "exception";
 }
 
 /** Filter a runtime snapshot while preserving the current device context. */
@@ -306,6 +339,7 @@ export function filterRuntimeFleet(
 
   let runtimes = snapshot.runtimes;
   let agents = snapshot.agents;
+  let devices = runtimeFleetDevices(snapshot);
 
   if (filters.runtimeKind && filters.runtimeKind !== "all") {
     runtimes = runtimes.filter((runtime) => runtime.kind === filters.runtimeKind);
@@ -313,17 +347,18 @@ export function filterRuntimeFleet(
     agents = agents.filter((agent) => runtimeIds.has(agent.runtimeId));
   }
 
-  if (filters.runtimeStatus && filters.runtimeStatus !== "all") {
-    runtimes = runtimes.filter((runtime) => runtime.status === filters.runtimeStatus);
+  if (filters.lastSeenRange && filters.lastSeenRange !== "all") {
+    const lastSeenRange = filters.lastSeenRange;
+    runtimes = runtimes.filter((runtime) => matchesLastSeenRange(runtime.lastSeenAt, lastSeenRange));
     const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
-    agents = agents.filter((agent) => runtimeIds.has(agent.runtimeId));
-  }
-
-  if (filters.agentStatus && filters.agentStatus !== "all") {
-    agents = agents.filter((agent) => agent.status === filters.agentStatus);
+    agents = agents.filter((agent) =>
+      runtimeIds.has(agent.runtimeId) || matchesLastSeenRange(agent.lastSeenAt, lastSeenRange),
+    );
   }
 
   if (query) {
+    const matchingDevices = devices.filter((device) => deviceMatches(device, query));
+    const matchingDeviceIds = new Set(matchingDevices.map((device) => device.id));
     const matchingRuntimes = runtimes.filter((runtime) => runtimeMatches(runtime, query));
     const matchingRuntimeIds = new Set(matchingRuntimes.map((runtime) => runtime.id));
     const matchingAgents = agents.filter(
@@ -331,12 +366,29 @@ export function filterRuntimeFleet(
     );
     const agentRuntimeIds = new Set(matchingAgents.map((agent) => agent.runtimeId));
 
-    runtimes = matchingRuntimes.filter((runtime) => agentRuntimeIds.has(runtime.id));
+    runtimes = runtimes.filter((runtime) =>
+      matchingDeviceIds.has(runtime.deviceId) ||
+      matchingRuntimeIds.has(runtime.id) ||
+      agentRuntimeIds.has(runtime.id),
+    );
     agents = matchingAgents;
+    if (matchingDeviceIds.size > 0) {
+      const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
+      agents = snapshot.agents.filter((agent) => runtimeIds.has(agent.runtimeId) || agentMatches(agent, query));
+    }
   }
+
+  const visibleDeviceIds = new Set([
+    ...runtimes.map((runtime) => runtime.deviceId),
+    ...agents
+      .map((agent) => snapshot.runtimes.find((runtime) => runtime.id === agent.runtimeId)?.deviceId)
+      .filter((deviceId): deviceId is string => Boolean(deviceId)),
+  ]);
+  devices = devices.filter((device) => visibleDeviceIds.size === 0 ? false : visibleDeviceIds.has(device.id));
 
   return {
     device: snapshot.device,
+    devices,
     runtimes,
     agents,
   };
@@ -348,36 +400,52 @@ export function getRuntimeFleetDetail(
   kind: RuntimeFleetDetail["kind"],
   id: string,
   workState?: RuntimeWorkStateSnapshot | null,
+  collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
 ): RuntimeFleetDetail | null {
-  if (kind === "device" && snapshot.device.id === id) {
+  const devices = runtimeFleetDevices(snapshot);
+
+  if (kind === "device") {
+    const device = devices.find((candidate) => candidate.id === id);
+    if (!device) return null;
+    const runtimes = snapshot.runtimes.filter((runtime) => runtime.deviceId === device.id);
+    const status = deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
     return {
       kind: "device",
-      id: snapshot.device.id,
-      title: snapshot.device.name,
-      subtitle: `最近同步 ${formatRuntimeTimestamp(snapshot.device.lastSeenAt ?? snapshot.observedAt)}`,
-      status: snapshot.device.status,
-      statusLabel: runtimeHealthLabels[snapshot.device.status],
+      id: device.id,
+      title: device.name,
+      subtitle: `最近同步 ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
+      status,
+      statusLabel: runtimeFleetObjectStatusLabels[status],
       sections: [
         {
-          title: "身份信息",
+          title: "基础信息",
           items: [
-            `Device ID: ${snapshot.device.id}`,
-            `Hostname: ${snapshot.device.hostname}`,
-            `OS: ${snapshot.device.os}`,
-            `Arch: ${snapshot.device.architecture ?? "unknown"}`,
+            `Lorume ID: ${device.id}`,
+            `Hostname: ${device.hostname}`,
+            `OS: ${device.os ?? "未上报"}`,
+            `Arch: ${device.architecture ?? "未上报"}`,
+            `用户: ${device.user?.username ?? "未上报"}`,
           ],
         },
         {
-          title: "连接状态",
+          title: "网络",
           items: [
-            "连接方式: Collector",
-            `设备状态: ${runtimeHealthLabels[snapshot.device.status]}`,
+            `局域网 IP: ${device.network?.localIps?.join(", ") || "未上报"}`,
+            `公网 IP: ${device.network?.publicIp || "未上报"}`,
+          ],
+        },
+        {
+          title: "运行资产",
+          items: [
+            `状态: ${runtimeFleetObjectStatusLabels[status]}`,
             `Collector: ${snapshot.collector.version}`,
+            `Runtime 数量: ${runtimes.length}`,
+            `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
           ],
         },
         {
           title: "已注册 Runtime",
-          items: registeredRuntimeLabels(snapshot.runtimes),
+          items: registeredRuntimeLabels(runtimes),
         },
       ],
     };
@@ -387,31 +455,34 @@ export function getRuntimeFleetDetail(
     const runtime = snapshot.runtimes.find((candidate) => candidate.id === id);
     if (!runtime) return null;
     const agents = snapshot.agents.filter((agent) => agent.runtimeId === runtime.id);
-    const operatingStatus = deriveRuntimeOperatingStatus(snapshot, runtime, workState);
+    const status = deriveRuntimeFleetStatus(snapshot, runtime, workState, collectionHealthByDeviceId);
+    const device = deviceForRuntime(snapshot, runtime);
 
     return {
       kind: "runtime",
       id: runtime.id,
       title: runtime.name,
-      subtitle: `${runtimeKindLabels[runtime.kind]} · ${runtimeOperatingStatusLabels[operatingStatus]}`,
+      subtitle: `${runtimeKindLabels[runtime.kind]} · ${runtimeFleetObjectStatusLabels[status]}`,
       runtimeKindLabel: runtimeKindLabels[runtime.kind],
-      status: operatingStatus,
-      statusLabel: runtimeOperatingStatusLabels[operatingStatus],
+      status,
+      statusLabel: runtimeFleetObjectStatusLabels[status],
       sections: [
         {
-          title: "身份信息",
+          title: "基础信息",
           items: [
-            `Runtime ID: ${runtime.id}`,
-            `Runtime: ${runtimeKindLabels[runtime.kind]}`,
-            `Version: ${runtime.version ?? "unknown"}`,
-            `可用性: ${runtimeHealthLabels[runtime.status]}`,
-            `运行状态: ${runtimeOperatingStatusLabels[operatingStatus]}`,
+            `Lorume ID: ${runtime.id}`,
+            `Version: ${runtime.version ?? "未上报"}`,
+            `状态: ${runtimeFleetObjectStatusLabels[status]}`,
             `最近同步: ${formatRuntimeTimestamp(runtime.lastSeenAt)}`,
           ],
         },
         {
           title: "归属关系",
-          items: [`所属设备: ${snapshot.device.name}`, `Agent 数量: ${agents.length}`],
+          items: [`所属设备: ${device?.name ?? runtime.deviceId}`, `Agent 数量: ${agents.length}`],
+        },
+        {
+          title: "本地路径",
+          items: localPathItems(runtime.paths),
         },
       ],
     };
@@ -421,35 +492,39 @@ export function getRuntimeFleetDetail(
     const agent = snapshot.agents.find((candidate) => candidate.id === id);
     if (!agent) return null;
     const runtime = snapshot.runtimes.find((candidate) => candidate.id === agent.runtimeId);
-    const displayStatus = deriveManagedAgentDisplayStatus(snapshot, agent, workState);
+    const status = deriveAgentFleetStatus(snapshot, agent, workState, collectionHealthByDeviceId);
+    const device = runtime ? deviceForRuntime(snapshot, runtime) : snapshot.device;
 
     return {
       kind: "agent",
       id: agent.id,
       title: agent.name,
-      subtitle: `${sourceLabel(agent.origin)} · ${managedAgentStatusLabels[displayStatus]}`,
-      deviceId: snapshot.device.id,
+      subtitle: `${sourceLabel(agent.origin)} · ${runtimeFleetObjectStatusLabels[status]}`,
+      deviceId: device?.id ?? snapshot.device.id,
       runtimeName: runtime?.name ?? agent.runtimeId,
       runtimeId: agent.runtimeId,
-      status: displayStatus,
-      statusLabel: managedAgentStatusLabels[displayStatus],
+      status,
+      statusLabel: runtimeFleetObjectStatusLabels[status],
       sections: [
         {
-          title: "身份信息",
+          title: "基础信息",
           items: [
-            `Agent ID: ${agent.id}`,
-            `Runtime: ${sourceLabel(agent.origin)}`,
-            `状态: ${managedAgentStatusLabels[displayStatus]}`,
+            `Lorume ID: ${agent.id}`,
+            `状态: ${runtimeFleetObjectStatusLabels[status]}`,
             `最近同步: ${formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtime, snapshot))}`,
           ],
         },
         {
           title: "归属关系",
-          items: [`所属 Runtime: ${runtime?.name ?? agent.runtimeId}`, `所属设备: ${snapshot.device.name}`],
+          items: [`所属 Runtime: ${runtime?.name ?? agent.runtimeId}`, `所属设备: ${device?.name ?? runtime?.deviceId ?? snapshot.device.name}`],
         },
         {
           title: "关联渠道",
           items: labelsForAgent(agent),
+        },
+        {
+          title: "本地路径",
+          items: localPathItems(agent.paths),
         },
         {
           title: "运行统计",
@@ -464,6 +539,26 @@ export function getRuntimeFleetDetail(
 
 function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function runtimeFleetDevices(snapshot: RuntimeInventorySnapshot): RuntimeDevice[] {
+  return Array.isArray(snapshot.devices) ? snapshot.devices : [snapshot.device];
+}
+
+function deviceForRuntime(snapshot: RuntimeInventorySnapshot, runtime: LorumeRuntime): RuntimeDevice | undefined {
+  return runtimeFleetDevices(snapshot).find((device) => device.id === runtime.deviceId);
+}
+
+function matchesLastSeenRange(value: string | undefined, range: RuntimeFleetLastSeenRange): boolean {
+  const timestamp = Date.parse(value ?? "");
+  if (!Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  const rangeMs = range === "24h"
+    ? 24 * 60 * 60 * 1000
+    : range === "7d"
+      ? 7 * 24 * 60 * 60 * 1000
+      : 30 * 24 * 60 * 60 * 1000;
+  return timestamp >= now - rangeMs && timestamp <= now + 60 * 1000;
 }
 
 function isWorkItemLinkedToRuntime(
@@ -624,6 +719,22 @@ function includesQuery(values: Array<string | undefined>, query: string): boolea
   return values.some((value) => value?.toLowerCase().includes(query));
 }
 
+function deviceMatches(device: RuntimeDevice, query: string): boolean {
+  return includesQuery(
+    [
+      device.id,
+      device.name,
+      device.hostname,
+      device.os,
+      device.architecture,
+      device.user?.username,
+      device.network?.publicIp,
+      ...(device.network?.localIps ?? []),
+    ],
+    query,
+  );
+}
+
 function runtimeMatches(runtime: LorumeRuntime, query: string): boolean {
   return includesQuery(
     [
@@ -632,6 +743,7 @@ function runtimeMatches(runtime: LorumeRuntime, query: string): boolean {
       runtimeKindLabels[runtime.kind],
       runtime.version,
       runtime.endpoint,
+      ...localPathItems(runtime.paths),
       ...runtime.capabilities,
       ...runtime.sourceRefs.flatMap((ref) => [ref.source, ref.externalId, ref.label, ref.url]),
     ],
@@ -646,6 +758,7 @@ function agentMatches(agent: ManagedRuntimeAgent, query: string): boolean {
       agent.origin,
       sourceLabel(agent.origin),
       agent.status,
+      ...localPathItems(agent.paths),
       ...agent.channelBindings.flatMap((binding) => [
         binding.kind,
         channelKindLabels[binding.kind],
@@ -688,6 +801,12 @@ function runtimeStatisticsItems(stats?: RuntimeActivityStats & { lastError?: str
     `最大并发: ${statValue(stats?.maxConcurrency)}`,
     stats?.lastError ? `最近错误: ${stats.lastError}` : "",
   ].filter(Boolean);
+}
+
+function localPathItems(paths?: RuntimeObjectPath[]): string[] {
+  return (paths ?? [])
+    .filter((entry) => entry.path)
+    .map((entry) => `${entry.label}: ${entry.path}`);
 }
 
 function statValue(value?: number): string {

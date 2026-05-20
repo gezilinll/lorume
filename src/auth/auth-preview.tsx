@@ -7,8 +7,7 @@ export function AuthOperationsPreview() {
   return (
     <section className="auth-preview" aria-label="运营概览">
       <div className="auth-preview__header">
-        <span className="auth-preview__prompt">&gt;_ 运营概览</span>
-        <span>UTC+8</span>
+        <span className="auth-preview__prompt">运营概览</span>
       </div>
       <AuthPreviewRow
         command="$ runtimes list --all"

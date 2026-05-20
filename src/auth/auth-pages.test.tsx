@@ -15,18 +15,52 @@ afterEach(() => {
 describe("auth pages", () => {
   it("guards the console behind email-code login", async () => {
     window.history.pushState({}, "", "/runtime");
+    const requests: string[] = [];
     globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();
+      requests.push(url);
       if (url.endsWith("/api/me")) {
         return jsonResponse({ error: "unauthorized" }, 401);
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "运行资产" })).not.toBeInTheDocument();
+    expect(requests).toEqual(["/api/me"]);
+  });
+
+  it("keeps agent mode local and still renders the complete Console shell", () => {
+    window.history.pushState({}, "", "/runtime");
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL) => jsonResponse({ error: "unexpected request" }, 500));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    render(<App runtimeMode="agent" />);
+
+    expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换组织" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开个人入口" })).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalledWith("/api/me", expect.anything());
+  });
+
+  it("does not poll authenticated utility counts in agent mode", async () => {
+    window.history.pushState({}, "", "/runtime");
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL) => jsonResponse({ error: "unexpected request" }, 500));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    render(<App runtimeMode="agent" />);
+
+    await waitFor(() => {
+      expect(fetchSpy.mock.calls.some(([input]) => input.toString().includes("/api/runtime-fleet"))).toBe(true);
+    });
+
+    const requestedUrls = fetchSpy.mock.calls.map(([input]) => input.toString());
+    expect(requestedUrls).not.toEqual(expect.arrayContaining([
+      expect.stringContaining("/api/operations"),
+      expect.stringContaining("/api/notifications"),
+    ]));
   });
 
   it("does not surface anonymous session probe errors on the login page", async () => {
@@ -51,7 +85,7 @@ describe("auth pages", () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();
       if (url.endsWith("/api/me")) {
-        return jsonResponse({ error: "backend unavailable" }, 503);
+        return jsonResponse({ error: "backend_unavailable", message: "后端暂不可用，请稍后重试。" }, 503);
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
@@ -59,7 +93,7 @@ describe("auth pages", () => {
     render(<App authMode="required" />);
 
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("backend unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent("后端暂不可用，请稍后重试。");
   });
 
   it("requests an email code and signs in with the verification code", async () => {
@@ -97,6 +131,49 @@ describe("auth pages", () => {
       url: "/api/auth/login",
       body: { code: "246810", email: "zhangliang@gaoding.com" },
     });
+  });
+
+  it("maps auth error codes to readable verification messages", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/login");
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.endsWith("/api/me")) return jsonResponse({ error: "unauthorized" }, 401);
+      if (url.endsWith("/api/auth/email-code")) return jsonResponse({ ok: true, email: "zhangliang@gaoding.com" }, 202);
+      if (url.endsWith("/api/auth/login")) return jsonResponse({ error: "invalid_or_expired_code" }, 401);
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App authMode="required" />);
+
+    await user.type(await screen.findByLabelText("邮箱"), "zhangliang@gaoding.com");
+    await user.click(screen.getByRole("button", { name: /发送验证码/ }));
+    await user.type(await screen.findByLabelText("验证码"), "12321");
+    await user.click(screen.getByRole("button", { name: "进入控制台" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("验证码无效或已过期，请重新获取验证码。");
+    expect(screen.queryByText("invalid_or_expired_code")).not.toBeInTheDocument();
+  });
+
+  it("maps login service gateway failures to a readable message", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/login");
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.endsWith("/api/me")) return jsonResponse({ error: "unauthorized" }, 401);
+      if (url.endsWith("/api/auth/email-code")) {
+        return new Response("", { status: 502, statusText: "Bad Gateway" });
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App authMode="required" />);
+
+    await user.type(await screen.findByLabelText("邮箱"), "zhangliang@gaoding.com");
+    await user.click(screen.getByRole("button", { name: /发送验证码/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("登录服务暂时不可用，请稍后重试。");
+    expect(screen.queryByText("Bad Gateway")).not.toBeInTheDocument();
   });
 
   it("asks a signed-in user without organizations to create one", async () => {
@@ -164,7 +241,8 @@ describe("auth pages", () => {
     render(<App authMode="required" />);
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "退出登录" }));
+    await user.click(screen.getByRole("button", { name: "打开个人入口" }));
+    await user.click(screen.getByRole("menuitem", { name: "退出登录" }));
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();

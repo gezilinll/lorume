@@ -213,24 +213,31 @@ Multica 特别规则：
 
 ## 设计规则
 
-- Adapter 可以选择不同采集策略，但必须输出 Lorume 统一模型。
+- Adapter 可以选择不同采集策略，但必须归属 `lorume` CLI 内部实现，并输出 Lorume 统一模型。collector / daemon 只能调用 `lorume collect work-state --json`，不能直接读取第三方私有目录、内部 token、内部 API 或平台原始字段。
 - WorkItem 状态和 Execution 状态必须分开：看板 `in_progress` 代表 Agent 正在承接工作，但不代表已经有一条 `RuntimeExecution.running` 记录。
 - OpenClaw 先作为 execution/session 强来源；DingTalk message context 只有被 task、task origin、requester session 或 trajectory prompt 关联时才作为 message-backed work item 来源。
 - Multica 作为 work item + execution 的强来源。
-- Slock 作为 task board 强来源，优先使用本地 agent token + internal API；execution state 需要单独方案。
+- Slock 作为 task board 强来源，优先由 `lorume` CLI adapter 在授权上下文内读取本地 agent context 并调用稳定 task-board API；execution state 需要单独方案。
 - 网络 proxy 可以作为增强策略，但当前不默认要求 TLS 明文拦截；优先使用平台 API/CLI 和低侵入 observer。
 
 ## Collector 落地规则
 
-`scripts/lorume-device-collector.mjs --work-state-once` 必须是 live-first。它不再生成内置 work-state fixture，也不允许在探测失败时伪造工作项、会话或执行态。
+`scripts/lorume-device-collector.mjs --work-state-once` 必须是 live-first。它不再生成内置 work-state fixture，也不允许在探测失败时伪造工作项、会话或执行态。设备侧只安装 Lorume device package，collector 必须通过 `lorume collect work-state --json` 获取工作态。
 
 Collector 常驻模式和控制面 `inventory.refresh` 命令也必须刷新 work-state。`--once` 只适合一次性 inventory smoke；正式 daemon 启动、周期刷新和远程刷新都要同时上报 `POST /api/device-snapshots` 与 `POST /api/runtime-work-state-snapshots`，避免 Runtime Fleet 已更新但 Runs 仍停留在旧工作态。
 
+CLI Adapter 实现：
+
+- OpenClaw：读取 `openclaw health --json --timeout 5000`、`openclaw status --json --timeout 5000`、`openclaw tasks list --json`，并在 `lorume` CLI adapter 边界内读取 OpenClaw 已公开或已约定的本地状态摘要。有 message id、DingTalk requester session、task origin 或 trajectory prompt 关联时生成 `RuntimeWorkItem`、`RuntimeConversation` 和 `RuntimeExecution`；无关联的裸 execution 和未关联入站消息只保留为执行或会话证据，不进入 Runs 工作项。OpenClaw `health/status/tasks` 输出可能较大，`lorume` CLI 必须用受控的大 buffer 读取 JSON，避免 stdout 截断后误报 `failed or returned non-JSON`。OpenClaw CLI 可能是 `#!/usr/bin/env node` shim，CLI 的 probe 环境必须把 shim 所在目录、当前 Node 安装目录和常见用户 bin 目录加入 `PATH`，否则 launchd / ssh 的最小环境会导致 `env: node: No such file or directory`。
+- Multica：读取 `multica runtime list --output json`、`multica agent list --output json`、`multica issue list --output json`、`multica agent tasks <agent-id> --output json`。issue 生成 `RuntimeWorkItem`，agent task 生成 `RuntimeExecution`，`chat_session_id` 生成 `RuntimeConversation`。
+- Slock：优先使用 `slockServerUrl` / `SLOCK_SERVER_URL`，未配置时默认使用 `https://api.slock.ai`，并由 `lorume` CLI adapter 在授权上下文内读取本地 Slock agent context；先从 `/server` 自动发现 joined channel，再用 `tasks?channel=#频道名` 拉 task board。如用户显式配置 `slockTaskChannels`，则只采集配置范围。task-board internal API 遇到临时 5xx、网络抖动或超时时做小次数重试；重试成功不记录 channel probe warning；同 channel 被其他 agent context 成功采集时不保留失败 warning。失败后再尝试本机 `slock task list` CLI。仅有 Slock workspace 目录只能证明本机存在 Slock agent workspace，不能证明 task board、会话或执行态。
+
 Collector 实现：
 
-- OpenClaw：读取 `openclaw health --json --timeout 5000`、`openclaw status --json --timeout 5000`、`openclaw tasks list --json`，并读取 `~/.openclaw/agents/*/sessions/dingtalk-state/messages.context*.json`、`targets.directory*.json` 与 `*.trajectory.jsonl`。有 message id、DingTalk requester session、task origin 或 trajectory prompt 关联时生成 `RuntimeWorkItem`、`RuntimeConversation` 和 `RuntimeExecution`；无关联的裸 execution 和未关联入站消息只保留为执行或会话证据，不进入 Runs 工作项。OpenClaw `health/status/tasks` 输出可能较大，collector 必须用受控的大 buffer 读取 JSON，避免 stdout 截断后误报 `failed or returned non-JSON`。OpenClaw CLI 可能是 `#!/usr/bin/env node` shim，collector 的 probe 环境必须把 shim 所在目录、当前 Node 安装目录和常见用户 bin 目录加入 `PATH`，否则 launchd / ssh 的最小环境会导致 `env: node: No such file or directory`。
-- Multica：读取 `multica runtime list --output json`、`multica agent list --output json`、`multica issue list --output json`、`multica agent tasks <agent-id> --output json`。issue 生成 `RuntimeWorkItem`，agent task 生成 `RuntimeExecution`，`chat_session_id` 生成 `RuntimeConversation`。
-- Slock：优先使用 `slockServerUrl` / `SLOCK_SERVER_URL`，未配置时默认使用 `https://api.slock.ai`，并结合本地 `~/.slock/agents/<agent>/.slock/agent-token` 调 internal agent API；先从 `/server` 自动发现 joined channel，再用 `tasks?channel=#频道名` 拉 task board。如用户显式配置 `slockTaskChannels`，则只采集配置范围。task-board internal API 遇到临时 5xx、网络抖动或超时时做小次数重试；重试成功不记录 channel probe warning；同 channel 被其他 agent context 成功采集时不保留失败 warning。失败后再尝试本机 `slock task list` CLI。仅有 `~/.slock/agents` 目录只能证明本机存在 Slock agent workspace，不能证明 task board、会话或执行态。
+- `--once` 调用 `lorume collect inventory --json` 后上报 inventory snapshot。
+- `--work-state-once` 调用 `lorume collect work-state --json` 后上报 work-state snapshot。
+- 控制面 `inventory.refresh` 只负责编排两条 CLI 命令、POST snapshot、回传 command result 和记录用户可读错误。
+- 新增平台探测能力时，先扩展 `lorume` CLI adapter 与 CLI harness，再让 collector 消费 CLI 输出。
 
 失败规则：
 

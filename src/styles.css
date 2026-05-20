@@ -499,7 +499,7 @@ button {
   background-size: 40px 40px, 40px 40px, 100% 100%;
   display: grid;
   grid-template-columns: 232px 1fr;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: 1fr;
   min-height: 100vh;
   overflow: hidden;
   position: relative;
@@ -508,9 +508,16 @@ button {
 .sideNav {
   background: rgb(238 243 247 / 88%);
   border-right: var(--lorume-border-hairline);
+  display: flex;
+  flex-direction: column;
   grid-row: 1 / -1;
+  height: 100vh;
+  left: 0;
+  min-height: 100vh;
   padding: 20px 16px;
-  position: relative;
+  position: fixed;
+  top: 0;
+  width: 232px;
   z-index: 2;
 }
 
@@ -528,6 +535,69 @@ button {
 
 .brandMark .pixel-logo__wordmark {
   font-size: 24px;
+}
+
+.organizationSwitch {
+  align-items: center;
+  background: color-mix(in srgb, var(--lorume-color-paper) 72%, var(--lorume-color-bg));
+  border: var(--lorume-border-hairline);
+  border-radius: var(--lorume-radius-lg);
+  color: var(--lorume-color-ink);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  min-height: 52px;
+  margin-bottom: 18px;
+  padding: 8px 10px;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  width: 100%;
+}
+
+.organizationSwitch:hover {
+  background: var(--lorume-color-paper);
+  border-color: color-mix(in srgb, var(--lorume-color-action) 18%, var(--lorume-color-line));
+  box-shadow: var(--lorume-shadow-subtle);
+}
+
+.organizationAvatar,
+.profileAvatar {
+  align-items: center;
+  background: var(--lorume-color-ink);
+  border-radius: 12px;
+  color: #fff;
+  display: inline-flex;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 800;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.organizationCopy,
+.profileCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.organizationCopy span,
+.profileCopy span {
+  color: var(--lorume-color-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.organizationCopy strong,
+.profileCopy strong {
+  color: var(--lorume-color-ink);
+  display: block;
+  font-size: 14px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .navList {
@@ -586,24 +656,85 @@ button {
   display: grid;
   font-size: 12px;
   gap: 8px;
-  margin-top: 22px;
+  margin-top: auto;
   padding-top: 16px;
+  position: relative;
   word-break: break-all;
 }
 
-.navItemCompact {
-  height: 32px;
-  justify-content: center;
+.profileEntry {
+  align-items: center;
+  background: color-mix(in srgb, var(--lorume-color-paper) 70%, var(--lorume-color-bg));
+  border: var(--lorume-border-hairline);
+  border-radius: var(--lorume-radius-lg);
+  color: var(--lorume-color-ink);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.profileEntry:hover {
+  background: var(--lorume-color-paper);
+  border-color: color-mix(in srgb, var(--lorume-color-action) 18%, var(--lorume-color-line));
+  box-shadow: var(--lorume-shadow-subtle);
+}
+
+.profileAvatar {
+  background: var(--lorume-color-action);
+  box-shadow: var(--lorume-shadow-blue);
+}
+
+.profileMenu {
+  background: rgb(255 255 255 / 0.96);
+  border: var(--lorume-border-hairline);
+  border-radius: var(--lorume-radius-md);
+  bottom: 64px;
+  box-shadow: var(--lorume-shadow-float);
+  display: grid;
+  gap: 6px;
+  left: 0;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  z-index: 4;
+}
+
+.profileMenu p {
+  color: var(--lorume-color-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.profileMenu button {
+  background: var(--lorume-color-surface-soft);
+  border: 1px solid transparent;
+  border-radius: var(--lorume-radius-sm);
+  color: var(--lorume-color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 34px;
+  text-align: center;
+}
+
+.profileMenu button:hover {
+  background: color-mix(in srgb, var(--lorume-color-action) 8%, var(--lorume-color-surface-soft));
 }
 
 .workspace {
   align-content: start;
   display: grid;
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   gap: 16px;
   min-width: 0;
-  padding: 8px 24px 24px;
+  padding: 28px 24px 24px;
   position: relative;
   z-index: 2;
 }
@@ -674,6 +805,20 @@ h1 {
   margin: 6px 0 0;
 }
 
+.pageStatus {
+  border: var(--lorume-border-hairline);
+  border-radius: var(--lorume-radius-lg);
+  font-size: 13px;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.pageStatusError {
+  background: color-mix(in srgb, var(--lorume-color-red) 7%, var(--lorume-color-paper));
+  border-color: color-mix(in srgb, var(--lorume-color-red) 24%, var(--lorume-color-line));
+  color: var(--lorume-color-red);
+}
+
 .primaryButton {
   align-items: center;
   background: linear-gradient(135deg, var(--lorume-color-action), var(--lorume-color-action-bright));
@@ -707,10 +852,10 @@ h1 {
 }
 
 .refreshControl {
-  align-items: end;
+  align-items: stretch;
   display: grid;
   gap: 6px;
-  justify-items: end;
+  justify-items: stretch;
 }
 
 .refreshMessage {
@@ -718,8 +863,8 @@ h1 {
   font-size: 12px;
   line-height: 1.4;
   margin: 0;
-  max-width: 240px;
-  text-align: right;
+  max-width: 180px;
+  text-align: left;
 }
 
 .refresh-error {
@@ -749,7 +894,7 @@ h1 {
 }
 
 .runtimeToolbar {
-  grid-template-columns: minmax(260px, 1fr) repeat(2, minmax(150px, 190px));
+  grid-template-columns: minmax(260px, 1fr) repeat(2, minmax(140px, 190px));
 }
 
 .toolbarField {
@@ -817,6 +962,20 @@ h1 {
 .toolbarField input,
 .toolbarField select {
   height: 44px;
+}
+
+.searchBox input {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: auto;
+  padding: 0;
+}
+
+.searchBox input:focus {
+  border: 0;
+  box-shadow: none;
+  outline: 0;
 }
 
 .toolbarField select {
@@ -1106,78 +1265,6 @@ h1 {
 
 .metricpurple::before {
   background: color-mix(in srgb, var(--lorume-color-accent) 72%, var(--lorume-color-action));
-}
-
-.collectionHealthPanel {
-  background: var(--lorume-color-surface);
-  border: var(--lorume-border-hairline);
-  border-radius: var(--lorume-radius-lg);
-  box-shadow: var(--lorume-shadow-subtle);
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-}
-
-.collectionHealthSummary {
-  align-items: start;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.collectionHealthSummary h2 {
-  color: var(--lorume-color-ink);
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.2;
-  margin: 0 0 4px;
-}
-
-.collectionHealthSummary p {
-  color: var(--lorume-color-muted);
-  font-size: 13px;
-  margin: 0;
-}
-
-.collectionHealthChecks {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.collectionHealthCheck {
-  background: color-mix(in srgb, var(--lorume-color-surface) 82%, var(--lorume-color-bg));
-  border: var(--lorume-border-hairline);
-  border-radius: var(--lorume-radius-md);
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 10px;
-}
-
-.collectionHealthCheckHeader {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.collectionHealthCheck strong {
-  color: var(--lorume-color-ink);
-  font-size: 13px;
-}
-
-.collectionHealthCheck p,
-.collectionHealthCheck small {
-  color: var(--lorume-color-muted);
-  font-size: 12px;
-  line-height: 1.45;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.collectionHealthCheck .healthIssueText {
-  color: var(--lorume-color-orange);
 }
 
 .contentGrid {
@@ -1484,7 +1571,9 @@ h1 {
 .deviceSummary {
   align-items: center;
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-radius: 0;
   color: var(--lorume-color-ink);
   display: grid;
   gap: 12px;
@@ -1494,8 +1583,16 @@ h1 {
   width: 100%;
 }
 
-.deviceSummary:hover {
+.deviceSummary:hover,
+.deviceSummaryActive {
   background: color-mix(in srgb, var(--lorume-color-action) 4%, var(--lorume-color-surface));
+  border-left-color: var(--lorume-color-action);
+}
+
+.deviceSummary:focus-visible {
+  border-color: color-mix(in srgb, var(--lorume-color-action) 28%, var(--lorume-color-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lorume-color-action) 22%, transparent);
+  outline: 0;
 }
 
 .deviceSummary strong,
@@ -1589,6 +1686,20 @@ button.tableRow:hover,
   background: color-mix(in srgb, var(--lorume-color-action) 4%, var(--lorume-color-paper));
 }
 
+.assetDataRow {
+  border-left: 3px solid transparent;
+}
+
+.assetDataRow.tableRowActive {
+  background: color-mix(in srgb, var(--lorume-color-action) 5%, var(--lorume-color-paper));
+  border-left-color: var(--lorume-color-action);
+}
+
+.assetDataRow:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lorume-color-action) 24%, transparent);
+  outline: 0;
+}
+
 .assetHeader {
   background: color-mix(in srgb, var(--lorume-color-surface) 82%, var(--lorume-color-bg));
   color: var(--lorume-color-muted);
@@ -1599,11 +1710,44 @@ button.tableRow:hover,
 }
 
 .runtimeTableRow {
-  grid-template-columns: minmax(220px, 1.4fr) 110px minmax(130px, 0.8fr) 90px 100px minmax(150px, 0.9fr);
+  grid-template-columns: minmax(220px, 1.4fr) 110px minmax(130px, 0.8fr) 100px minmax(150px, 0.9fr);
 }
 
 .agentTableRow {
-  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(160px, 0.8fr) 100px minmax(160px, 0.8fr);
+  grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.9fr) minmax(150px, 0.8fr) 92px minmax(150px, 0.8fr) 74px;
+}
+
+.rowCellButton {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.rowCellButton:focus-visible,
+.inlineActionButton:focus-visible {
+  border-radius: var(--lorume-radius-sm);
+  box-shadow: var(--lorume-shadow-focus);
+  outline: 0;
+}
+
+.inlineActionButton {
+  background: color-mix(in srgb, var(--lorume-color-action) 7%, var(--lorume-color-paper));
+  border: 1px solid color-mix(in srgb, var(--lorume-color-action) 18%, var(--lorume-color-line));
+  border-radius: var(--lorume-radius-pill);
+  color: var(--lorume-color-action);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 800;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.inlineActionButton:hover {
+  background: color-mix(in srgb, var(--lorume-color-action) 12%, var(--lorume-color-paper));
+  border-color: color-mix(in srgb, var(--lorume-color-action) 28%, var(--lorume-color-line));
 }
 
 .mutedAssetText {
@@ -1639,7 +1783,7 @@ button.tableRow:hover,
   border: var(--lorume-border-hairline);
   border-radius: var(--lorume-radius-pill);
   display: inline-flex;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 700;
   min-height: 24px;
@@ -1647,9 +1791,9 @@ button.tableRow:hover,
 }
 
 .badge {
-  background: color-mix(in srgb, var(--lorume-color-action) 8%, var(--lorume-color-paper));
-  border-color: color-mix(in srgb, var(--lorume-color-action) 20%, var(--lorume-color-line));
-  color: var(--lorume-color-action);
+  background: color-mix(in srgb, var(--lorume-color-bg) 72%, var(--lorume-color-paper));
+  border-color: color-mix(in srgb, var(--lorume-color-muted) 18%, var(--lorume-color-line));
+  color: var(--lorume-color-muted);
 }
 
 .lifecycleBadge {
@@ -1826,7 +1970,7 @@ button.tableRow:hover,
   border-radius: var(--lorume-radius-pill);
   color: var(--lorume-color-success);
   display: inline-flex;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 700;
   min-height: 24px;
@@ -1836,10 +1980,16 @@ button.tableRow:hover,
 .status-degraded,
 .status-warning,
 .status-stale,
-.status-unknown {
+.status-exception {
   background: color-mix(in srgb, var(--lorume-color-warning) 9%, var(--lorume-color-paper));
   border-color: color-mix(in srgb, var(--lorume-color-warning) 24%, var(--lorume-color-line));
   color: var(--lorume-color-warning);
+}
+
+.status-unknown {
+  background: color-mix(in srgb, var(--lorume-color-muted) 8%, var(--lorume-color-paper));
+  border-color: color-mix(in srgb, var(--lorume-color-muted) 18%, var(--lorume-color-line));
+  color: var(--lorume-color-muted);
 }
 
 .status-failed,
@@ -1931,22 +2081,29 @@ button.tableRow:hover,
 
 .consoleUtilityBar {
   align-items: center;
+  background: rgb(255 255 255 / 62%);
+  border: var(--lorume-border-hairline);
+  border-radius: var(--lorume-radius-pill);
+  box-shadow: var(--lorume-shadow-subtle);
   display: flex;
   gap: 8px;
   grid-column: 2;
-  grid-row: 1;
+  grid-row: auto;
   justify-self: end;
-  padding: 18px 24px 0;
-  position: relative;
+  margin: 0;
+  padding: 6px;
+  position: fixed;
+  right: 24px;
+  top: 20px;
   z-index: 25;
 }
 
 .consoleUtilityButton {
   align-items: center;
-  background: rgb(255 255 255 / 82%);
-  border: var(--lorume-border-hairline);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 999px;
-  box-shadow: var(--lorume-shadow-subtle);
+  box-shadow: none;
   color: var(--lorume-color-ink);
   display: inline-flex;
   font-family: var(--font-sans);
@@ -1960,10 +2117,10 @@ button.tableRow:hover,
 
 .consoleUtilityButtonActive,
 .consoleUtilityButton:hover {
-  background: var(--lorume-color-surface);
+  background: var(--lorume-color-paper);
   border-color: color-mix(in srgb, var(--lorume-color-action) 26%, var(--lorume-color-line));
   box-shadow: var(--lorume-shadow-float);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .consoleUtilityCount {
@@ -2265,9 +2422,14 @@ button.tableRow:hover,
   }
 
   .contentGrid,
-  .runtimeFleetGrid,
   .workBoardGrid,
   .resourceCenterGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1240px) {
+  .runtimeFleetGrid {
     grid-template-columns: 1fr;
   }
 
@@ -2312,8 +2474,14 @@ button.tableRow:hover,
     border-bottom: var(--lorume-border-hairline);
     border-right: 0;
     grid-row: auto;
+    height: auto;
+    left: auto;
+    min-height: 0;
     overflow-x: hidden;
     padding: 12px 14px;
+    position: relative;
+    top: auto;
+    width: auto;
   }
 
   .brandMark {
@@ -2354,10 +2522,6 @@ button.tableRow:hover,
 
   .metricGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .collectionHealthChecks {
-    grid-template-columns: 1fr;
   }
 
   .contentGrid {

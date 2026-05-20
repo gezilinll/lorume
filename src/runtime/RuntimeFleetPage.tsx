@@ -2,26 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
 import {
   channelKindLabels,
-  deriveManagedAgentDisplayStatus,
-  deriveRuntimeOperatingStatus,
+  deriveAgentFleetStatus,
+  deriveDeviceFleetStatus,
+  deriveRuntimeFleetStatus,
   filterRuntimeFleet,
   formatRuntimeTimestamp,
   getRuntimeFleetDetail,
-  listRuntimeFleetHealthOptions,
   listRuntimeFleetRuntimeKindOptions,
-  managedAgentStatusLabels,
   runtimeAgentLastSeenAt,
-  runtimeHealthLabels,
+  runtimeFleetObjectStatusLabels,
   runtimeKindLabels,
-  runtimeOperatingStatusLabels,
   summarizeRuntimeFleet,
   type RuntimeFleetDetail,
   type RuntimeFleetFilters,
+  type RuntimeFleetLastSeenRange,
 } from "./runtime-inventory-query";
 import {
   type LorumeRuntime,
   type ManagedRuntimeAgent,
-  type RuntimeHealthStatus,
   type RuntimeInventorySnapshot,
   type RuntimeKind,
 } from "./runtime-normalize";
@@ -31,11 +29,7 @@ import {
   createWorkItemsQueryUrl,
   runtimeWorkItemsQueryPageFromResponse,
 } from "./runtime-work-query-api";
-import {
-  collectionHealthStatusLabels,
-  type CollectionHealthCheck,
-  type DeviceCollectionHealth,
-} from "./runtime-collection-health";
+import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
 import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
@@ -45,8 +39,12 @@ import { PixelIcon } from "../ui/PixelIcon";
 
 const fixtureRuntimeSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
 const autoRefreshIntervalMs = 30_000;
-const remoteRefreshPollIntervalMs = 1_000;
-const remoteRefreshMaxPolls = 300;
+const lastSeenRangeLabels: Record<RuntimeFleetLastSeenRange, string> = {
+  all: "全部时间",
+  "24h": "最近 24 小时",
+  "7d": "最近 7 天",
+  "30d": "最近 30 天",
+};
 
 interface RuntimeFleetQueryResponse {
   observedAt: string | null;
@@ -84,18 +82,12 @@ export function RuntimeFleetPage() {
     allowFixtureFallback ? fixtureRuntimeSnapshot : createEmptyRuntimeInventorySnapshot(),
   );
   const [workStateSnapshot, setWorkStateSnapshot] = useState<RuntimeWorkStateSnapshot | null>(null);
-  const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth | null>(null);
-  const [dataSource, setDataSource] = useState<"fixture" | "backend">(
-    allowFixtureFallback ? "fixture" : "backend",
-  );
-  const [refreshState, setRefreshState] = useState<{
-    status: "idle" | "running" | "success" | "error";
-    message: string;
-  }>({ status: "idle", message: "" });
+  const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [query, setQuery] = useState("");
   const [runtimeKind, setRuntimeKind] = useState<RuntimeKind | "all">("all");
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeHealthStatus | "all">("all");
+  const [lastSeenRange, setLastSeenRange] = useState<RuntimeFleetLastSeenRange>("all");
   const [selection, setSelection] = useState<RuntimeFleetSelection | null>(null);
   const [agentSkillProbeState, setAgentSkillProbeState] = useState<AgentSkillProbeViewState>({
     agentId: "",
@@ -120,6 +112,14 @@ export function RuntimeFleetPage() {
     return deviceCollectionHealthFromResponse(await response.json());
   }
 
+  async function fetchCollectionHealthForDevices(latestSnapshot: RuntimeInventorySnapshot): Promise<DeviceCollectionHealth[]> {
+    const devices = latestSnapshot.devices ?? [latestSnapshot.device];
+    const health = await Promise.all(
+      devices.map((device) => fetchCollectionHealth(device.id).catch(() => null)),
+    );
+    return health.filter((value): value is DeviceCollectionHealth => Boolean(value));
+  }
+
   async function fetchLatestWorkStateSnapshot(): Promise<RuntimeWorkStateSnapshot | null> {
     let cursor: string | undefined;
     let snapshot: RuntimeWorkStateSnapshot | null = null;
@@ -138,34 +138,13 @@ export function RuntimeFleetPage() {
   function applySnapshot(
     latestSnapshot: RuntimeInventorySnapshot,
     latestWorkState: RuntimeWorkStateSnapshot | null,
-    latestCollectionHealth: DeviceCollectionHealth | null,
+    latestCollectionHealth: DeviceCollectionHealth[],
   ) {
     setSnapshot(latestSnapshot);
     setWorkStateSnapshot(latestWorkState);
     setCollectionHealth(latestCollectionHealth);
-    setDataSource("backend");
+    setLoadError("");
     setLastLoadedAt(new Date().toISOString());
-  }
-
-  async function loadLatestSnapshot(options: { silent?: boolean } = {}): Promise<RuntimeInventorySnapshot | null> {
-    try {
-      const latestSnapshot = await fetchLatestSnapshot();
-      if (!latestSnapshot) return null;
-      const [latestWorkState, latestCollectionHealth] = await Promise.all([
-        fetchLatestWorkStateSnapshot(),
-        fetchCollectionHealth(latestSnapshot.device.id).catch(() => null),
-      ]);
-      applySnapshot(latestSnapshot, latestWorkState, latestCollectionHealth);
-      return latestSnapshot;
-    } catch (error) {
-      if (!options.silent) {
-        setRefreshState({
-          status: "error",
-          message: error instanceof Error ? error.message : "读取最新快照失败",
-        });
-      }
-      return null;
-    }
   }
 
   useEffect(() => {
@@ -177,12 +156,12 @@ export function RuntimeFleetPage() {
         if (!latestSnapshot) return;
         const [latestWorkState, latestCollectionHealth] = await Promise.all([
           fetchLatestWorkStateSnapshot(),
-          fetchCollectionHealth(latestSnapshot.device.id).catch(() => null),
+          fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
         ]);
         if (!cancelled) applySnapshot(latestSnapshot, latestWorkState, latestCollectionHealth);
       } catch {
         if (!allowFixtureFallback && !cancelled) {
-          setRefreshState({ status: "error", message: "后端查询失败，无法读取正式运行资产" });
+          setLoadError("后端查询失败，无法读取正式运行资产");
         }
       }
     }
@@ -198,31 +177,29 @@ export function RuntimeFleetPage() {
   }, [allowFixtureFallback]);
 
   const runtimeKindOptions = useMemo(() => listRuntimeFleetRuntimeKindOptions(snapshot), [snapshot]);
-  const runtimeStatusOptions = useMemo(() => listRuntimeFleetHealthOptions(snapshot), [snapshot]);
+  const collectionHealthByDeviceId = useMemo(
+    () => new Map(collectionHealth.map((health) => [health.deviceId, health])),
+    [collectionHealth],
+  );
   useEffect(() => {
     if (runtimeKind !== "all" && !runtimeKindOptions.some((option) => option.value === runtimeKind)) {
       setRuntimeKind("all");
     }
   }, [runtimeKind, runtimeKindOptions]);
-  useEffect(() => {
-    if (runtimeStatus !== "all" && !runtimeStatusOptions.some((option) => option.value === runtimeStatus)) {
-      setRuntimeStatus("all");
-    }
-  }, [runtimeStatus, runtimeStatusOptions]);
 
   const filters: RuntimeFleetFilters = useMemo(
-    () => ({ query, runtimeKind, runtimeStatus }),
-    [query, runtimeKind, runtimeStatus],
+    () => ({ lastSeenRange, query, runtimeKind }),
+    [lastSeenRange, query, runtimeKind],
   );
   const result = useMemo(() => filterRuntimeFleet(snapshot, filters), [filters, snapshot]);
   const summary = useMemo(() => summarizeRuntimeFleet(snapshot, workStateSnapshot), [snapshot, workStateSnapshot]);
-  const detail = selection ? getRuntimeFleetDetail(snapshot, selection.kind, selection.id, workStateSnapshot) : null;
-  const isRefreshRunning = refreshState.status === "running";
-  const refreshButtonLabel = dataSource === "backend" ? "请求设备刷新" : "读取后端数据";
+  const detail = selection
+    ? getRuntimeFleetDetail(snapshot, selection.kind, selection.id, workStateSnapshot, collectionHealthByDeviceId)
+    : null;
 
   async function fetchAgentSkillProbe(agentId: string): Promise<AgentSkillProbeSnapshot> {
     const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/skill-probe`);
-    if (!response.ok) throw new Error(`Skill 探测查询失败: HTTP ${response.status}`);
+    if (!response.ok) throw new Error(formatHttpError(response.status, "读取 Skill 探测失败"));
     const snapshot = normalizeAgentSkillProbeSnapshot(await response.json());
     if (!snapshot) throw new Error("Skill 探测返回了无效数据");
     return snapshot;
@@ -246,10 +223,10 @@ export function RuntimeFleetPage() {
     } catch (error) {
       setAgentSkillProbeState({
         agentId: agentDetail.id,
-        errorMessage: error instanceof Error ? error.message : "读取 Skill 探测失败",
         isVisible: true,
         snapshot: null,
         status: "error",
+        errorMessage: formatRuntimeFleetError(error, "读取 Skill 探测失败"),
       });
     }
   }
@@ -287,49 +264,10 @@ export function RuntimeFleetPage() {
     } catch (error) {
       setAgentSkillProbeState({
         agentId: agentDetail.id,
-        errorMessage: error instanceof Error ? error.message : "请求 Skill 探测失败",
+        errorMessage: formatRuntimeFleetError(error, "请求 Skill 探测失败"),
         isVisible: true,
         snapshot: null,
         status: "error",
-      });
-    }
-  }
-
-  async function handleRefresh() {
-    if (dataSource !== "backend") {
-      setRefreshState({ status: "running", message: "正在读取后端数据" });
-      const latestSnapshot = await loadLatestSnapshot();
-      setRefreshState(
-        latestSnapshot
-          ? { status: "success", message: "已读取后端数据" }
-          : { status: "error", message: "读取后端数据失败" },
-      );
-      return;
-    }
-
-    setRefreshState({ status: "running", message: "正在请求设备刷新" });
-    try {
-      const refreshResponse = await fetch(`/api/devices/${encodeURIComponent(snapshot.device.id)}/refresh`, {
-        method: "POST",
-      });
-      const refreshBody = (await refreshResponse.json()) as {
-        commandId?: string;
-        error?: string;
-        message?: string;
-        status?: string;
-      };
-      if (!refreshResponse.ok || !refreshBody.commandId) {
-        throw new Error(formatDeviceRefreshError(refreshResponse.status, refreshBody));
-      }
-
-      setRefreshState({ status: "running", message: "刷新命令已下发" });
-      await waitForRemoteRefreshCommand(snapshot.device.id, refreshBody.commandId);
-      await loadLatestSnapshot({ silent: true });
-      setRefreshState({ status: "success", message: "刷新完成" });
-    } catch (error) {
-      setRefreshState({
-        status: "error",
-        message: error instanceof Error ? error.message : "设备刷新失败",
       });
     }
   }
@@ -340,34 +278,17 @@ export function RuntimeFleetPage() {
         <div>
           <p className="eyebrow">Runtime / Device / Agent</p>
           <h1>运行资产</h1>
-          <p className="pageSubtitle">
-            统一识别设备、Runtime、Agent 与它们暴露到的渠道。当前数据源：
-            {dataSource === "backend" ? "后端查询" : "Fixture 样例"}
-          </p>
+          <p className="pageSubtitle">查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。</p>
           {lastLoadedAt ? (
             <p className="pageRefreshMeta">上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p>
           ) : null}
         </div>
-        <div className="refreshControl">
-          <button
-            className="primaryButton"
-            type="button"
-            aria-label={refreshButtonLabel}
-            disabled={isRefreshRunning}
-            onClick={() => {
-              void handleRefresh();
-            }}
-          >
-            <PixelIcon name="reload" size={16} />
-            {isRefreshRunning ? "刷新中" : refreshButtonLabel}
-          </button>
-          {refreshState.message ? (
-            <p className={`refreshMessage refresh-${refreshState.status}`} role="status">
-              {refreshState.message}
-            </p>
-          ) : null}
-        </div>
       </header>
+      {loadError ? (
+        <p className="pageStatus pageStatusError" role="status">
+          {loadError}
+        </p>
+      ) : null}
 
       <section className="toolbar runtimeToolbar" aria-label="运行资产筛选">
         <label className="toolbarField toolbarSearch">
@@ -398,36 +319,37 @@ export function RuntimeFleetPage() {
         </label>
 
         <label className="toolbarField">
-          <span className="controlLabel">可用性</span>
+          <span className="controlLabel">同步时间</span>
           <select
-            value={runtimeStatus}
-            onChange={(event) => setRuntimeStatus(event.target.value as RuntimeHealthStatus | "all")}
+            value={lastSeenRange}
+            onChange={(event) => setLastSeenRange(event.target.value as RuntimeFleetLastSeenRange)}
           >
-            <option value="all">全部</option>
-            {runtimeStatusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            {(Object.keys(lastSeenRangeLabels) as RuntimeFleetLastSeenRange[]).map((option) => (
+              <option key={option} value={option}>
+                {lastSeenRangeLabels[option]}
               </option>
             ))}
           </select>
         </label>
-
       </section>
 
       <section className="metricGrid" aria-label="运行资产概览">
         <Metric label="设备" value={summary.devices} tone="blue" />
-        <Metric label="在线 Runtime" value={summary.onlineRuntimes} tone="green" />
+        <Metric label="Runtime" value={summary.runtimes} tone="green" />
         <Metric label="Agent" value={summary.agents} tone="purple" />
-        <Metric label="异常" value={summary.issues} tone="orange" />
       </section>
-
-      <CollectionHealthPanel health={collectionHealth} />
 
       <section className="runtimeFleetGrid">
         <div className="runtimeStack">
-          <DevicePanel snapshot={snapshot} onSelect={() => setSelection({ kind: "device", id: result.device.id })} />
+          <DevicePanel
+            collectionHealthByDeviceId={collectionHealthByDeviceId}
+            devices={result.devices}
+            snapshot={snapshot}
+            selectedId={selection?.kind === "device" ? selection.id : undefined}
+            onSelect={(deviceId) => setSelection({ kind: "device", id: deviceId })}
+          />
           <RuntimeTable
-            deviceName={snapshot.device.name}
+            collectionHealthByDeviceId={collectionHealthByDeviceId}
             snapshot={snapshot}
             workStateSnapshot={workStateSnapshot}
             runtimes={result.runtimes}
@@ -436,11 +358,23 @@ export function RuntimeFleetPage() {
           />
           <AgentTable
             agents={result.agents}
+            collectionHealthByDeviceId={collectionHealthByDeviceId}
             runtimes={snapshot.runtimes}
             snapshot={snapshot}
             workStateSnapshot={workStateSnapshot}
             selectedId={selection?.kind === "agent" ? selection.id : undefined}
             onSelect={(agent) => setSelection({ kind: "agent", id: agent.id })}
+            onShowSkillProbe={(agent) => {
+              setSelection({ kind: "agent", id: agent.id });
+              const agentDetail = getRuntimeFleetDetail(
+                snapshot,
+                "agent",
+                agent.id,
+                workStateSnapshot,
+                collectionHealthByDeviceId,
+              );
+              if (agentDetail?.kind === "agent") void handleShowAgentSkillProbe(agentDetail);
+            }}
           />
         </div>
         <RuntimeDetail
@@ -449,50 +383,10 @@ export function RuntimeFleetPage() {
           onRequestSkillProbe={(agentDetail) => {
             void handleRequestAgentSkillProbe(agentDetail);
           }}
-          onShowSkillProbe={(agentDetail) => {
-            void handleShowAgentSkillProbe(agentDetail);
-          }}
         />
       </section>
     </section>
   );
-}
-
-function formatDeviceRefreshError(
-  status: number,
-  body: {
-    error?: string;
-    message?: string;
-  },
-): string {
-  if (status === 409 && body.error === "device_not_connected") {
-    return "设备控制通道未连接，已保留最近一次采集数据。请确认设备 Collector 在线后再刷新。";
-  }
-  return body.message || `刷新请求失败: HTTP ${status}`;
-}
-
-async function waitForRemoteRefreshCommand(deviceId: string, commandId: string): Promise<void> {
-  for (let attempt = 0; attempt < remoteRefreshMaxPolls; attempt += 1) {
-    const commandResponse = await fetch(
-      `/api/devices/${encodeURIComponent(deviceId)}/commands/${encodeURIComponent(commandId)}`,
-    );
-    const commandBody = (await commandResponse.json()) as { status?: string; error?: string };
-    if (!commandResponse.ok) {
-      throw new Error(commandBody.error || `刷新命令查询失败: HTTP ${commandResponse.status}`);
-    }
-    if (commandBody.status === "succeeded") return;
-    if (commandBody.status === "failed" || commandBody.status === "timed_out") {
-      throw new Error(commandBody.error || "设备刷新失败");
-    }
-    await sleep(remoteRefreshPollIntervalMs);
-  }
-  throw new Error("设备刷新超时");
-}
-
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
 }
 
 function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeInventorySnapshot | null {
@@ -501,6 +395,7 @@ function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeInventory
     observedAt: value.observedAt ?? value.devices[0].lastSeenAt ?? new Date().toISOString(),
     collector: fixtureRuntimeSnapshot.collector,
     device: value.devices[0],
+    devices: value.devices,
     runtimes: value.runtimes,
     agents: value.agents,
     reports: [],
@@ -519,10 +414,32 @@ function createEmptyRuntimeInventorySnapshot(): RuntimeInventorySnapshot {
       status: "unknown",
       connectionMode: "collector",
     },
+    devices: [],
     runtimes: [],
     agents: [],
     reports: [],
   };
+}
+
+function formatRuntimeFleetError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message) return fallback;
+  return formatBackendErrorMessage(error.message, fallback);
+}
+
+function formatHttpError(status: number, fallback: string): string {
+  if (status === 401 || status === 403) return "当前会话无权读取该信息。";
+  if (status === 404) return "没有找到对应的运行资产。";
+  if (status === 502 || status === 503 || status === 504) return "本地后端暂不可用，请稍后重试。";
+  return `${fallback}，请稍后重试。`;
+}
+
+function formatBackendErrorMessage(message: string, fallback: string): string {
+  if (message.includes("device_not_connected")) return "设备控制通道未连接，无法下发请求。";
+  if (message.includes("HTTP 502") || message.includes("HTTP 503") || message.includes("HTTP 504")) {
+    return "本地后端暂不可用，请稍后重试。";
+  }
+  if (/^[a-z0-9_:-]+$/i.test(message)) return fallback;
+  return message;
 }
 
 function isRuntimeFleetQueryResponse(value: unknown): value is RuntimeFleetQueryResponse {
@@ -569,7 +486,7 @@ function isCollectionHealthCheck(value: unknown): value is CollectionHealthCheck
 }
 
 function isCollectionHealthStatus(value: unknown): value is DeviceCollectionHealth["status"] {
-  return value === "healthy" || value === "warning" || value === "stale" || value === "failed" || value === "unknown";
+  return value === "healthy" || value === "failed";
 }
 
 function mergeWorkStateSnapshots(
@@ -599,13 +516,6 @@ function mergeBySource<T extends { source: string }>(current: T[], next: T[]): T
   return Array.from(bySource.values());
 }
 
-function formatCollectionCounts(check: CollectionHealthCheck): string {
-  if (check.id === "inventory") {
-    return `设备 ${check.counts.devices ?? 0} · Runtime ${check.counts.runtimes ?? 0} · Agent ${check.counts.agents ?? 0}`;
-  }
-  return `工作项 ${check.counts.workItems ?? 0} · 会话 ${check.counts.conversations ?? 0} · 执行 ${check.counts.executions ?? 0}`;
-}
-
 function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
     <div className={`metricCard metric${tone}`}>
@@ -615,84 +525,75 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
   );
 }
 
-function CollectionHealthPanel({ health }: { health: DeviceCollectionHealth | null }) {
-  if (!health) return null;
-  return (
-    <section className="collectionHealthPanel" aria-label="采集健康">
-      <div className="collectionHealthSummary">
-        <div>
-          <h2>采集健康</h2>
-          <p>{health.summary}</p>
-        </div>
-        <StatusBadge label={collectionHealthStatusLabels[health.status]} status={health.status} />
-      </div>
-      <div className="collectionHealthChecks">
-        {health.checks.map((check) => (
-          <article className="collectionHealthCheck" key={check.id}>
-            <div className="collectionHealthCheckHeader">
-              <strong>{check.label}</strong>
-              <StatusBadge label={collectionHealthStatusLabels[check.status]} status={check.status} />
-            </div>
-            <p>{check.message}</p>
-            <small>最近收到 {formatRuntimeTimestamp(check.lastReceivedAt)}</small>
-            <small>{formatCollectionCounts(check)}</small>
-            {check.error ? <small className="healthIssueText">错误：{check.error}</small> : null}
-            {check.warnings.length > 0 ? (
-              <small className="healthIssueText">最近警告：{check.warnings[0]}</small>
-            ) : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function DevicePanel({
+  collectionHealthByDeviceId,
+  devices,
   snapshot,
+  selectedId,
   onSelect,
 }: {
+  collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
+  devices: RuntimeInventorySnapshot["device"][];
   snapshot: RuntimeInventorySnapshot;
-  onSelect: () => void;
+  selectedId?: string;
+  onSelect: (deviceId: string) => void;
 }) {
   return (
     <section className="tablePanel devicePanel" aria-label="设备">
       <div className="runtimePanelHeader">
         <div>
           <h2>设备</h2>
-          <p>最新采集快照来源</p>
+          <p>{devices.length} 台设备匹配当前筛选</p>
         </div>
         <PixelIcon name="server" size={18} />
       </div>
-      <button className="deviceSummary" type="button" onClick={onSelect}>
-        <span className="iconSquare">
-          <PixelIcon name="monitor" size={18} />
-        </span>
-        <span>
-          <strong>{snapshot.device.name}</strong>
-          <small>{snapshot.device.hostname}</small>
-          <small>最近同步 {formatRuntimeTimestamp(snapshot.device.lastSeenAt ?? snapshot.observedAt)}</small>
-        </span>
-        <StatusBadge label={runtimeHealthLabels[snapshot.device.status]} status={snapshot.device.status} />
-      </button>
+      {devices.length === 0 ? (
+        <EmptyAsset message="没有匹配的设备" />
+      ) : (
+        devices.map((device) => (
+          <button
+            className={
+              device.id === selectedId ? "deviceSummary deviceSummaryActive" : "deviceSummary"
+            }
+            key={device.id}
+            type="button"
+            onClick={() => onSelect(device.id)}
+          >
+            <span className="iconSquare">
+              <PixelIcon name="monitor" size={18} />
+            </span>
+            <span>
+              <strong>{device.name}</strong>
+              <small>{device.hostname}</small>
+              <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}</small>
+            </span>
+            <StatusBadge
+              label={runtimeFleetObjectStatusLabels[deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId)]}
+              status={deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId)}
+            />
+          </button>
+        ))
+      )}
     </section>
   );
 }
 
 function RuntimeTable({
-  deviceName,
+  collectionHealthByDeviceId,
   snapshot,
   workStateSnapshot,
   runtimes,
   selectedId,
   onSelect,
 }: {
-  deviceName: string;
+  collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   snapshot: RuntimeInventorySnapshot;
   workStateSnapshot: RuntimeWorkStateSnapshot | null;
   runtimes: LorumeRuntime[];
   selectedId?: string;
   onSelect: (runtime: LorumeRuntime) => void;
 }) {
+  const deviceById = new Map((snapshot.devices ?? [snapshot.device]).map((device) => [device.id, device]));
   return (
     <section className="tablePanel runtimeAssetPanel" aria-label="Runtime 列表">
       <div className="runtimePanelHeader">
@@ -710,12 +611,11 @@ function RuntimeTable({
             <span role="columnheader">名称</span>
             <span role="columnheader">Runtime</span>
             <span role="columnheader">所属设备</span>
-            <span role="columnheader">可用性</span>
-            <span role="columnheader">运行状态</span>
+            <span role="columnheader">状态</span>
             <span role="columnheader">最近同步</span>
           </div>
           {runtimes.map((runtime) => {
-            const operatingStatus = deriveRuntimeOperatingStatus(snapshot, runtime, workStateSnapshot);
+            const status = deriveRuntimeFleetStatus(snapshot, runtime, workStateSnapshot, collectionHealthByDeviceId);
             return (
               <button
                 className={
@@ -736,16 +636,10 @@ function RuntimeTable({
                   <Badge>{runtimeKindLabels[runtime.kind]}</Badge>
                 </span>
                 <span className="mutedAssetText" role="cell">
-                  {deviceName}
+                  {deviceById.get(runtime.deviceId)?.name ?? runtime.deviceId}
                 </span>
                 <span role="cell">
-                  <StatusBadge label={runtimeHealthLabels[runtime.status]} status={runtime.status} />
-                </span>
-                <span role="cell">
-                  <StatusBadge
-                    label={runtimeOperatingStatusLabels[operatingStatus]}
-                    status={operatingStatus}
-                  />
+                  <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                 </span>
                 <span className="mutedAssetText" role="cell">
                   {formatRuntimeTimestamp(runtime.lastSeenAt)}
@@ -761,18 +655,22 @@ function RuntimeTable({
 
 function AgentTable({
   agents,
+  collectionHealthByDeviceId,
   runtimes,
   snapshot,
   workStateSnapshot,
   selectedId,
   onSelect,
+  onShowSkillProbe,
 }: {
   agents: ManagedRuntimeAgent[];
+  collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   runtimes: LorumeRuntime[];
   snapshot: RuntimeInventorySnapshot;
   workStateSnapshot: RuntimeWorkStateSnapshot | null;
   selectedId?: string;
   onSelect: (agent: ManagedRuntimeAgent) => void;
+  onShowSkillProbe: (agent: ManagedRuntimeAgent) => void;
 }) {
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
@@ -795,25 +693,25 @@ function AgentTable({
             <span role="columnheader">关联渠道</span>
             <span role="columnheader">状态</span>
             <span role="columnheader">最近同步</span>
+            <span role="columnheader">Skill</span>
           </div>
           {agents.map((agent) => {
-            const displayStatus = deriveManagedAgentDisplayStatus(snapshot, agent, workStateSnapshot);
+            const status = deriveAgentFleetStatus(snapshot, agent, workStateSnapshot, collectionHealthByDeviceId);
             return (
-              <button
+              <div
                 className={
                   agent.id === selectedId
                     ? "assetRow assetDataRow agentTableRow tableRowActive"
                     : "assetRow assetDataRow agentTableRow"
                 }
                 key={agent.id}
-                type="button"
                 role="row"
                 onClick={() => onSelect(agent)}
               >
-                <span className="nameCell" role="cell">
+                <button className="rowCellButton nameCell" type="button" role="cell" onClick={() => onSelect(agent)}>
                   <strong>{agent.name}</strong>
                   <small>{agent.id}</small>
-                </span>
+                </button>
                 <span className="mutedAssetText" role="cell">
                   {runtimeById.get(agent.runtimeId)?.name ?? agent.runtimeId}
                 </span>
@@ -825,12 +723,25 @@ function AgentTable({
                 ))}
                 </span>
                 <span role="cell">
-                  <StatusBadge label={managedAgentStatusLabels[displayStatus]} status={displayStatus} />
+                  <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                 </span>
                 <span className="mutedAssetText" role="cell">
                   {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
                 </span>
-              </button>
+                <span role="cell">
+                  <button
+                    aria-label={`${agent.name} Skill 探测`}
+                    className="inlineActionButton"
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onShowSkillProbe(agent);
+                    }}
+                  >
+                    查看
+                  </button>
+                </span>
+              </div>
             );
           })}
         </div>
@@ -843,12 +754,10 @@ function RuntimeDetail({
   detail,
   skillProbeState,
   onRequestSkillProbe,
-  onShowSkillProbe,
 }: {
   detail: RuntimeFleetDetail | null;
   skillProbeState: AgentSkillProbeViewState;
   onRequestSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
-  onShowSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
   if (!detail) {
     return (
@@ -872,12 +781,11 @@ function RuntimeDetail({
       {detail.sections.map((section) => (
         <DetailList key={section.title} title={section.title} items={section.items} />
       ))}
-      {detail.kind === "agent" ? (
+      {detail.kind === "agent" && skillProbeState.agentId === detail.id && skillProbeState.isVisible ? (
         <AgentSkillProbePanel
           detail={detail}
-          state={skillProbeState.agentId === detail.id ? skillProbeState : undefined}
+          state={skillProbeState}
           onRequest={() => onRequestSkillProbe(detail)}
-          onShow={() => onShowSkillProbe(detail)}
         />
       ) : null}
     </aside>
@@ -888,15 +796,12 @@ function AgentSkillProbePanel({
   detail,
   state,
   onRequest,
-  onShow,
 }: {
   detail: Extract<RuntimeFleetDetail, { kind: "agent" }>;
-  state?: AgentSkillProbeViewState;
+  state: AgentSkillProbeViewState;
   onRequest: () => void;
-  onShow: () => void;
 }) {
-  const isVisible = Boolean(state?.isVisible);
-  const snapshot = state?.snapshot ?? null;
+  const snapshot = state.snapshot ?? null;
   const status = snapshot?.status ?? "unknown";
 
   return (
@@ -906,35 +811,20 @@ function AgentSkillProbePanel({
         <button
           className="secondaryButton compactButton"
           type="button"
-          onClick={isVisible ? onShow : onShow}
+          disabled={state.status === "loading"}
+          onClick={onRequest}
         >
-          {isVisible ? "刷新 Skill 探测" : "查看 Skill 探测"}
+          请求探测
         </button>
       </div>
-      {!isVisible ? (
-        <p className="mutedText">读取目标 Agent 本地 Skill 元数据。</p>
-      ) : (
-        <>
-          <div className="skillProbeActions">
-            <StatusBadge label={agentSkillProbeStatusLabels[status]} status={status} />
-            <button
-              className="secondaryButton compactButton"
-              type="button"
-              disabled={state?.status === "loading"}
-              onClick={onRequest}
-            >
-              请求 Skill 探测
-            </button>
-          </div>
-          {state?.status === "loading" ? <p>正在读取 Skill 探测</p> : null}
-          {state?.status === "error" ? <p className="healthIssueText">{state.errorMessage}</p> : null}
-          {snapshot ? <AgentSkillProbeSnapshotView snapshot={snapshot} /> : null}
-          {!snapshot && state?.status !== "loading" && state?.status !== "error" ? (
-            <p>尚未探测 Skill</p>
-          ) : null}
-          <p className="mutedText">目标 Agent: {detail.title}</p>
-        </>
-      )}
+      <div className="skillProbeActions">
+        <StatusBadge label={agentSkillProbeStatusLabels[status]} status={status} />
+      </div>
+      {state.status === "loading" ? <p>正在读取 Skill 探测</p> : null}
+      {state.status === "error" ? <p className="healthIssueText">{state.errorMessage}</p> : null}
+      {snapshot ? <AgentSkillProbeSnapshotView snapshot={snapshot} /> : null}
+      {!snapshot && state.status !== "loading" && state.status !== "error" ? <p>尚未探测 Skill</p> : null}
+      <p className="mutedText">目标 Agent: {detail.title}</p>
     </section>
   );
 }

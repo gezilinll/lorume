@@ -7,12 +7,16 @@ import { LoginPage } from "./LoginPage";
 import { VerifyCodePage } from "./VerifyCodePage";
 import { AuthLayout } from "../ui/AuthLayout";
 
-interface AuthContextValue {
+export interface AuthContextValue {
   logout: () => Promise<void>;
   session: AuthSessionContext;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthSessionProvider({ children, value }: { children: ReactNode; value: AuthContextValue }) {
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
 
 interface AuthProviderProps {
   children: ReactNode;

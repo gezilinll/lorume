@@ -37,9 +37,9 @@ describe("Glacier Premium Precision UI primitives", () => {
 
     expect(tokens).toContain("--font-sans:");
     expect(tokens).toContain("--font-mono:");
-    expect(tokens).toContain("--lorume-color-bg: #f7f9fb");
-    expect(tokens).toContain("--lorume-color-action: #245bff");
-    expect(tokens).toContain("--lorume-color-accent: #12a7a2");
+    expect(tokens).toContain("--lorume-color-bg: #f8fafc");
+    expect(tokens).toContain("--lorume-color-action: #2563eb");
+    expect(tokens).toContain("--lorume-color-accent: #0f9f9a");
     expect(tokens).toContain("--lorume-border-hairline: 1px solid var(--lorume-color-line)");
     expect(tokens).toContain("--lorume-radius-lg: 18px");
     expect(tokens).toContain("JetBrains Mono");
@@ -53,6 +53,9 @@ describe("Glacier Premium Precision UI primitives", () => {
     expect(styles).toMatch(/\.metricCard strong\s*{[^}]*font-family:\s*var\(--font-mono\)/s);
     expect(styles).toMatch(/\.workCard strong\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
     expect(styles).toMatch(/\.detailBlock p,\n\.detailBlock li\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
+    expect(styles).toMatch(/\.badge\s*{[^}]*color:\s*var\(--lorume-color-muted\)/s);
+    expect(styles).toMatch(/\.statusBadge\s*{[^}]*font-family:\s*var\(--font-sans\)/s);
+    expect(styles).toMatch(/\.searchBox input:focus\s*{[^}]*box-shadow:\s*none/s);
     expect(styles).not.toContain("box-shadow: 7px 7px 0");
   });
 

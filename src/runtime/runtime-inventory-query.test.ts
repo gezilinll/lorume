@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
 import {
+  deriveAgentFleetStatus,
+  deriveDeviceFleetStatus,
+  deriveRuntimeFleetStatus,
   deriveRuntimeOperatingStatus,
   formatRuntimeTimestamp,
   filterRuntimeFleet,
   getRuntimeFleetDetail,
   runtimeOperatingStatusLabels,
+  runtimeFleetObjectStatusLabels,
   runtimeDisplayName,
-  listRuntimeFleetHealthOptions,
   listRuntimeFleetRuntimeKindOptions,
   summarizeRuntimeFleet,
 } from "./runtime-inventory-query";
@@ -22,9 +25,7 @@ describe("runtime inventory query", () => {
     expect(summarizeRuntimeFleet(snapshot)).toEqual({
       devices: 1,
       runtimes: 2,
-      onlineRuntimes: 2,
       agents: 2,
-      issues: 1,
     });
   });
 
@@ -33,7 +34,6 @@ describe("runtime inventory query", () => {
       "openclaw",
       "slock",
     ]);
-    expect(listRuntimeFleetHealthOptions(snapshot).map((option) => option.value)).toEqual(["online"]);
   });
 
   it("derives Runtime operating status from Agent work state without using platform raw states", () => {
@@ -84,6 +84,9 @@ describe("runtime inventory query", () => {
 
     expect(deriveRuntimeOperatingStatus(snapshot, slockRuntime, idleWorkState)).toBe("idle");
     expect(deriveRuntimeOperatingStatus(snapshot, slockRuntime, undefined)).toBe("unknown");
+    expect(deriveRuntimeFleetStatus(snapshot, slockRuntime, undefined)).toBe("exception");
+    expect(runtimeFleetObjectStatusLabels.exception).toBe("异常");
+    expect(Object.values(runtimeFleetObjectStatusLabels)).not.toContain("未知");
   });
 
   it("treats linked non-processing work evidence as enough to mark a Runtime idle", () => {
@@ -171,7 +174,7 @@ describe("runtime inventory query", () => {
   it("filters runtimes and agents by query", () => {
     const result = filterRuntimeFleet(snapshot, { query: "tester" });
 
-    expect(result.runtimes).toEqual([]);
+    expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["Slock daemon"]);
     expect(result.agents.map((agent) => agent.name)).toEqual(["tester"]);
   });
 
@@ -183,6 +186,59 @@ describe("runtime inventory query", () => {
     expect(result.runtimes.map((runtime) => runtime.kind)).toEqual(["slock"]);
   });
 
+  it("preserves multi-device ownership in filters and detail sections", () => {
+    const multiDeviceSnapshot: RuntimeInventorySnapshot = {
+      ...snapshot,
+      devices: [
+        snapshot.device,
+        {
+          id: "edge-node-2",
+          name: "Edge Node 2",
+          hostname: "edge-node-2.local",
+          os: "linux",
+          architecture: "x64",
+          status: "online",
+          connectionMode: "collector",
+          lastSeenAt: "2026-05-19T10:00:00.000Z",
+        },
+      ],
+      runtimes: [
+        ...snapshot.runtimes,
+        {
+          id: "edge-node-2:codex:runtime-main",
+          deviceId: "edge-node-2",
+          kind: "codex",
+          name: "Codex Runtime",
+          status: "online",
+          capabilities: ["cli:version"],
+          lastSeenAt: "2026-05-19T10:00:00.000Z",
+          sourceRefs: [{ source: "codex", externalId: "runtime-main", label: "Codex Runtime" }],
+        },
+      ],
+      agents: [
+        ...snapshot.agents,
+        {
+          id: "edge-node-2:codex:runtime-main:agent:reviewer",
+          runtimeId: "edge-node-2:codex:runtime-main",
+          name: "reviewer",
+          origin: "codex",
+          status: "idle",
+          channelBindings: [{ kind: "other", label: "CLI", status: "enabled" }],
+          sourceRefs: [{ source: "codex", externalId: "reviewer", label: "reviewer" }],
+          lastSeenAt: "2026-05-19T10:00:00.000Z",
+        },
+      ],
+    };
+
+    expect(summarizeRuntimeFleet(multiDeviceSnapshot).devices).toBe(2);
+    const result = filterRuntimeFleet(multiDeviceSnapshot, { query: "edge node" });
+    expect(result.devices.map((device) => device.id)).toEqual(["edge-node-2"]);
+    expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["Codex Runtime"]);
+
+    const detail = getRuntimeFleetDetail(multiDeviceSnapshot, "runtime", "edge-node-2:codex:runtime-main");
+    expect(sectionItems(detailSections(detail), "归属关系")).toContain("所属设备: Edge Node 2");
+  });
+
   it("resolves selected agent detail with its runtime", () => {
     const detail = getRuntimeFleetDetail(snapshot, "agent", "fixture-mac:slock:slock-daemon:agent:tester");
 
@@ -190,7 +246,8 @@ describe("runtime inventory query", () => {
       kind: "agent",
       title: "tester",
       runtimeName: "Slock daemon",
-      status: "unknown",
+      status: "exception",
+      statusLabel: "异常",
       sections: expect.arrayContaining([
         expect.objectContaining({ title: "关联渠道", items: ["Slock"] }),
       ]),
@@ -226,11 +283,11 @@ describe("runtime inventory query", () => {
     expect(detail).toMatchObject({
       kind: "agent",
       title: "tester",
-      status: "active",
-      statusLabel: "活跃",
-      subtitle: "Slock · 活跃",
+      status: "working",
+      statusLabel: "工作中",
+      subtitle: "Slock · 工作中",
     });
-    expect(sectionItems(detailSections(detail), "身份信息")).toContain("状态: 活跃");
+    expect(sectionItems(detailSections(detail), "基础信息")).toContain("状态: 工作中");
   });
 
   it("aggregates Agent runtime statistics from linked work-state evidence", () => {
@@ -303,16 +360,22 @@ describe("runtime inventory query", () => {
     const detail = getRuntimeFleetDetail(snapshot, "device", "fixture-mac");
     const sections = detailSections(detail);
 
-    expect(sectionItems(sections, "身份信息")).toEqual([
-      "Device ID: fixture-mac",
+    expect(sectionItems(sections, "基础信息")).toEqual([
+      "Lorume ID: fixture-mac",
       "Hostname: fixture-mac.local",
       "OS: darwin",
       "Arch: arm64",
+      "用户: 未上报",
     ]);
-    expect(sectionItems(sections, "连接状态")).toEqual([
-      "连接方式: Collector",
-      "设备状态: 在线",
+    expect(sectionItems(sections, "网络")).toEqual([
+      "局域网 IP: 未上报",
+      "公网 IP: 未上报",
+    ]);
+    expect(sectionItems(sections, "运行资产")).toEqual([
+      "状态: 工作中",
       "Collector: 0.1.0",
+      "Runtime 数量: 2",
+      `最近同步: ${fixtureLastSeenAt}`,
     ]);
     expect(sectionItems(sections, "已注册 Runtime")).toEqual(["OpenClaw Gateway", "Slock daemon"]);
     expect((detail as { sourceLabels?: string[] })?.sourceLabels).toBeUndefined();
@@ -322,12 +385,10 @@ describe("runtime inventory query", () => {
     const detail = getRuntimeFleetDetail(snapshot, "runtime", "fixture-mac:openclaw:gateway-18789");
     const sections = detailSections(detail);
 
-    expect(sectionItems(sections, "身份信息")).toEqual([
-      "Runtime ID: fixture-mac:openclaw:gateway-18789",
-      "Runtime: OpenClaw",
+    expect(sectionItems(sections, "基础信息")).toEqual([
+      "Lorume ID: fixture-mac:openclaw:gateway-18789",
       "Version: 2026.4.27",
-      "可用性: 在线",
-      "运行状态: 未知",
+      "状态: 异常",
       `最近同步: ${fixtureLastSeenAt}`,
     ]);
     expect(sectionItems(sections, "归属关系")).toEqual(["所属设备: Fixture Mac", "Agent 数量: 1"]);
@@ -341,10 +402,9 @@ describe("runtime inventory query", () => {
     const detail = getRuntimeFleetDetail(snapshot, "agent", "fixture-mac:slock:slock-daemon:agent:tester");
     const sections = detailSections(detail);
 
-    expect(sectionItems(sections, "身份信息")).toEqual([
-      "Agent ID: fixture-mac:slock:slock-daemon:agent:tester",
-      "Runtime: Slock",
-      "状态: 未知",
+    expect(sectionItems(sections, "基础信息")).toEqual([
+      "Lorume ID: fixture-mac:slock:slock-daemon:agent:tester",
+      "状态: 异常",
       `最近同步: ${fixtureLastSeenAt}`,
     ]);
     expect(sectionItems(sections, "归属关系")).toEqual([
@@ -380,7 +440,7 @@ describe("runtime inventory query", () => {
     );
     const sections = detailSections(detail);
 
-    expect(sectionItems(sections, "身份信息")).toContain(`最近同步: ${fixtureLastSeenAt}`);
+    expect(sectionItems(sections, "基础信息")).toContain(`最近同步: ${fixtureLastSeenAt}`);
   });
 
   it("formats timestamps for UI display without leaking raw ISO strings", () => {
@@ -394,6 +454,19 @@ describe("runtime inventory query", () => {
   it("uses runtime names as the stable display label for agent ownership", () => {
     expect(runtimeDisplayName(snapshot.runtimes[0])).toBe("OpenClaw Gateway");
     expect(runtimeDisplayName(snapshot.runtimes[1])).toBe("Slock daemon");
+  });
+
+  it("folds collection exceptions into concrete asset statuses", () => {
+    const failedCollection = new Map([
+      [snapshot.device.id, { deviceId: snapshot.device.id, status: "failed" as const, summary: "采集异常", checks: [] }],
+    ]);
+    const openClawRuntime = snapshot.runtimes.find((runtime) => runtime.kind === "openclaw");
+    const openClawAgent = snapshot.agents.find((agent) => agent.runtimeId === openClawRuntime?.id);
+    if (!openClawRuntime || !openClawAgent) throw new Error("missing OpenClaw fixture");
+
+    expect(deriveDeviceFleetStatus(snapshot, snapshot.device, failedCollection)).toBe("exception");
+    expect(deriveRuntimeFleetStatus(snapshot, openClawRuntime, null, failedCollection)).toBe("exception");
+    expect(deriveAgentFleetStatus(snapshot, openClawAgent, null, failedCollection)).toBe("exception");
   });
 });
 

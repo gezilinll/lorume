@@ -2,14 +2,15 @@
 
 状态：当前规则
 
-本规格定义 `lorume` CLI 的设备侧确定性能力边界。CLI 是 Agent 和设备连接层可以调用的本地 atom 集合，不具备推理能力，也不负责分析、编辑、安装或迁移 Skill。
+本规格定义 `lorume` CLI 的设备侧确定性能力边界。被采集设备上只有 Lorume device package 这一条安装入口，稳定本地调用面是 `lorume` CLI；collector / daemon 只能编排 CLI 命令、上传结果和回传命令状态，不能直接探测第三方 Runtime 的私有目录、内部 API、token 或进程语义。CLI 不具备推理能力，也不负责分析、编辑、安装或迁移 Skill。
 
 ## 目标
 
 - 提供一个本地 `lorume` CLI 入口，用于暴露设备侧确定性能力。
-- 输出稳定 JSON，方便 Agent、collector、connector 和 harness 消费。
+- 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
 - 允许读取本机设备身份。
-- 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent。
+- 允许 live-first 采集 Runtime / Agent inventory、work-state 和 Agent Skill metadata。
+- 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent，用于测试、迁移和离线诊断。
 - 允许在后端下发的授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
 
@@ -20,10 +21,14 @@
 - 不实现 centralized Skill storage、Skill 编辑、发布、分配或同步。
 - 不绕过 Lorume backend 的组织、设备 token、Operation 或 Notification 边界。
 - 不开放任意命令执行。
+- 不要求用户额外安装 Lorume 之外的“connector CLI”。OpenClaw、Multica、Slock 等平台命令或 API 只能作为 `lorume` CLI 内部 adapter 的可选依赖。
+- 不把第三方平台私有路径、内部 token、raw payload 或 debug-only evidence 暴露给 collector、backend API 或 UI。
 
 ## 命令契约
 
 所有支持 `--json` 的命令都必须输出 JSON object。错误也输出 JSON object 到 stderr，并使用非零退出码。
+
+所有错误 JSON 必须包含稳定 `code` 和用户可读 `message`。新增错误码必须进入共享错误映射，不能把 `invalid_or_expired_code` 这类技术字符串直接展示给用户。
 
 ### `lorume device identify --json`
 
@@ -35,9 +40,42 @@
 - `device.os`
 - `device.architecture`
 - `device.connectionMode`
+- `device.network.privateIp`（可选，来自本机网络接口）
+- `device.network.publicIp`（可选，只能来自后端观测或显式配置，CLI 不主动访问外部探测服务）
+- `device.user.username`（可选）
 - `observedAt`
 
 测试和安装脚本可以通过 `--device-id`、`--device-name` 覆盖展示身份。
+
+### `lorume collect inventory --json [--snapshot <path>]`
+
+返回 `RuntimeInventorySnapshot`：
+
+- `device`
+- `runtimes`
+- `agents`
+- `observedAt`
+- `collector`
+- `reports`
+
+默认 live-first 采集本机已授权、已安装或已配置的 Runtime / Agent。`--snapshot` 只用于测试、离线诊断和兼容期迁移；读取 snapshot 时仍需输出同一 JSON shape。
+
+Runtime 和 Agent 可附带 `paths`：
+
+- `kind`: `workspace`、`install`、`config`、`data` 或 `unknown`
+- `path`: 本机路径
+- `source`: 哪个 CLI adapter 提供
+- `confidence`: `direct` 或 `derived`
+
+不能为了 UI 完整而伪造目录。adapter 拿不到目录时省略 `paths`。
+
+### `lorume collect work-state --json`
+
+返回 `RuntimeWorkStateSnapshot`。CLI 内部 adapter 必须把平台原始状态转换成 Lorume-owned `RuntimeWorkItem`、`RuntimeConversation`、`RuntimeExecution` 和 capability model。collector 不能读取平台原始字段再做状态推断。
+
+### `lorume agent skill-probe --json --agent-id <id>`
+
+返回一个 Agent 的只读 Skill metadata snapshot。该命令只列出 Skill root、entry path、Markdown 文件名和非 Markdown 文件名；不能返回 Skill 文件内容、token、安装建议、编辑建议或迁移计划。
 
 ### `lorume runtime list --json --snapshot <path>`
 
@@ -49,6 +87,8 @@
 - `observedAt`
 
 该命令不解释平台原始字段，只消费已归一化 snapshot。
+
+该命令是兼容别名。新实现优先使用 `lorume collect inventory --json --snapshot <path>`。
 
 ### `lorume connector status --json --context <path> --target <id>`
 
@@ -65,5 +105,7 @@
 ## Harness
 
 - `src/cli/lorume-cli.test.ts` 覆盖命令 shape、JSON 输出、路径安全和 unsupported command。
+- `src/cli/lorume-cli.test.ts` 覆盖 `collect inventory`、`collect work-state`、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
+- `src/runtime/device-collector-script.test.ts` 必须验证 collector 通过 `lorume` CLI 获取 inventory / work-state / skill-probe，而不是直接新增第三方私有探测逻辑。
 - `npm run check:cli` 运行 CLI harness。
 - `npm run check:runtime`、`npm run check:backend`、`npm run check:quick` 继续覆盖 collector、backend 和 TypeScript 边界。

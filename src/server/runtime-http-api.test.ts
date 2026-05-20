@@ -160,6 +160,23 @@ describe("runtime HTTP API", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "invalid_device_token" });
   });
 
+  it("returns normalized collector ingestion errors with readable messages", async () => {
+    const { baseUrl } = await startRuntimeApi();
+
+    const response = await fetch(`${baseUrl}/api/device-snapshots`, {
+      body: JSON.stringify({ observedAt: "2026-05-12T09:59:30.000Z" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      error: "invalid_collector_snapshot",
+      message: "设备采集数据无效，请检查 Lorume CLI 版本或上报结构。",
+    });
+  });
+
   it("accepts real-sized runtime work state snapshots from remote collectors", async () => {
     const { baseUrl, workStateStore } = await startRuntimeApi();
     const snapshot = {

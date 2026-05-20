@@ -1,6 +1,6 @@
 # Backend Service Spec
 
-版本：TinySpec v0.4
+版本：TinySpec v0.5
 
 Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备控制面。当前阶段已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及 `lorume.com` ECS 部署。
 
@@ -10,7 +10,8 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 - 使用 Postgres 持久化设备、Runtime、Agent、Channel binding、工作项、会话、执行记录和采集记录。
 - 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 建立控制面，通过 HTTP POST 上报采集结果。
 - 将 Runs / Runtime Fleet 的正式数据读取固定为“后端查询、前端展示”，不再使用前端拉 latest snapshot 后本地筛选作为正式路径。
-- 每次 collector 上报都记录 ingestion 结果，并由后端生成设备采集健康结论，支持排查某个平台为什么缺数据、什么时候缺数据、缺了哪些能力。
+- 每次 collector 上报都记录 ingestion 结果，并由后端生成设备采集诊断结论，支持排查某个平台为什么缺数据、什么时候缺数据、缺了哪些能力。
+- 统一维护规范化错误码到用户可读 message 的映射；后端 API、collector 上报失败、通知和 UI 错误状态必须复用同一语义，不向用户展示技术错误字符串。
 - 使用 Postgres-backed Operation / Job Runner 承接通知和后续已规格化的异步动作。
 - 提供 production-like 本地部署配置：后端 bundle、前端静态构建、Nginx 反代和 Postgres compose。
 - 保持当前功能和测试质量，不为尚未上线的旧实现背兼容包袱。
@@ -80,10 +81,12 @@ Collector 保持主动上报：
 - Inventory 和 Work state 上报代表该设备的最新观测快照。后端按稳定 ID upsert 当前对象，并删除同一设备在新快照中已经消失的 Runtime、Agent、工作项、会话和执行记录；历史只保留在 `collector_ingestions` 中。
 - Work state 里的 `workItemId`、`conversationId` 等可选关联必须以当前快照中真实存在的对象为准。缺失的可选关联写成 `NULL`，不能因为单个平台的关联证据不完整而拒绝整批工作态上报。
 - Work state 里的 `runtimeId`、`agentId` 也必须按当前设备已注册对象校验。会话和工作项的陈旧 `runtimeId` / `agentId` 降级为 `NULL`；执行记录的 `runtimeId` 是必填外键，若 runtime 不存在则跳过该 execution，并在本次 ingestion 数量中反映实际写入数量。
-- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、错误摘要和接收时间。
+- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、规范化错误码、用户可读错误摘要和接收时间。
 - 认证后的 inventory / work-state 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
 - Collector 上报 inventory / work-state 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
-- 设备 WebSocket 在线只表示控制面可达，不等于 inventory / work-state 采集健康。采集健康必须从 `collector_ingestions` 中最近一次 inventory 与 work-state 记录独立判断。
+- 设备 WebSocket 在线只表示控制面可达，不等于 inventory / work-state 采集成功。采集诊断必须从 `collector_ingestions` 中最近一次 inventory 与 work-state 记录独立判断，并折叠进 Runtime Fleet 对象状态。
+- 最近同步时间只表达数据新鲜度，不单独产生 `stale` / 采集过期状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口，不在 Runtime Fleet 页面制造额外状态负担。
+- 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
 - Collector 可以继续演进为增量采集；当前复用现有采集结果，由后端通过 upsert 去重。
 
 建议节奏：
@@ -108,7 +111,7 @@ Collector 保持主动上报：
 正式查询 API：
 
 - `GET /api/runtime-fleet`
-  - 参数：`search`、`runtimeKind`、`healthStatus`。
+  - 参数：`search`、`runtimeKind`、`syncWindow`。
   - 返回 Runtime Fleet 页面需要的设备、Runtime、Agent、summary 和详情基础数据。
 - `GET /api/runtime-work-items`
   - 参数：`search`、`source`、`channelKind`、`stage`、`startAt`、`endAt`、`limit`、`cursor`。
@@ -119,12 +122,10 @@ Collector 保持主动上报：
 - `GET /api/devices/:deviceId/ingestions`
   - 返回最近采集记录，用于解释数据新鲜度和缺口；记录必须包含 `observedAt` 和 `receivedAt`，方便区分设备观测时间与后端接收时间。
 - `GET /api/devices/:deviceId/collection-health`
-  - 返回设备级采集健康摘要和 inventory / work-state 两个检查项。
-  - `healthy`：最近一次上报成功、未超时、无 warnings。
-  - `warning`：最近一次上报成功，但 adapter 有 warnings，例如某平台部分 probe 不可用。
-  - `stale`：最近一次上报超过健康阈值。
-  - `failed`：最近一次上报失败。
-  - `unknown`：尚未收到该 snapshot type 的采集记录。
+  - 返回设备级采集诊断摘要和 inventory / work-state 两个检查项。
+  - `healthy`：最近一次上报成功；warnings 只进入诊断信息，不改变 Runtime Fleet 展示状态。
+  - `failed`：尚未收到记录、最近一次上报失败、payload 结构不可用或后端写入失败。
+  - 该接口不再返回用户界面专用的 `warning`、`stale` 或 `unknown` 状态；Runtime Fleet 展示层只把 `failed` 折叠为对象 `异常`。
   - 该接口面向产品诊断，不返回外部平台密钥、原始 payload 或调试-only 字段。
 - `GET /api/operations`
   - 参数：`organizationId`、`status`、`resourceType`、`resourceId`、`targetType`、`targetId`、`limit`。
@@ -187,6 +188,8 @@ ECS 部署形态：
 - notification harness：事件聚合、限流、in-app 记录和 email delivery 记录。
 - collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime warning 通知。
 - collector contract harness：现有 collector 上报 payload 仍可被后端接收。
+- error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
+- structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。
 - deploy config harness：backend bundle、Dockerfile、Nginx、production-like compose 必须和当前服务入口一致。
 - production smoke harness：`npm run smoke:production` 检查 `/healthz`、`/readyz`、Runtime Fleet、Work Items 和设备采集健康查询。
 - Playwright harness：Runtime Fleet 和 Runs 页面继续通过，且不依赖手动 dev 数据。

@@ -57,16 +57,19 @@ Rules:
 
 ## Runtime Fleet
 
-Purpose: View Device, Runtime, Agent, collection health, recent sync, availability, and operating status.
+Purpose: View Device, Runtime, Agent, recent sync, ownership, and one clear operating status.
 
 Rules:
 
 - Runtime and Channel are separate concepts.
 - Runtime Fleet does not provide Channel filtering.
-- Availability and operating status use Lorume-owned semantics.
-- The layout should expose summary rail, Runtime matrix/list, Agent coverage, collection health, and a detail inspector.
-- Agent Skill probing appears only as a compact read-only detail-panel section; it does not become a standalone page, editor, import flow, or migration wizard.
-- Exceptions and unknown states must be traceable in ingestion/logging without dumping debug data into UI.
+- Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `工作中`、`空闲`、`离线`、`异常`.
+- The layout should expose compact summary, Runtime/Agent lists, and a sticky detail inspector without feeling like stacked cards.
+- The left navigation stays fixed and keeps the identity entry at the bottom of the viewport.
+- Desktop layouts keep the selected detail inspector visible while the main content scrolls.
+- Agent Skill probing appears as a compact row-level action with read-only metadata; it does not become a standalone page, editor, import flow, or migration wizard.
+- Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
+- Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
 
 ## Runs / Work Board
 

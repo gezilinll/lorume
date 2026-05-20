@@ -21,6 +21,7 @@ afterEach(() => {
 
 describe("backend email provider", () => {
   it("sends login codes through the configured SMTP account", async () => {
+    process.env.LORUME_APP_MODE = "production";
     process.env.LORUME_EMAIL_PROVIDER = "smtp";
     process.env.LORUME_SMTP_HOST = "smtp.qiye.aliyun.com";
     process.env.LORUME_SMTP_PORT = "465";
@@ -50,6 +51,7 @@ describe("backend email provider", () => {
   });
 
   it("fails loudly when production email provider is not configured", async () => {
+    process.env.LORUME_APP_MODE = "production";
     delete process.env.LORUME_AUTH_DEBUG_CODES;
     delete process.env.LORUME_EMAIL_PROVIDER;
 
@@ -59,5 +61,18 @@ describe("backend email provider", () => {
       code: "246810",
       email: "zhangliang@gaoding.com",
     })).rejects.toThrow("email_provider_not_configured");
+  });
+
+  it("prints login codes in development mode without requiring SMTP", async () => {
+    process.env.LORUME_APP_MODE = "development";
+    delete process.env.LORUME_AUTH_DEBUG_CODES;
+    delete process.env.LORUME_EMAIL_PROVIDER;
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    const provider = createBackendEmailProvider();
+    await provider.sendLoginCode({ code: "246810", email: "zhangliang@gaoding.com" });
+
+    expect(write).toHaveBeenCalledWith("Lorume login code for zhangliang@gaoding.com: 246810\n");
+    expect(mocks.createTransport).not.toHaveBeenCalled();
   });
 });

@@ -98,11 +98,11 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         await expect(healthResponse.json()).resolves.toMatchObject({
           deviceId: "fixture-mac",
-          status: "warning",
-          summary: "工作态采集有警告",
+          status: "healthy",
+          summary: "设备资产与工作态采集正常",
           checks: [
             expect.objectContaining({ id: "inventory", status: "healthy" }),
-            expect.objectContaining({ id: "work_state", status: "warning" }),
+            expect.objectContaining({ id: "work_state", status: "healthy" }),
           ],
         });
       } finally {
@@ -141,7 +141,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
               receivedAt: expect.any(String),
               snapshotType: "work_state",
               status: "failed",
-              error: "invalid runtime work state snapshot",
+              error: expect.stringContaining("invalid_work_state_snapshot: 工作态采集数据无效"),
             }),
             expect.objectContaining({
               deviceId: "broken-device",
@@ -149,7 +149,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
               receivedAt: expect.any(String),
               snapshotType: "inventory",
               status: "failed",
-              error: "invalid runtime inventory snapshot",
+              error: expect.stringContaining("invalid_collector_snapshot: 设备采集数据无效"),
             }),
           ],
         });

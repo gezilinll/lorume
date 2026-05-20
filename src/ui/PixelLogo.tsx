@@ -11,7 +11,7 @@ export function PixelLogo() {
         >
           <rect width="64" height="64" rx="18" fill="#111827" />
           <path d="M24 18v28h18" fill="none" stroke="#ffffff" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="47" cy="17" r="5" fill="#12a7a2" />
+          <circle cx="47" cy="17" r="5" fill="#0f9f9a" />
         </svg>
       </span>
       <span className="pixel-logo__wordmark">Lorume</span>

@@ -133,7 +133,7 @@ test.describe("Runs / Work Board", () => {
     await page.getByRole("button", { name: "Runs" }).click();
 
     await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
-    await expect(page.getByText(/当前数据源：后端查询/)).toBeVisible();
+    await expect(page.getByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeVisible();
     for (const lane of ["待处理", "处理中", "待验收", "已关闭", "需关注"]) {
       await expect(page.getByRole("heading", { name: lane })).toBeVisible();
     }
@@ -231,7 +231,7 @@ test.describe("Runs / Work Board", () => {
     await page.setViewportSize({ width: 1185, height: 900 });
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
-    await expect(page.getByText(/当前数据源：后端查询/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,

@@ -19,6 +19,7 @@ await prepareDatabase(databaseUrl);
 rmSync(e2eLoginCodePath, { force: true });
 
 const backend = createLorumeBackendServer({
+  appMode: "agent",
   databaseUrl,
   emailProvider: {
     async sendLoginCode(input) {
@@ -42,6 +43,8 @@ const vite = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", 
   env: {
     ...process.env,
     LORUME_BACKEND_URL: backend.url,
+    VITE_LORUME_APP_MODE: "agent",
+    VITE_LORUME_AUTH_MODE: "agent",
   },
   stdio: "inherit",
 });

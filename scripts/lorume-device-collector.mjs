@@ -1,14 +1,29 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir, hostname, arch, platform } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const COLLECTOR_VERSION = "0.1.0";
 const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_SLOCK_SERVER_URL = process.env.SLOCK_DEFAULT_SERVER_URL || "https://api.slock.ai";
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 const POST_RETRY_DELAYS_MS = [0, 500, 1500];
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_LORUME_CLI_PATH = path.join(SCRIPT_DIR, "lorume.mjs");
+const DEFAULT_COLLECTOR_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const COLLECTOR_LOG_SECRET_KEYS = new Set([
+  "authorization",
+  "bearertoken",
+  "code",
+  "devicetoken",
+  "emailprovidertoken",
+  "invitationtoken",
+  "password",
+  "sessiontoken",
+  "token",
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -89,6 +104,75 @@ function loadConfig(configPath) {
 
 function isoNow() {
   return new Date().toISOString();
+}
+
+function resolveCollectorLogPath(config = {}) {
+  return process.env.LORUME_COLLECTOR_LOG_PATH || config.logPath || path.join(homeDir(), ".lorume", "logs", "collector.jsonl");
+}
+
+function resolveCollectorLogMaxBytes(config = {}) {
+  const value = Number(process.env.LORUME_COLLECTOR_LOG_MAX_BYTES || config.logMaxBytes || DEFAULT_COLLECTOR_LOG_MAX_BYTES);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_COLLECTOR_LOG_MAX_BYTES;
+}
+
+function createCollectorLogger(config = {}) {
+  const logPath = resolveCollectorLogPath(config);
+  const maxBytes = resolveCollectorLogMaxBytes(config);
+  const write = (level, fields, message) => writeCollectorLog(logPath, maxBytes, level, fields, message);
+
+  return {
+    error: (fields, message) => write("error", fields, message),
+    info: (fields, message) => write("info", fields, message),
+    warn: (fields, message) => write("warn", fields, message),
+  };
+}
+
+function writeCollectorLog(logPath, maxBytes, level, fields, message) {
+  try {
+    mkdirSync(path.dirname(logPath), { recursive: true });
+    rotateCollectorLogIfNeeded(logPath, maxBytes);
+    appendFileSync(logPath, `${JSON.stringify({
+      ...redactCollectorLogFields(fields || {}),
+      level,
+      message,
+      service: "lorume-device-collector",
+      time: isoNow(),
+    })}\n`, "utf8");
+  } catch {
+    // Logging is best-effort and must never block device collection.
+  }
+}
+
+function rotateCollectorLogIfNeeded(logPath, maxBytes) {
+  try {
+    if (statSync(logPath).size < maxBytes) return;
+    renameSync(logPath, `${logPath}.1`);
+  } catch {
+    // Missing or unrotatable logs can be ignored.
+  }
+}
+
+function redactCollectorLogFields(value) {
+  if (Array.isArray(value)) return value.map((entry) => redactCollectorLogFields(entry));
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    COLLECTOR_LOG_SECRET_KEYS.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase())
+      ? "[redacted]"
+      : redactCollectorLogFields(entry),
+  ]));
+}
+
+function collectorErrorCode(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/post failed/i.test(message)) return "collector_post_failed";
+  if (/non-json|invalid|snapshot/i.test(message)) return "invalid_collector_snapshot";
+  return "collector_run_failed";
+}
+
+function collectorErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function sanitizeId(value) {
@@ -205,6 +289,7 @@ function runText(command, args, timeoutMs = 5_000) {
 
 function createDevice(config, observedAt) {
   const defaultId = sanitizeId(hostname());
+  const localIps = collectLocalIps();
   return {
     id: config.deviceId || defaultId,
     name: config.deviceName || config.deviceId || hostname(),
@@ -214,10 +299,31 @@ function createDevice(config, observedAt) {
     status: "unknown",
     connectionMode: "collector",
     lastSeenAt: observedAt,
+    user: { username: safeUsername() },
+    ...(localIps.length ? { network: { localIps } } : {}),
   };
 }
 
-function createRuntime({ deviceId, source, externalId, kind, name, status, version, capabilities, lastSeenAt, health }) {
+function safeUsername() {
+  try {
+    return userInfo().username;
+  } catch {
+    return "unknown";
+  }
+}
+
+function collectLocalIps() {
+  const values = [];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.internal) continue;
+      if (entry.address) values.push(entry.address);
+    }
+  }
+  return Array.from(new Set(values)).sort();
+}
+
+function createRuntime({ deviceId, source, externalId, kind, name, status, version, capabilities, lastSeenAt, health, paths }) {
   return {
     id: makeRuntimeId(deviceId, source, externalId),
     deviceId,
@@ -229,10 +335,11 @@ function createRuntime({ deviceId, source, externalId, kind, name, status, versi
     lastSeenAt,
     sourceRefs: [{ source, externalId, label: name }],
     ...(health ? { health } : {}),
+    ...(Array.isArray(paths) && paths.length ? { paths } : {}),
   };
 }
 
-function createAgent({ runtimeId, source, externalId, name, origin, status, channelBindings, lastSeenAt, load }) {
+function createAgent({ runtimeId, source, externalId, name, origin, status, channelBindings, lastSeenAt, load, paths }) {
   return {
     id: makeAgentId(runtimeId, externalId),
     runtimeId,
@@ -243,6 +350,7 @@ function createAgent({ runtimeId, source, externalId, name, origin, status, chan
     sourceRefs: [{ source, externalId, label: name }],
     ...(lastSeenAt ? { lastSeenAt } : {}),
     ...(load ? { load } : {}),
+    ...(Array.isArray(paths) && paths.length ? { paths } : {}),
   };
 }
 
@@ -334,6 +442,10 @@ function collectOpenClaw(deviceId, observedAt) {
       historicalSessions: status?.agents?.totalSessions,
       lastError: health?.ok === false ? "openclaw health returned ok=false" : undefined,
     },
+    paths: compactPaths([
+      { label: "Config", path: path.join(homeDir(), ".openclaw", "openclaw.json") },
+      { label: "Agents", path: path.join(homeDir(), ".openclaw", "agents") },
+    ]),
   });
 
   const openclawAgents = health?.agents || status?.agents?.agents || [];
@@ -355,6 +467,7 @@ function collectOpenClaw(deviceId, observedAt) {
       load: {
         ...(agent.sessions?.count === undefined ? {} : { historicalSessions: agent.sessions.count }),
       },
+      paths: compactPaths([{ label: "Agent", path: path.join(homeDir(), ".openclaw", "agents", agentId) }]),
     });
   });
 
@@ -433,6 +546,7 @@ function collectSlock(deviceId, observedAt) {
     status: commandExists("slock-daemon") || agentDirs.length > 0 ? "online" : "unknown",
     capabilities: ["agent:start", "agent:deliver", "workspace:files"],
     lastSeenAt: observedAt,
+    paths: compactPaths([{ label: "Agents", path: slockAgentsDir }]),
   });
 
   const agents = agentDirs.map((entry) =>
@@ -445,10 +559,15 @@ function collectSlock(deviceId, observedAt) {
       status: "unknown",
       channelBindings: [{ kind: "slock", label: "Slock", status: "enabled" }],
       lastSeenAt: observedAt,
+      paths: compactPaths([{ label: "Agent", path: path.join(slockAgentsDir, entry.name) }]),
     }),
   );
 
   return { runtimes: [runtime], agents };
+}
+
+function compactPaths(paths) {
+  return paths.filter((entry) => entry?.path && existsSync(entry.path));
 }
 
 function normalizeMulticaAgentStatus(status) {
@@ -517,6 +636,8 @@ function applyDeviceOverrides(snapshot, config) {
 }
 
 function collectSnapshot(config, args) {
+  if (!isInternalLegacyCollectorMode()) return collectSnapshotViaLorumeCli(config, args);
+
   const mergedConfig = {
     ...config,
     ...(args.serverUrl ? { serverUrl: args.serverUrl } : {}),
@@ -557,6 +678,16 @@ function collectSnapshot(config, args) {
   };
 }
 
+function collectSnapshotViaLorumeCli(config, args) {
+  const cliArgs = ["collect", "inventory", "--json"];
+  if (args.configPath) cliArgs.push("--config", args.configPath);
+  if (args.fixturePath) cliArgs.push("--snapshot", args.fixturePath);
+  const identity = resolveCliDeviceIdentity(config, args);
+  if (identity.deviceId) cliArgs.push("--device-id", identity.deviceId);
+  if (identity.deviceName) cliArgs.push("--device-name", identity.deviceName);
+  return stripCliCommand(runLorumeCliJson(config, cliArgs));
+}
+
 function resolveDeviceToken(config, args) {
   return String(args.deviceToken || config.deviceToken || "").trim();
 }
@@ -569,6 +700,11 @@ async function postSnapshot(serverUrl, snapshot, deviceToken = "") {
 async function postWorkStateSnapshot(serverUrl, snapshot, deviceToken = "") {
   const url = new URL("/api/runtime-work-state-snapshots", serverUrl);
   await postJsonWithRetry(url, snapshot, "Work state snapshot", deviceToken);
+}
+
+async function postAgentSkillProbeSnapshot(serverUrl, snapshot, deviceToken = "") {
+  const url = new URL("/api/agent-skill-probe-snapshots", serverUrl);
+  await postJsonWithRetry(url, snapshot, "Agent Skill probe snapshot", deviceToken);
 }
 
 async function postJsonWithRetry(url, payload, label, deviceToken = "") {
@@ -2105,6 +2241,8 @@ function mergeWorkStateParts(parts) {
 }
 
 async function collectWorkStateSnapshot(config, args) {
+  if (!isInternalLegacyCollectorMode()) return collectWorkStateViaLorumeCli(config, args);
+
   const mergedConfig = {
     ...config,
     ...(args.deviceId ? { deviceId: args.deviceId } : {}),
@@ -2137,6 +2275,89 @@ async function collectWorkStateSnapshot(config, args) {
     capabilities: collected.capabilities,
     ...(collected.warnings.length ? { warnings: collected.warnings } : {}),
   };
+}
+
+async function collectWorkStateViaLorumeCli(config, args) {
+  const cliArgs = ["collect", "work-state", "--json"];
+  if (args.configPath) cliArgs.push("--config", args.configPath);
+  const identity = resolveCliDeviceIdentity(config, args);
+  if (identity.deviceId) cliArgs.push("--device-id", identity.deviceId);
+  return stripCliCommand(runLorumeCliJson(config, cliArgs));
+}
+
+async function collectAgentSkillProbeViaLorumeCli(config, message) {
+  const payload = message.payload && typeof message.payload === "object" ? message.payload : {};
+  const targetAgentId = payload.targetAgentId || message.targetAgentId;
+  if (!targetAgentId || typeof targetAgentId !== "string") {
+    throw new Error("agent.skill_probe missing targetAgentId");
+  }
+  const cliArgs = ["agent", "skill-probe", "--json", "--agent-id", targetAgentId];
+  if (typeof payload.runtimeId === "string" && payload.runtimeId) cliArgs.push("--runtime-id", payload.runtimeId);
+  if (typeof message.deviceId === "string" && message.deviceId) cliArgs.push("--device-id", message.deviceId);
+  if (typeof payload.targetAgentName === "string" && payload.targetAgentName) cliArgs.push("--agent-name", payload.targetAgentName);
+  if (typeof payload.runtimeName === "string" && payload.runtimeName) cliArgs.push("--runtime-name", payload.runtimeName);
+  return stripCliCommand(runLorumeCliJson(config, cliArgs));
+}
+
+
+function resolveCliDeviceIdentity(config, args) {
+  if (args.deviceId || config.deviceId || args.deviceName || config.deviceName) {
+    return {
+      deviceId: args.deviceId || config.deviceId || "",
+      deviceName: args.deviceName || config.deviceName || "",
+    };
+  }
+  if (args.fixturePath) {
+    try {
+      const device = readJsonFile(args.fixturePath)?.device;
+      return {
+        deviceId: typeof device?.id === "string" ? device.id : "",
+        deviceName: typeof device?.name === "string" ? device.name : "",
+      };
+    } catch {
+      return { deviceId: "", deviceName: "" };
+    }
+  }
+  return { deviceId: "", deviceName: "" };
+}
+
+function resolveLorumeCliPath(config) {
+  return process.env.LORUME_CLI_PATH || config.lorumeCliPath || DEFAULT_LORUME_CLI_PATH;
+}
+
+function runLorumeCliJson(config, cliArgs) {
+  const cliPath = resolveLorumeCliPath(config);
+  const result = spawnSync(process.execPath, [cliPath, ...cliArgs], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      LORUME_CLI_USE_COLLECTOR_ADAPTERS: "1",
+      LORUME_COLLECTOR_INTERNAL_LEGACY: "1",
+    },
+    maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 120_000,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    throw new Error(stderr || `lorume CLI failed with exit code ${result.status}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new Error("lorume CLI returned non-JSON output");
+  }
+}
+
+function stripCliCommand(value) {
+  if (!value || typeof value !== "object") return value;
+  const { command: _command, ...snapshot } = value;
+  return snapshot;
+}
+
+function isInternalLegacyCollectorMode() {
+  return process.env.LORUME_COLLECTOR_INTERNAL_LEGACY === "1";
 }
 
 async function runWorkStateOnce(config, args) {
@@ -2230,6 +2451,10 @@ async function handleControlMessage(socket, rawMessage, config, args, seenComman
     return;
   }
 
+  if (message.type === "agent.skill_probe") {
+    await handleAgentSkillProbeCommand(socket, message, config, args, seenCommandIds);
+    return;
+  }
   if (message.type !== "inventory.refresh") return;
   if (!message.commandId) {
     sendControlMessage(socket, { type: "error", error: "inventory.refresh missing commandId" });
@@ -2263,6 +2488,55 @@ async function handleControlMessage(socket, rawMessage, config, args, seenComman
       result: {
         observedAt: inventorySnapshot.observedAt,
         workStateObservedAt: workStateSnapshot.observedAt,
+      },
+    });
+  } catch (error) {
+    sendControlMessage(socket, {
+      type: "command.result",
+      commandId: message.commandId,
+      deviceId: message.deviceId || config.deviceId || args.deviceId,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleAgentSkillProbeCommand(socket, message, config, args, seenCommandIds) {
+  if (!message.commandId) {
+    sendControlMessage(socket, { type: "error", error: "agent.skill_probe missing commandId" });
+    return;
+  }
+  if (seenCommandIds.has(message.commandId)) {
+    sendControlMessage(socket, {
+      type: "command.result",
+      commandId: message.commandId,
+      deviceId: message.deviceId || config.deviceId || args.deviceId,
+      status: "succeeded",
+      result: { duplicate: true },
+    });
+    return;
+  }
+
+  seenCommandIds.add(message.commandId);
+  sendControlMessage(socket, {
+    type: "command.accepted",
+    commandId: message.commandId,
+    deviceId: message.deviceId || config.deviceId || args.deviceId,
+  });
+
+  try {
+    const snapshot = await collectAgentSkillProbeViaLorumeCli(config, message);
+    const serverUrl = resolveServerUrl(config, args);
+    if (serverUrl) await postAgentSkillProbeSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
+    sendControlMessage(socket, {
+      type: "command.result",
+      commandId: message.commandId,
+      deviceId: snapshot.deviceId || message.deviceId || config.deviceId || args.deviceId,
+      status: "succeeded",
+      result: {
+        observedAt: snapshot.observedAt,
+        probedAt: snapshot.probedAt,
+        status: snapshot.status,
       },
     });
   } catch (error) {
@@ -2334,25 +2608,38 @@ function startControlChannel(config, args, refresh) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = loadConfig(args.configPath);
+  const logger = createCollectorLogger(config);
 
-  if (args.workStateOnce) {
-    await runWorkStateOnce(config, args);
-    return;
+  try {
+    if (args.workStateOnce) {
+      await runWorkStateOnce(config, args);
+      return;
+    }
+
+    if (args.once) {
+      await runOnce(config, args);
+      return;
+    }
+
+    const refresh = createRefreshRunner(config, args);
+    startControlChannel(config, args, refresh);
+    await refresh();
+    setInterval(() => {
+      refresh().catch((error) => {
+        logger.error({
+          errorCode: collectorErrorCode(error),
+          event: "collector_refresh_failed",
+        }, collectorErrorMessage(error));
+        console.error(`[lorume-device-collector] ${collectorErrorMessage(error)}`);
+      });
+    }, Number.isFinite(args.intervalMs) && args.intervalMs > 0 ? args.intervalMs : DEFAULT_INTERVAL_MS);
+  } catch (error) {
+    logger.error({
+      errorCode: collectorErrorCode(error),
+      event: "collector_run_failed",
+    }, collectorErrorMessage(error));
+    throw error;
   }
-
-  if (args.once) {
-    await runOnce(config, args);
-    return;
-  }
-
-  const refresh = createRefreshRunner(config, args);
-  startControlChannel(config, args, refresh);
-  await refresh();
-  setInterval(() => {
-    refresh().catch((error) => {
-      console.error(`[lorume-device-collector] ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }, Number.isFinite(args.intervalMs) && args.intervalMs > 0 ? args.intervalMs : DEFAULT_INTERVAL_MS);
 }
 
 main().catch((error) => {

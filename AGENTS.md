@@ -38,7 +38,9 @@ Current source of truth:
 - `src/runtime/runtime-work-query-api.ts`: frontend API adapter for backend Runs query responses and cursor pagination.
 - `src/runtime/runtime-data-source.ts`: source-of-truth helper for whether fixture fallback is allowed in a given build mode.
 - `src/runtime/runtime-listening-acceptance.ts`: TypeScript source of truth for source-specific listening readiness and Runs lane policy.
-- `src/runtime/runtime-collection-health.ts`: TypeScript source of truth for product-level collection health derived from collector ingestion records.
+- `src/runtime/runtime-collection-health.ts`: TypeScript source of truth for product-level collection diagnostics derived from collector ingestion records and folded into Runtime Fleet object status.
+- `src/errors/error-catalog.ts`: shared source of truth for normalized error codes and user-readable messages.
+- `src/logging/structured-logger.ts`: shared backend structured logger with secret redaction rules.
 - `src/runtime/agent-skill-probe.ts`: TypeScript source of truth for read-only Agent Skill probe metadata normalization and local file-entry parsing.
 - `src/runtime/runtime-inventory-query.ts`: query and detail model for the Runtime Fleet page.
 - `src/server/runtime-inventory-store.ts`: internal snapshot and command state store used for collector validation and the device control channel.
@@ -110,6 +112,7 @@ Current spec and harness mapping:
 | Runtime listening acceptance | `docs/product/runtime-listening-acceptance-spec.md`, `src/runtime/runtime-listening-acceptance.ts`, `docs/product/runtime-work-state-probe.md` | `src/runtime/runtime-listening-acceptance.test.ts`, `src/runtime/runtime-work-state-adapters.test.ts`, `npm run check:runtime` |
 | Runs / Work Board page | `src/runtime/RuntimeWorkBoardPage.tsx`, `src/runtime/runtime-work-query-api.ts`, `src/runtime/runtime-data-source.ts`, `docs/product/runtime-work-state-probe.md` | `src/App.test.tsx`, `src/runtime/runtime-work-query-api.test.ts`, `src/runtime/runtime-data-source.test.ts`, `e2e/runtime-work-board.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
 | Runtime Fleet page | `docs/product/runtime-fleet-page-spec.md`, `src/runtime/runtime-inventory-query.ts`, `src/runtime/runtime-collection-health.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/runtime-inventory-query.test.ts`, `src/runtime/runtime-collection-health.test.ts`, `src/App.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
+| Normalized errors and structured logs | `src/errors/error-catalog.ts`, `src/logging/structured-logger.ts`, `docs/product/backend-service-spec.md`, `docs/product/runtime-device-registration-spec.md` | `src/errors/error-catalog.test.ts`, `src/logging/structured-logger.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `npm run check:backend`, `npm run check:runtime`, `npm run check:quick` |
 | Runtime snapshot and control backend | `docs/product/runtime-device-registration-spec.md`, `src/runtime/runtime-collection-health.ts`, `src/server/runtime-inventory-store.ts`, `src/server/runtime-control-channel.ts`, `src/server/runtime-http-api.ts`, `src/backend/backend-server.ts` | `src/runtime/runtime-collection-health.test.ts`, `src/server/runtime-inventory-store.test.ts`, `src/server/runtime-control-channel.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `npm run check:backend` |
 | Backend service formalization | `docs/product/backend-service-spec.md`, `src/backend/backend-server.ts`, `src/server/postgres-store.ts`, `db/migrations/`, `scripts/db-migrate.mjs`, `scripts/dev-e2e.ts`, `scripts/smoke-production.mjs`, `vite.backend.config.ts`, `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml` | `src/backend/backend-server.test.ts`, `src/backend/dev-e2e-config.test.ts`, `src/server/db-migrate.test.ts`, `src/server/postgres-store.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `scripts/check-deploy-config.mjs`, `npm run check:backend:standalone`, `npm run check:db`, `npm run check:backend`, `npm run check:deploy`, `npm run smoke:production` |
 | Auth and access | `docs/product/auth-and-access-spec.md`, `src/auth/`, `db/migrations/` | `src/auth/auth-crypto.test.ts`, `src/auth/auth-store.test.ts`, `src/auth/auth-http-api.test.ts`, `src/server/runtime-http-api.test.ts`, `npm run check:backend`, `npm run check:db`, `npm run check:quick` |
@@ -140,7 +143,7 @@ Keep the test layout simple and tied to what each harness can prove:
 - Keep shared Vitest / Testing Library setup in `src/test/setup.ts`.
 - Put real-browser Playwright specs in `e2e/`. Use this for user workflows, responsive layout, browser rendering, and behavior jsdom cannot prove.
 - Keep Playwright server state isolated from manual dev/acceptance state. The default e2e web server uses `scripts/dev-e2e.ts`, an isolated `lorume_e2e` Postgres database, the standalone backend, and a Vite proxy so test fixture posts do not overwrite manual review data.
-- Keep auth harnesses and Console harnesses separated. `check:e2e` sets `VITE_LORUME_AUTH_MODE=disabled` so Runtime Fleet and Runs browser tests validate the Console directly; auth entry, email-code login, organization creation, and invitation flows are covered by `src/auth/*` component/API/backend tests.
+- Keep auth harnesses and Console harnesses separated. `check:e2e` sets `VITE_LORUME_AUTH_MODE=agent` so Runtime Fleet and Runs browser tests validate the Console directly; auth entry, email-code login, organization creation, and invitation flows are covered by `src/auth/*` component/API/backend tests.
 - Prefer adding the smallest focused test that captures the important behavior. Do not create broad `tests/`, `specs/`, or `harnesses/` directories until the project has enough surfaces to justify them.
 
 ## Agent-Ready Growth
@@ -194,7 +197,7 @@ Current harness scripts:
 | `npm run start:backend` | Run the bundled backend artifact. | Manual smoke of production-like backend output after `npm run build:backend`. |
 | `npm run check:deploy` | Build backend bundle and verify Docker / Nginx / production-like compose config. | Deployment-shape, backend bundle, Dockerfile, compose, or Nginx changes. |
 | `npm run smoke:production` | Check the deployed environment health, readiness, Runtime Fleet, Runs, and device collection-health read paths. | After ECS deploy, DNS/Nginx changes, backend query changes, or collector registration changes. |
-| `npm run check:e2e` | Playwright browser harness using isolated Postgres, standalone backend, Vite proxy, and auth disabled for Console surfaces. | Runtime Fleet/Runs interaction paths, layout, toolbar, responsive behavior, navigation shell, backend query wiring, or visual regression risk. |
+| `npm run check:e2e` | Playwright browser harness using isolated Postgres, standalone backend, Vite proxy, and agent-mode auth for Console surfaces. | Runtime Fleet/Runs interaction paths, layout, toolbar, responsive behavior, navigation shell, backend query wiring, or visual regression risk. |
 | `npm run verify` | Full harness, same as `./scripts/verify.sh`. | Before handoff, commit, or review. |
 
 Local frontend development:

@@ -80,11 +80,8 @@ const quickRangeLabels: Record<QuickRangeOption, string> = {
 const fixtureWorkStateSnapshot = createFixtureWorkStateSnapshot();
 const defaultFiltersKey = createRuntimeWorkFiltersKey();
 
-type RuntimeWorkDataSource = "fixture" | "backend-query";
-
 interface RuntimeWorkSnapshotLoadResult {
   snapshot: RuntimeWorkStateSnapshot;
-  source: Extract<RuntimeWorkDataSource, "backend-query">;
   total: number;
   nextCursor?: string;
 }
@@ -94,9 +91,6 @@ export function RuntimeWorkBoardPage() {
   const allowFixtureFallback = isFixtureFallbackAllowed();
   const [snapshot, setSnapshot] = useState<RuntimeWorkStateSnapshot>(
     allowFixtureFallback ? fixtureWorkStateSnapshot : createEmptyWorkStateSnapshot(),
-  );
-  const [dataSource, setDataSource] = useState<RuntimeWorkDataSource>(
-    allowFixtureFallback ? "fixture" : "backend-query",
   );
   const [totalMatchingItems, setTotalMatchingItems] = useState(
     allowFixtureFallback ? fixtureWorkStateSnapshot.workItems.length : 0,
@@ -130,16 +124,14 @@ export function RuntimeWorkBoardPage() {
     }
     const queryPage = runtimeWorkItemsQueryPageFromResponse(await queryResponse.json());
     if (!queryPage) throw new Error("runtime work item query returned an invalid payload");
-    return { ...queryPage, source: "backend-query" };
+    return queryPage;
   }
 
   function applySnapshot(
     latestSnapshot: RuntimeWorkStateSnapshot,
-    latestDataSource: RuntimeWorkDataSource,
     options: { append?: boolean; filtersKey?: string; nextCursor?: string; total?: number } = {},
   ) {
     setSnapshot((current) => options.append ? mergeWorkStateSnapshots(current, latestSnapshot) : latestSnapshot);
-    setDataSource(latestDataSource);
     setNextCursor(options.nextCursor);
     setLoadedFiltersKey(options.filtersKey ?? defaultFiltersKey);
     setTotalMatchingItems(options.total ?? latestSnapshot.workItems.length);
@@ -161,7 +153,7 @@ export function RuntimeWorkBoardPage() {
   async function loadLatestSnapshot(options: { silent?: boolean } = {}) {
     try {
       const latestSnapshot = await fetchLatestSnapshot(filters);
-      applySnapshot(latestSnapshot.snapshot, latestSnapshot.source, {
+      applySnapshot(latestSnapshot.snapshot, {
         filtersKey,
         nextCursor: latestSnapshot.nextCursor,
         total: latestSnapshot.total,
@@ -185,7 +177,7 @@ export function RuntimeWorkBoardPage() {
       try {
         const latestSnapshot = await fetchLatestSnapshot(filters);
         if (!cancelled) {
-          applySnapshot(latestSnapshot.snapshot, latestSnapshot.source, {
+          applySnapshot(latestSnapshot.snapshot, {
             filtersKey,
             nextCursor: latestSnapshot.nextCursor,
             total: latestSnapshot.total,
@@ -270,7 +262,7 @@ export function RuntimeWorkBoardPage() {
     setLoadingMore(true);
     try {
       const page = await fetchLatestSnapshot(filters, nextCursor);
-      applySnapshot(page.snapshot, page.source, {
+      applySnapshot(page.snapshot, {
         append: true,
         filtersKey,
         nextCursor: page.nextCursor,
@@ -294,8 +286,7 @@ export function RuntimeWorkBoardPage() {
           <p className="eyebrow">Agent / Work Board</p>
           <h1>工作看板</h1>
           <p className="pageSubtitle">
-            统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。当前数据源：
-            {dataSource === "backend-query" ? "后端查询" : "Fixture 样例"}
+            统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。
           </p>
           <p className="pageRefreshMeta">
             快照时间 {formatRuntimeTimestamp(snapshot.observedAt)}

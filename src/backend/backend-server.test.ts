@@ -139,6 +139,15 @@ describe("standalone Lorume backend server", () => {
 
     await expect(closePromise).resolves.toBe(1008);
   });
+
+  it("requires a user session for Runtime read APIs in production mode", async () => {
+    const backend = await startBackend({ appMode: "production" });
+
+    const response = await fetch(`${backend.url}/api/runtime-fleet`);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ error: "unauthorized" });
+  });
 });
 
 describeDb("standalone Lorume backend server with Postgres", () => {
@@ -268,6 +277,7 @@ describeDb("standalone Lorume backend server with Postgres", () => {
 });
 
 async function startBackend(options: {
+  appMode?: "production" | "development" | "agent";
   authPepper?: string;
   authStore?: AuthStore;
   createCommandId?: () => string;
@@ -276,6 +286,7 @@ async function startBackend(options: {
 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-standalone-backend-"));
   const backend = createLorumeBackendServer({
+    appMode: options.appMode ?? "agent",
     createCommandId: options.createCommandId,
     databaseUrl: options.databaseUrl,
     authPepper: options.authPepper,

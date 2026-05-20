@@ -90,6 +90,13 @@ function collectionHealthResponse(snapshot: RuntimeInventorySnapshot) {
   };
 }
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 function stageFromWorkItemStatus(status: RuntimeWorkStateSnapshot["workItems"][number]["status"]): string {
   if (status === "todo") return "pending";
   if (status === "in_progress") return "processing";
@@ -132,6 +139,26 @@ describe("Console shell", () => {
 
   it("uses URL routes for implemented console pages and hides unavailable nav entries", async () => {
     const user = userEvent.setup();
+    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/runtime-fleet")) {
+        return jsonResponse(runtimeFleetQueryResponse(backendSnapshot));
+      }
+      if (url.includes("/api/runtime-work-items")) {
+        return jsonResponse(emptyWorkStateQueryResponse());
+      }
+      if (url.includes("/api/devices/fixture-mac/collection-health")) {
+        return jsonResponse(collectionHealthResponse(backendSnapshot));
+      }
+      if (url.includes("/api/operations")) {
+        return jsonResponse({ operations: [] });
+      }
+      if (url.includes("/api/notifications")) {
+        return jsonResponse({ threads: [] });
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
     window.history.pushState({}, "", "/runtime");
 
     render(<App />);
@@ -157,21 +184,21 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "任务 0" }));
     expect(window.location.pathname).toBe("/operations");
     const operationsDrawer = screen.getByRole("dialog", { name: "任务" });
-    expect(within(operationsDrawer).getByText("请选择组织后查看任务。")).toBeInTheDocument();
+    expect(within(operationsDrawer).getByText("本地调试模式不读取远端任务。")).toBeInTheDocument();
     await user.click(within(operationsDrawer).getByRole("button", { name: "关闭任务" }));
     expect(window.location.pathname).toBe("/runs");
 
     await user.click(screen.getByRole("button", { name: "通知 0" }));
     expect(window.location.pathname).toBe("/notifications");
     const notificationsDrawer = screen.getByRole("dialog", { name: "通知" });
-    expect(within(notificationsDrawer).getByText("请选择组织后查看通知。")).toBeInTheDocument();
+    expect(within(notificationsDrawer).getByText("本地调试模式不读取远端通知。")).toBeInTheDocument();
     await user.click(within(notificationsDrawer).getByRole("button", { name: "关闭通知" }));
     expect(window.location.pathname).toBe("/runs");
 
     await user.click(within(nav).getByRole("button", { name: "组织设置" }));
     expect(window.location.pathname).toBe("/settings");
     expect(screen.getByRole("heading", { name: "组织设置" })).toBeInTheDocument();
-    expect(screen.getByText("请选择组织后管理成员与权限。")).toBeInTheDocument();
+    expect(screen.getAllByText("精选AI").length).toBeGreaterThan(0);
   });
 
   it("falls back from the removed Catalog route to Runtime Fleet", () => {
@@ -209,7 +236,7 @@ describe("Console shell", () => {
     for (const lane of ["待处理", "处理中", "待验收", "已关闭", "需关注"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
-    expect(await screen.findByText(/当前数据源：Fixture/)).toBeInTheDocument();
+    expect(await screen.findByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeInTheDocument();
     const channelSelect = screen.getByLabelText("渠道") as HTMLSelectElement;
     expect(channelSelect.value).toBe("all");
     expect(within(channelSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
@@ -383,7 +410,7 @@ describe("Console shell", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByText(/当前数据源：后端查询/)).toBeInTheDocument();
+    expect(await screen.findByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("来源 Runtime"), "slock");
     expect(screen.queryByText("Slock 监听未就绪")).not.toBeInTheDocument();
@@ -530,10 +557,7 @@ describe("Console shell", () => {
       "OpenClaw",
       "Slock",
     ]);
-    expect(within(screen.getByLabelText("可用性")).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "全部",
-      "在线",
-    ]);
+    expect(screen.queryByLabelText("可用性")).not.toBeInTheDocument();
   });
 
   it("loads Runtime Fleet from the backend query API when available", async () => {
@@ -566,11 +590,11 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     expect((await screen.findAllByText("Backend DB Mac")).length).toBeGreaterThan(0);
-    expect(screen.getByText(/当前数据源：后端查询/)).toBeInTheDocument();
-    const healthPanel = screen.getByLabelText("采集健康");
-    expect(within(healthPanel).getByText("工作态采集有警告")).toBeInTheDocument();
-    expect(within(healthPanel).getByText("采集成功，但有 1 条警告")).toBeInTheDocument();
-    expect(within(healthPanel).getByText("工作项 8 · 会话 4 · 执行 2")).toBeInTheDocument();
+    expect(screen.getByText("查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。")).toBeInTheDocument();
+    expect(screen.queryByLabelText("采集健康")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("运行资产概览")).queryByText("异常")).not.toBeInTheDocument();
+    expect(screen.queryByText("未知")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "请求设备刷新" })).not.toBeInTheDocument();
   });
 
   it("loads every backend work-item page before deriving Runtime Fleet operating status", async () => {
@@ -623,7 +647,8 @@ describe("Console shell", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
-    expect(await screen.findByRole("row", { name: /Slock daemon.*工作中/ })).toBeInTheDocument();
+    const runtimeTable = await screen.findByRole("table", { name: "Runtime 列表" });
+    expect(within(runtimeTable).getByRole("row", { name: /Slock daemon.*工作中/ })).toBeInTheDocument();
     expect(requests.some((url) => url.includes("cursor=work-page-2"))).toBe(true);
   });
 
@@ -691,7 +716,7 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
-    expect(screen.getByText(/当前数据源：后端查询/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
   });
 
   it("keeps current Runs filters when automatic refresh reloads backend query data", async () => {
@@ -831,7 +856,7 @@ describe("Console shell", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByText(/当前数据源：后端查询/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Old card/ })).toBeInTheDocument();
     const lanes = screen.getByLabelText("工作态泳道");
     expect(within(lanes).getAllByText("Old card").length).toBeGreaterThan(0);
     expect(within(lanes).getAllByText("New card").length).toBeGreaterThan(0);
@@ -897,15 +922,15 @@ describe("Console shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
-    expect(await screen.findByRole("columnheader", { name: "运行状态" })).toBeInTheDocument();
-    const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
+    const runtimeTable = await screen.findByRole("table", { name: "Runtime 列表" });
+    expect(within(runtimeTable).getByRole("columnheader", { name: "状态" })).toBeInTheDocument();
     const slockRuntimeRow = within(runtimeTable).getByRole("row", { name: /Slock daemon/ });
     expect(within(slockRuntimeRow).getByText("工作中")).toBeInTheDocument();
 
     await user.click(slockRuntimeRow);
     const detail = screen.getByRole("complementary", { name: "运行资产详情" });
-    expect(within(detail).getByText("运行状态: 工作中")).toBeInTheDocument();
-    expect(within(detail).getByText("可用性: 在线")).toBeInTheDocument();
+    expect(within(detail).getByText("状态: 工作中")).toBeInTheDocument();
+    expect(within(detail).queryByText(/可用性/)).not.toBeInTheDocument();
   });
 
   it("shows Slock Agent status and workload statistics from task-board work state", async () => {
@@ -984,13 +1009,13 @@ describe("Console shell", () => {
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
     const testerRow = within(agentTable).getByRole("row", { name: /tester/ });
-    expect(within(testerRow).getByText("活跃")).toBeInTheDocument();
+    expect(within(testerRow).getByText("工作中")).toBeInTheDocument();
 
     await user.click(testerRow);
 
     const detail = screen.getByRole("complementary", { name: "运行资产详情" });
     expect(within(detail).getByRole("heading", { name: "tester" })).toBeInTheDocument();
-    expect(within(detail).getByText("状态: 活跃")).toBeInTheDocument();
+    expect(within(detail).getByText("状态: 工作中")).toBeInTheDocument();
     expect(within(detail).getByText("活跃任务: 1")).toBeInTheDocument();
     expect(within(detail).getByText("队列深度: 1")).toBeInTheDocument();
     expect(within(detail).getByText("活跃会话: 1")).toBeInTheDocument();
@@ -1113,165 +1138,4 @@ describe("Console shell", () => {
     expect(screen.getByText(/上次刷新/)).toBeInTheDocument();
   });
 
-  it("requests a remote device refresh and reloads backend query data", async () => {
-    const user = userEvent.setup();
-    let latestRequests = 0;
-    const backendSnapshot: RuntimeInventorySnapshot = {
-      ...(fixtureSnapshot as RuntimeInventorySnapshot),
-      device: {
-        ...(fixtureSnapshot as RuntimeInventorySnapshot).device,
-        name: "Backend Fixture Mac",
-      },
-    };
-    const refreshedSnapshot: RuntimeInventorySnapshot = {
-      ...backendSnapshot,
-      device: {
-        ...backendSnapshot.device,
-        name: "Refreshed Fixture Mac",
-      },
-    };
-    globalThis.fetch = vi.fn(async (input, init) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        latestRequests += 1;
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(
-          latestRequests === 1 ? backendSnapshot : refreshedSnapshot,
-        )), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/refresh") && init?.method === "POST") {
-        return new Response(JSON.stringify({ ok: true, commandId: "cmd-refresh-1", status: "sent" }), {
-          status: 202,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/commands/cmd-refresh-1")) {
-        return new Response(JSON.stringify({ commandId: "cmd-refresh-1", status: "succeeded" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    expect(await screen.findAllByText("Backend Fixture Mac")).toHaveLength(3);
-
-    await user.click(screen.getByRole("button", { name: "请求设备刷新" }));
-
-    expect(await screen.findByText("刷新完成")).toBeInTheDocument();
-    expect((await screen.findAllByText("Refreshed Fixture Mac")).length).toBeGreaterThan(0);
-    expect(vi.mocked(globalThis.fetch).mock.calls.some((call) => call[0].toString().includes("/refresh"))).toBe(true);
-  });
-
-  it("polls a remote refresh command until it reaches a terminal state", async () => {
-    const user = userEvent.setup();
-    let latestRequests = 0;
-    let commandRequests = 0;
-    const backendSnapshot: RuntimeInventorySnapshot = {
-      ...(fixtureSnapshot as RuntimeInventorySnapshot),
-      device: {
-        ...(fixtureSnapshot as RuntimeInventorySnapshot).device,
-        name: "Backend Fixture Mac",
-      },
-    };
-    const refreshedSnapshot: RuntimeInventorySnapshot = {
-      ...backendSnapshot,
-      device: {
-        ...backendSnapshot.device,
-        name: "Polled Fixture Mac",
-      },
-    };
-    globalThis.fetch = vi.fn(async (input, init) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        latestRequests += 1;
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(
-          latestRequests === 1 ? backendSnapshot : refreshedSnapshot,
-        )), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/refresh") && init?.method === "POST") {
-        return new Response(JSON.stringify({ ok: true, commandId: "cmd-refresh-1", status: "sent" }), {
-          status: 202,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/commands/cmd-refresh-1")) {
-        commandRequests += 1;
-        return new Response(JSON.stringify({
-          commandId: "cmd-refresh-1",
-          status: commandRequests === 1 ? "accepted" : "succeeded",
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    expect(await screen.findAllByText("Backend Fixture Mac")).toHaveLength(3);
-
-    await user.click(screen.getByRole("button", { name: "请求设备刷新" }));
-
-    expect(await screen.findByText("刷新完成", {}, { timeout: 3000 })).toBeInTheDocument();
-    expect((await screen.findAllByText("Polled Fixture Mac")).length).toBeGreaterThan(0);
-    expect(commandRequests).toBe(2);
-  });
-
-  it("shows a clear remote refresh error when the device is disconnected", async () => {
-    const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
-    globalThis.fetch = vi.fn(async (input, init) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/refresh") && init?.method === "POST") {
-        return new Response(JSON.stringify({
-          error: "device_not_connected",
-          message: "device is not connected: fixture-mac",
-        }), {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    expect((await screen.findAllByText("Fixture Mac")).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: "请求设备刷新" }));
-
-    expect(await screen.findByText("设备控制通道未连接，已保留最近一次采集数据。请确认设备 Collector 在线后再刷新。")).toBeInTheDocument();
-  });
 });

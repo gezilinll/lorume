@@ -7,8 +7,8 @@
     "lorume": "scripts/lorume.mjs"
   },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "dev:backend": "tsx src/backend/backend-server.ts",
+    "dev": "VITE_LORUME_APP_MODE=${VITE_LORUME_APP_MODE:-development} vite --host 0.0.0.0",
+    "dev:backend": "LORUME_APP_MODE=${LORUME_APP_MODE:-development} tsx src/backend/backend-server.ts",
     "dev:e2e": "tsx scripts/dev-e2e.ts",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "node scripts/db-migrate.mjs",

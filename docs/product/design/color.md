@@ -1,29 +1,29 @@
 # Color
 
-Lorume uses a cool, low-noise palette. Color serves hierarchy, state, and product memory; it must not decorate every component.
+Lorume uses a cool, low-noise palette grounded in mature Slate / Blue / Teal UI scales. Color serves hierarchy, state, and product memory; it must not decorate every component.
 
 ## Active Palette
 
 | Role | Token | Value |
 |---|---|---|
-| Page background | `--lorume-color-bg` | `#f7f9fb` |
-| Rail background | `--lorume-color-bg-rail` | `#eef3f7` |
+| Page background | `--lorume-color-bg` | `#f8fafc` |
+| Rail background | `--lorume-color-bg-rail` | `#eef4f8` |
 | Surface | `--lorume-color-surface` | `rgba(255, 255, 255, 0.88)` |
-| Soft surface | `--lorume-color-surface-soft` | `#f4f7fa` |
-| Blue surface | `--lorume-color-surface-blue` | `#f2f7ff` |
-| Ink | `--lorume-color-ink` | `#111827` |
-| Muted text | `--lorume-color-muted` | `#667587` |
-| Faint text | `--lorume-color-faint` | `#94a3b5` |
-| Hairline | `--lorume-color-line` | `#dce5ee` |
-| Strong line | `--lorume-color-line-strong` | `#b8c5d3` |
-| Primary action | `--lorume-color-action` | `#245bff` |
-| Primary action bright | `--lorume-color-action-bright` | `#3d73ff` |
-| Primary action dark | `--lorume-color-action-dark` | `#163fc2` |
-| Operational signal | `--lorume-color-accent` | `#12a7a2` |
-| Success | `--lorume-color-success` | `#1f9d68` |
-| Warning | `--lorume-color-warning` | `#b7791f` |
-| Danger | `--lorume-color-danger` | `#d64b55` |
-| Info | `--lorume-color-info` | `#2d7ff0` |
+| Soft surface | `--lorume-color-surface-soft` | `#f1f5f9` |
+| Blue surface | `--lorume-color-surface-blue` | `#eff6ff` |
+| Ink | `--lorume-color-ink` | `#0f172a` |
+| Muted text | `--lorume-color-muted` | `#64748b` |
+| Faint text | `--lorume-color-faint` | `#94a3b8` |
+| Hairline | `--lorume-color-line` | `#d8e2ee` |
+| Strong line | `--lorume-color-line-strong` | `#b6c4d2` |
+| Primary action | `--lorume-color-action` | `#2563eb` |
+| Primary action bright | `--lorume-color-action-bright` | `#3b82f6` |
+| Primary action dark | `--lorume-color-action-dark` | `#1d4ed8` |
+| Operational signal | `--lorume-color-accent` | `#0f9f9a` |
+| Success | `--lorume-color-success` | `#15803d` |
+| Warning | `--lorume-color-warning` | `#a16207` |
+| Danger | `--lorume-color-danger` | `#dc2626` |
+| Info | `--lorume-color-info` | `#2563eb` |
 
 ## Usage Ratio
 
@@ -38,9 +38,9 @@ If a screen feels busy, reduce accent usage before reducing useful data.
 - Action blue means primary action or active navigation.
 - Teal means operational signal, sync, routing, or online context.
 - Green means healthy or completed.
-- Amber means attention, manual step, stale state, or pending user review.
+- Amber means attention, manual step, delayed sync, or pending user review. It should not create a separate "stale" asset status when recent sync time already explains freshness.
 - Red means failed, blocked, critical, or destructive.
-- Source/runtime/channel badges should be neutral or info-toned unless they are expressing status.
+- Source/runtime/channel badges should be neutral by default. Semantic color is reserved for actual health, availability, progress, warning, and error states.
 
 ## Contrast
 

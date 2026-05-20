@@ -17,7 +17,7 @@ const networkLayers = [
 ] as const;
 
 const consoleCards: Array<{ detail: string; icon: PixelIconName; title: string }> = [
-  { detail: "设备、Runtime、Agent 的采集状态与可用性。", icon: "server", title: "Runtime Fleet" },
+  { detail: "设备、Runtime、Agent 的采集状态、归属关系和最近活动。", icon: "server", title: "Runtime Fleet" },
   { detail: "任务上下文优先的工作看板，不暴露原始 payload。", icon: "chart", title: "Runs Board" },
   { detail: "组织成员、邀请链接和角色边界。", icon: "shield", title: "组织设置" },
 ];
@@ -70,7 +70,7 @@ export function HomePage() {
         <section className="homeNetwork" aria-label="Agent 网络结构预览">
           <div className="homeNetwork__header">
             <span>CONTROL SURFACE</span>
-            <strong>Operational graph</strong>
+            <strong>Live product surface</strong>
           </div>
           <div className="homeNetwork__canvas">
             {networkLayers.map((layer) => (

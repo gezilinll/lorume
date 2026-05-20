@@ -24,8 +24,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    await user.click(screen.getByRole("row", { name: /tester/ }));
-    await user.click(screen.getByRole("button", { name: "查看 Skill 探测" }));
+    await user.click(screen.getByRole("button", { name: "tester Skill 探测" }));
 
     expect(screen.getByText("正在读取 Skill 探测")).toBeInTheDocument();
     resolveProbe(new Response(JSON.stringify({
@@ -53,8 +52,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    await user.click(screen.getByRole("row", { name: /tester/ }));
-    await user.click(screen.getByRole("button", { name: "查看 Skill 探测" }));
+    await user.click(screen.getByRole("button", { name: "tester Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("reviewer")).toBeInTheDocument();
@@ -83,15 +81,31 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    fireEvent.click(screen.getByRole("row", { name: /tester/ }));
-    fireEvent.click(screen.getByRole("button", { name: "查看 Skill 探测" }));
+    fireEvent.click(screen.getByRole("button", { name: "tester Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("不支持探测")).toBeInTheDocument();
     expect(within(panel).getByText("当前 runtime 不支持本地 Skill 探测")).toBeInTheDocument();
 
-    fireEvent.click(within(panel).getByRole("button", { name: "请求 Skill 探测" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "请求探测" }));
     await waitFor(() => expect(within(panel).getByText("设备控制通道未连接")).toBeInTheDocument());
+  });
+
+  it("maps backend transport failures to readable messages", async () => {
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/agents/") && url.includes("/skill-probe")) {
+        return new Response(JSON.stringify({ error: "bad_gateway" }), { status: 502 });
+      }
+      return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
+    }) as unknown as typeof fetch;
+
+    render(<RuntimeFleetPage />);
+    fireEvent.click(screen.getByRole("button", { name: "tester Skill 探测" }));
+
+    const panel = await screen.findByRole("region", { name: "Skill 探测" });
+    expect(within(panel).getByText("本地后端暂不可用，请稍后重试。")).toBeInTheDocument();
+    expect(within(panel).queryByText(/HTTP 502/)).not.toBeInTheDocument();
   });
 });
 

@@ -33,6 +33,7 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 - 是否新增了一次性 box-shadow、border、font-family、radius。
 - 是否在业务页面复制 logo 或 icon SVG。
 - 是否破坏 Brand、Identity、Console 之间的 token 一致性。
+- Console 页面是否仍保持简洁、高级、专业、统一；必要时把最终截图与 Datadog Infrastructure List、Grafana Fleet Management、Linear 列表/详情等优秀竞品的信息密度和视觉噪声做对照，但不照搬其品牌风格。
 
 ## Harness Responsibility
 
@@ -47,6 +48,7 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 - `src/App.test.tsx` 锁定首页入口、已实现 Console 导航、不可用入口隐藏、Runtime Fleet / Runs / 组织设置的核心交互，以及任务/通知工具抽屉的打开、关闭和路由边界。
 - `src/console/ConsoleUtilityDrawer.test.tsx`、`src/settings/OrganizationSettingsPage.test.tsx` 锁定任务/通知抽屉、已读状态、组织邀请入口的 API 读取、权限显示和详情查看。
 - `e2e/runtime-fleet.spec.ts` 锁定 Runtime Fleet 的动态筛选、详情面板、响应式和无 Channel 筛选。
+- `e2e/runtime-fleet.spec.ts` 锁定 Runtime Fleet 左侧导航固定、详情 inspector 桌面滚动可见、多设备归属正确、Agent 行级 Skill 入口、无采集健康堆叠区块、无可用性筛选，以及页面不展示 debug-only 字段。
 - `e2e/runtime-work-board.spec.ts` 锁定 Runs 的 Runtime / Channel / 阶段 / 时间筛选、长文本不横滚、卡片不显示调试内容、监听缺口不变成任务卡。
 视觉变更不一定都需要新增截图回归工具，但必须能被以上至少一种 harness 或一次明确截图 Review 覆盖。
 
@@ -67,3 +69,4 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 - 单页面布局问题修页面 pattern 或页面实现。
 - 平台适配问题修 adapter，不让 React 组件推断平台语义。
 - 数据质量问题修后端、collector 或 normalized model，不用前端文案掩盖。
+- Harness 应验证当前正确设计是否存在，例如统一状态、行级 Skill 操作和无未实现入口；不要长期保留“过去误放过的文案不存在”这类历史脚印测试。

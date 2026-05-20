@@ -45,7 +45,8 @@ Mono is not used for long Chinese sentences.
 ## Implementation Mapping
 
 - `.homeTitle`, `.auth-layout__title`, `h1`, `h2`, `.detailHeader h2`, `.workCard strong`, `.primaryButton`, `.secondaryButton`, `.quickRangeButton`, `.toolbarField select`, `.detailBlock p`, and `.detailBlock li` use `--lorume-font-body`.
-- `.navItem`, `.metricCard strong`, `.tableSummary`, `.assetHeader`, `.badge`, `.refPill`, `.statusBadge`, and timestamps use `--lorume-font-mono`.
+- `.navItem`, `.metricCard strong`, `.tableSummary`, `.assetHeader`, short IDs, command fragments, and timestamps use `--lorume-font-mono`.
+- `.badge`, `.refPill`, and `.statusBadge` use `--lorume-font-body`; they are product labels/statuses, not code tokens.
 - `src/ui/ui-tokens.test.tsx` locks the core mapping; update this spec and the harness together.
 
 ## Line Length

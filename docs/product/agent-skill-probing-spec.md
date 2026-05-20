@@ -8,6 +8,7 @@ Agent Skill probing is Lorume's current read-only view of Skill metadata that al
 - The target device/agent remains the source of truth for local Skill directories.
 - Lorume does not import, edit, publish, assign, sync, migrate, install, or analyze Skill content.
 - The `lorume` CLI remains deterministic and does not decide how a Skill should be interpreted or installed.
+- Target-local probing is executed through `lorume agent skill-probe --json --agent-id <id>`. The collector only dispatches the CLI command and uploads the returned snapshot; it must not inspect Skill directories directly.
 
 ## Probe Metadata
 
@@ -46,6 +47,6 @@ Probe request APIs may create an `agent_skill_probe` Operation. Probe lifecycle 
 
 ## Runtime Fleet Display
 
-Runtime Fleet exposes Skill probing only from an Agent detail panel. It must not add a primary navigation item, `/skills` route, organization Skill store, import button, editor, assignment control, or migration action.
+Runtime Fleet exposes Skill probing from the Agent list row as a compact secondary action, with the latest probe status visible near the Agent row or inspector. It must not add a primary navigation item, `/skills` route, organization Skill store, import button, editor, assignment control, or migration action.
 
-The Agent detail probe panel shows loading, empty/unknown, requested, success, unsupported, failed, and device-disconnected states. It lists root and file metadata compactly and keeps non-Markdown files as plain text.
+The probe UI shows loading, empty/unknown, requested, success, unsupported, failed, and device-disconnected states. It lists root and file metadata compactly and keeps non-Markdown files as plain text. The detail inspector may summarize the latest probe result, but the primary action should stay on the Agent row so users do not need to open the detail panel before checking Skill metadata.

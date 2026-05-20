@@ -14,6 +14,8 @@ The following primitives keep their current filenames during this redesign:
 - `PixelLogo`: brand mark.
 - `PixelDecorations`: optional low-noise grid/trace decoration, not pixel sprites.
 
+`PixelIcon` keeps its legacy filename for import stability, but it renders modern line icons. New product icons must extend that primitive rather than reintroducing pixel-art packages or ad hoc SVGs in page components.
+
 ## Buttons
 
 - Button text uses Sans.
@@ -34,6 +36,7 @@ The following primitives keep their current filenames during this redesign:
 
 - Badge copy is short and semantic.
 - Status badges use semantic color.
+- Runtime Fleet asset status badges use only `工作中`、`空闲`、`离线`、`异常`; `未知` stays out of asset status UI.
 - Runtime/source/channel badges use neutral or info color unless expressing state.
 - A row should not accumulate badges that repeat the same fact.
 

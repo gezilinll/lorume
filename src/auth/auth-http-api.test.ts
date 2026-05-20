@@ -104,6 +104,41 @@ describe("auth HTTP API", () => {
 
     expect(wrongAccept.status).toBe(403);
   });
+
+  it("returns a readable message when the email provider is unavailable", async () => {
+    const store = new MemoryAuthStore();
+    const handler = createAuthHttpApiHandler({
+      createLoginCode: () => "246810",
+      emailProvider: {
+        sendLoginCode: async () => {
+          throw new Error("email_provider_not_configured");
+        },
+      },
+      now: () => new Date("2026-05-12T10:00:00.000Z"),
+      pepper: "test-pepper",
+      store,
+    });
+    const server = createServer((request, response) => {
+      void handler(request, response, () => {
+        response.statusCode = 404;
+        response.end("not found");
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+
+    const response = await postJson(`http://127.0.0.1:${address.port}/api/auth/email-code`, {
+      email: "zhangliang@gaoding.com",
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "email_provider_unavailable",
+      message: "验证码暂时无法发送，请确认邮件服务已配置后重试。",
+    });
+  });
 });
 
 async function startAuthApi(store: AuthStore, sentCodes: Array<{ code: string; email: string }>) {

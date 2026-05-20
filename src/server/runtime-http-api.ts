@@ -4,6 +4,8 @@ import type { RuntimeInventoryStore } from "./runtime-inventory-store";
 import type { PostgresStore } from "./postgres-store";
 import type { RuntimeWorkStateStore } from "./runtime-work-state-store";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
+import { createErrorResponse, errorMessageForCode, normalizeErrorCode } from "../errors/error-catalog";
+import type { StructuredLogger } from "../logging/structured-logger";
 import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
@@ -40,6 +42,8 @@ export interface RuntimeHttpApiHandlerOptions {
     createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
     listRecipientUserIds: (organizationId: string, deviceId: string) => Promise<string[]>;
   };
+  /** Optional structured logger. */
+  logger?: StructuredLogger;
 }
 
 /** Node/Vite middleware-style next callback. */
@@ -245,11 +249,11 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
           observedAt: snapshot.observedAt,
         });
       } catch (error) {
+        const errorResponse = createErrorResponse(error, "invalid_collector_snapshot");
         await recordFailedCollectorIngestion(options, "inventory", body, error);
         await notifyFailedCollectorIngestion(options, "inventory", body, error, deviceAuth);
-        sendJson(response, statusCodeForWriteError(error), {
-          error: error instanceof Error ? error.message : "invalid snapshot",
-        });
+        logCollectorIngestionFailure(options, "inventory", body, errorResponse);
+        sendJson(response, statusCodeForWriteError(error), errorResponse);
       }
       return;
     }
@@ -272,11 +276,11 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
           observedAt: snapshot.observedAt,
         });
       } catch (error) {
+        const errorResponse = createErrorResponse(error, "invalid_work_state_snapshot");
         await recordFailedCollectorIngestion(options, "work_state", body, error);
         await notifyFailedCollectorIngestion(options, "work_state", body, error, deviceAuth);
-        sendJson(response, statusCodeForWriteError(error), {
-          error: error instanceof Error ? error.message : "invalid runtime work state snapshot",
-        });
+        logCollectorIngestionFailure(options, "work_state", body, errorResponse);
+        sendJson(response, statusCodeForWriteError(error), errorResponse);
       }
       return;
     }
@@ -297,7 +301,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         sendJson(response, 409, {
           error: "device_not_connected",
           deviceId,
-          message: error instanceof Error ? error.message : "device is not connected",
+          message: errorMessageForCode("device_not_connected"),
         });
       }
       return;
@@ -652,12 +656,29 @@ async function recordFailedCollectorIngestion(
   error: unknown,
 ): Promise<void> {
   if (!options.postgresStore) return;
+  const errorResponse = createErrorResponse(error, snapshotType === "inventory"
+    ? "invalid_collector_snapshot"
+    : "invalid_work_state_snapshot");
   await options.postgresStore.recordFailedCollectorIngestion({
     deviceId: extractDeviceId(snapshotType, body),
-    error: error instanceof Error ? error.message : "invalid collector snapshot",
+    error: `${errorResponse.error}: ${errorResponse.message}`,
     observedAt: extractObservedAt(body),
     snapshotType,
   }).catch(() => undefined);
+}
+
+function logCollectorIngestionFailure(
+  options: RuntimeHttpApiHandlerOptions,
+  snapshotType: "inventory" | "work_state",
+  body: unknown,
+  errorResponse: { error: string; message: string },
+): void {
+  options.logger?.warn({
+    deviceId: extractDeviceId(snapshotType, body),
+    errorCode: normalizeErrorCode(errorResponse.error),
+    event: "collector_ingestion_failed",
+    snapshotType,
+  }, errorResponse.message);
 }
 
 async function notifyFailedCollectorIngestion(

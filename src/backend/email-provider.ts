@@ -1,11 +1,13 @@
 import nodemailer from "nodemailer";
+import { resolveLorumeAppMode } from "../app-mode";
 import type { AuthEmailProvider } from "../auth/auth-http-api";
 
 /** Create the production email provider used by email-code login. */
 export function createBackendEmailProvider(): AuthEmailProvider {
   return {
     async sendLoginCode({ code, email }) {
-      if (process.env.LORUME_AUTH_DEBUG_CODES === "1") {
+      const appMode = resolveLorumeAppMode(process.env.LORUME_APP_MODE ?? process.env.LORUME_AUTH_MODE);
+      if (appMode === "development" || process.env.LORUME_AUTH_DEBUG_CODES === "1") {
         process.stdout.write(`Lorume login code for ${email}: ${code}\n`);
         return;
       }

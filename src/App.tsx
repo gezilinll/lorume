@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { AuthProvider, useOptionalAuthSession } from "./auth/AuthProvider";
+import type { LorumeAppMode } from "./app-mode";
+import type { AuthOrganizationMembership } from "./auth/auth-store";
+import { AuthProvider, AuthSessionProvider, useOptionalAuthSession, type AuthContextValue } from "./auth/AuthProvider";
 import {
   ConsoleUtilityBar,
   ConsoleUtilityDrawer,
@@ -33,21 +35,33 @@ const utilityPathByView: Record<ConsoleUtilityView, string> = {
 
 export type AppAuthMode = "disabled" | "required";
 
-export function App({ authMode = "disabled" }: { authMode?: AppAuthMode }) {
-  if (authMode === "required" && getCurrentPath() === "/") {
+export function App({
+  authMode,
+  runtimeMode,
+}: {
+  /** Legacy test harness prop. Prefer runtimeMode for new code. */
+  authMode?: AppAuthMode;
+  runtimeMode?: LorumeAppMode;
+}) {
+  const mode = runtimeMode ?? legacyAuthModeToRuntimeMode(authMode);
+  if (mode !== "agent" && getCurrentPath() === "/") {
     return <HomePage />;
   }
 
-  const consoleApp = <ConsoleApp />;
-  return authMode === "required" ? <AuthProvider>{consoleApp}</AuthProvider> : consoleApp;
+  const consoleApp = <ConsoleApp utilityDataEnabled={mode !== "agent"} />;
+  if (mode === "agent") {
+    return <AuthSessionProvider value={createAgentAuthContext()}>{consoleApp}</AuthSessionProvider>;
+  }
+  return <AuthProvider>{consoleApp}</AuthProvider>;
 }
 
-function ConsoleApp() {
+function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
   const auth = useOptionalAuthSession();
   const [activePage, setActivePage] = useState<PageKey>(() => pageFromPath(getCurrentPath()) ?? "runtime");
   const [utilityView, setUtilityView] = useState<ConsoleUtilityView | null>(() => utilityViewFromPath(getCurrentPath()));
   const [utilityReturnPath, setUtilityReturnPath] = useState(() => pagePathByKey[pageFromPath(getCurrentPath()) ?? "runtime"]);
-  const organizationId = auth?.session.organizations[0]?.organizationId;
+  const currentOrganization = auth?.session.organizations[0];
+  const organizationId = currentOrganization?.organizationId;
 
   useEffect(() => {
     const syncPageFromUrl = () => {
@@ -107,6 +121,7 @@ function ConsoleApp() {
         <div className="brandMark">
           <PixelLogo />
         </div>
+        <OrganizationSwitcher organization={currentOrganization} />
         <nav className="navList" aria-label="主导航">
           {navItems.map((item) => {
             const isActive = item.page === activePage;
@@ -128,7 +143,12 @@ function ConsoleApp() {
         </nav>
         <AuthSessionActions />
       </aside>
-      <ConsoleUtilityBar activeView={utilityView} organizationId={organizationId} onOpen={openUtility} />
+      <ConsoleUtilityBar
+        activeView={utilityView}
+        organizationId={organizationId}
+        utilityDataEnabled={utilityDataEnabled}
+        onOpen={openUtility}
+      />
 
       {activePage === "runtime" ? (
         <RuntimeFleetPage />
@@ -139,6 +159,7 @@ function ConsoleApp() {
       )}
       <ConsoleUtilityDrawer
         organizationId={organizationId}
+        utilityDataEnabled={utilityDataEnabled}
         view={utilityView}
         onClose={closeUtility}
         onViewChange={openUtility}
@@ -164,16 +185,86 @@ function utilityViewFromPath(path: string): ConsoleUtilityView | null {
   return null;
 }
 
+function OrganizationSwitcher({ organization }: { organization?: AuthOrganizationMembership }) {
+  if (!organization) return null;
+
+  return (
+    <button className="organizationSwitch" type="button" aria-label="切换组织">
+      <span className="organizationAvatar" aria-hidden="true">{initialFromText(organization.name)}</span>
+      <span className="organizationCopy">
+        <span>当前组织</span>
+        <strong>{organization.name}</strong>
+      </span>
+      <PixelIcon name="chevron-down" size={14} />
+    </button>
+  );
+}
+
 function AuthSessionActions() {
   const auth = useOptionalAuthSession();
+  const [isOpen, setIsOpen] = useState(false);
   if (!auth) return null;
 
   return (
     <div className="navFooter">
-      <span>{auth.session.user.email}</span>
-      <button type="button" className="navItem navItemCompact" onClick={() => void auth.logout()}>
-        退出登录
+      <button
+        className="profileEntry"
+        type="button"
+        aria-label="打开个人入口"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <span className="profileAvatar" aria-hidden="true">{initialFromText(auth.session.user.displayName || auth.session.user.email)}</span>
+        <span className="profileCopy">
+          <strong>个人入口</strong>
+          <span>账户与偏好</span>
+        </span>
       </button>
+      {isOpen ? (
+        <div className="profileMenu" role="menu">
+          <p>{auth.session.user.email}</p>
+          <button type="button" role="menuitem" onClick={() => void auth.logout()}>
+            退出登录
+          </button>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function initialFromText(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return "L";
+  return normalized.slice(0, 1).toUpperCase();
+}
+
+function legacyAuthModeToRuntimeMode(authMode?: AppAuthMode): LorumeAppMode {
+  if (authMode === "required") return "production";
+  return "agent";
+}
+
+function createAgentAuthContext(): AuthContextValue {
+  return {
+    async logout() {
+      window.history.pushState({}, "", "/");
+    },
+    session: {
+      id: "agent-local-session",
+      organizations: [{
+        id: "agent-local-membership",
+        name: "精选AI",
+        organizationId: "agent-local-organization",
+        role: "owner",
+        slug: "agent-local",
+      }],
+      user: {
+        createdAt: new Date("2026-05-20T00:00:00.000Z"),
+        displayName: "Agent",
+        email: "agent@local.lorume",
+        id: "agent-local-user",
+        updatedAt: new Date("2026-05-20T00:00:00.000Z"),
+      },
+    },
+  };
 }

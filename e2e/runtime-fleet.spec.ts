@@ -96,16 +96,23 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
     await expect(page.getByLabel("设备").getByText("Backend Fixture Mac")).toBeVisible();
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
-    await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("运行状态");
+    await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("工作中");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("tester");
-    await expect(page.getByRole("row", { name: /tester/ })).toContainText("活跃");
+    await expect(page.getByRole("row", { name: /tester/ })).toContainText("工作中");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("所属设备");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("归属 Runtime");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("最近同步");
+    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("Skill");
     await expect(page.getByLabel("Channel")).toHaveCount(0);
     await expect(page.getByLabel("Runtime").locator("option")).toHaveText(["全部", "OpenClaw", "Slock"]);
-    await expect(page.getByLabel("可用性").locator("option")).toHaveText(["全部", "在线"]);
+    await expect(page.getByLabel("可用性")).toHaveCount(0);
+    await expect(page.getByLabel("同步时间").locator("option")).toHaveText([
+      "全部时间",
+      "最近 24 小时",
+      "最近 7 天",
+      "最近 30 天",
+    ]);
 
     await page.getByPlaceholder("搜索设备、Runtime、Agent 或渠道").fill("tester");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("tester");
@@ -115,7 +122,7 @@ test.describe("Runtime Fleet", () => {
     const detail = page.getByRole("complementary", { name: "运行资产详情" });
     await expect(detail).toHaveCSS("position", "sticky");
     await expect(detail).toContainText("归属关系");
-    await expect(detail).toContainText("状态: 活跃");
+    await expect(detail).toContainText("状态: 工作中");
     await expect(detail).toContainText("所属 Runtime: Slock daemon");
     await expect(detail).toContainText("关联渠道");
     await expect(detail).toContainText(`最近同步: ${new Intl.DateTimeFormat("zh-CN", {
@@ -128,15 +135,18 @@ test.describe("Runtime Fleet", () => {
       hour12: false,
     }).format(new Date("2026-05-08T08:00:01.000Z"))}`);
     await expect(detail).not.toContainText("slock: tester");
-    await detail.getByRole("button", { name: "查看 Skill 探测" }).click();
+    await page.getByRole("button", { name: "tester Skill 探测" }).click();
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("reviewer");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("references/guide.md");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("scripts/probe.sh");
     await expect(detail.getByRole("link", { name: "scripts/probe.sh" })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "请求设备刷新" }).click();
-    await expect(page.getByRole("status")).toContainText("设备控制通道未连接");
-    await expect(page.getByRole("status")).not.toContainText("device_not_connected");
+    const sideNavPosition = await page
+      .getByRole("complementary", { name: "主导航" })
+      .evaluate((node) => getComputedStyle(node).position);
+    expect(sideNavPosition).toBe("fixed");
+
+    await expect(page.getByRole("button", { name: "请求设备刷新" })).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();

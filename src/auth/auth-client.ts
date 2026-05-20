@@ -1,4 +1,5 @@
 import type { AuthOrganizationMembership, AuthSessionContext } from "./auth-store";
+import { authErrorMessage } from "./auth-errors";
 
 /** Browser auth API client for email-code login, organization setup, invitations, and logout. */
 export interface AuthClient {
@@ -70,12 +71,14 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
+  if (response.status === 502 || response.status === 504) return authErrorMessage("auth_backend_unavailable");
   try {
     const body = await response.json();
     if (body && typeof body.message === "string") return body.message;
-    if (body && typeof body.error === "string") return body.error;
+    if (body && typeof body.error === "string") return authErrorMessage(body.error);
   } catch {
     // Fall through to the status text.
   }
-  return response.statusText || "request_failed";
+  if (response.status === 503) return authErrorMessage("auth_backend_unavailable");
+  return response.statusText || authErrorMessage("request_failed");
 }

@@ -16,11 +16,6 @@ export function AuthLayout({ children, notice, preview, subtitle, title }: AuthL
     <div className="auth-layout">
       <header className="auth-layout__header">
         <PixelLogo />
-        <div className="auth-layout__language">
-          <span aria-hidden="true">◎</span>
-          简体中文
-          <span>UTC+8</span>
-        </div>
       </header>
       <main className="auth-layout__main">
         <PixelPanel className="auth-layout__card auth-layout__login-card">

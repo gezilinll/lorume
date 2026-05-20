@@ -98,7 +98,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 
 当前主要用户动线：
 
-- 管理运行资产：登录 -> Runtime Fleet -> 查看 Device、Runtime、Agent、采集健康和刷新结果。
+- 管理运行资产：登录 -> Runtime Fleet -> 查看 Device、Runtime、Agent 和采集健康。
 - 查看 Agent 工作项：登录 -> Runs / Work Board -> 按 Runtime、Channel、阶段和时间范围查看工作项。
 - 跟踪异步任务：登录 -> 右上角任务中心抽屉 -> 查看 Operation / Job 状态、失败原因和目标资源。
 - 查看通知：登录 -> 右上角通知中心抽屉 -> 查看未读/已读通知、同步、采集、审核和恢复类通知。

@@ -148,12 +148,25 @@ Runtime / Runs 读取 API：
 
 ## UI 规则
 
-- 登录、验证码、创建组织、邀请加入页面使用更强的 Cream Arcade 视觉语言：像素 logo、奶油底、黑色硬边、像素阴影、高饱和按钮和克制游戏装饰。
-- Console 页面使用相同 token 系统，但优先保证 Runtime Fleet、Runs、组织设置，以及任务中心、通知中心工具抽屉的数据扫描效率。
-- 品牌标题、按钮、状态短标签可使用 Fusion Pixel；身份页短说明和表单也可以使用 Fusion Pixel，Console 的长正文和表格内容仍以可读性为先。
-- 身份页和 Console 的图标都通过共享 `PixelIcon` 入口和像素装饰组件渲染；表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚装饰不得使用零散图标体系。
-- 像素风只作为视觉语言，不改变信息架构和权限边界。
+- 登录、验证码、创建组织、邀请加入页面使用 Glacier Premium Precision 视觉语言：冷白/冰蓝背景、现代品牌标识、hairline 边界、低噪声网格和清晰表单层级。
+- Console 页面使用同一 token 系统，但优先保证 Runtime Fleet、Runs、组织设置，以及任务中心、通知中心工具抽屉的数据扫描效率。
+- 品牌标题、按钮、状态短标签、说明文字和表单均以 Sans 为主；Mono 只用于短技术标签、时间戳和数字，不作为身份页装饰字体。
+- 身份页和 Console 的图标都通过共享 `PixelIcon` 入口渲染；该入口名称为历史兼容，实际图标应为现代低噪声线性图标。表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚装饰不得使用零散图标体系。
+- 不回退复古像素边框、厚黑线、高饱和黄色侧栏、错位阴影、像素 sprite 或装饰性调试文案。
 - 登录页的 `/api/me` 匿名会话探测返回 `401` 或 `404` 属于正常未登录状态，不能直接把 `Not Found`、接口错误或调试字段暴露在页面上；其他后端故障仍应展示可读错误，避免把真实服务异常吞掉。
+- Auth API 错误必须使用稳定 `error` code，并通过共享错误字典维护用户可读 `message`。前端遇到只有 code 的响应时，也必须映射成可读提示，不能把 `invalid_or_expired_code` 等技术字符串直接展示给用户。
+
+## Runtime Profiles
+
+Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到页面条件里：
+
+- `production`：默认线上模式。Console 和 Runtime 读取 API 必须要求有效 session 与组织上下文；匿名或组织缺失时前端回到公开首页/登录流程，后端返回 `401`。
+- `development`：开发者本地联调模式。权限规则仍与 production 一致，但验证码可以在本地后端日志中输出，便于开发者完成真实登录链路。
+- `agent`：自动化验收和本地代理开发模式。只用于本地 harness 或 coding agent 自测，可注入本地 session 进入已验收 Console 页面；不得作为线上默认值，也不得绕过生产后端的 session 校验。
+
+`disabled` 仅作为旧 harness 环境值的兼容别名解析为 `agent`，新文档、脚本和测试应使用 `agent`。
+
+前端使用 `VITE_LORUME_APP_MODE` 配置运行模式，并兼容读取旧 `VITE_LORUME_AUTH_MODE`；后端使用 `LORUME_APP_MODE`，并兼容读取旧 `LORUME_AUTH_MODE`。本地 `npm run dev` 与 `npm run dev:backend` 在未覆盖环境变量时使用 `development`，Playwright Console harness 显式覆盖为 `agent`，生产构建/启动不设置时回到 `production`。
 
 ## Harness
 
@@ -169,9 +182,9 @@ Runtime / Runs 读取 API：
 
 - 登录页、验证码页、创建组织页和邀请加入页必须有组件测试。
 - Console 必须被 `/api/me` gate 保护。
-- Cream Arcade 组件测试必须覆盖像素 logo、基础面板/button/badge/token 类名和身份页装饰层，防止后续页面绕开共享 token。
+- Glacier Premium Precision 组件测试必须覆盖现代 logo、基础面板/button/badge/token 类名和身份页结构，防止后续页面绕开共享 token。
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。
-- Playwright Console harness 可以通过 `VITE_LORUME_AUTH_MODE=disabled` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
+- Playwright Console harness 可以通过 `VITE_LORUME_AUTH_MODE=agent` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
 - 已验收的 Runtime Fleet 和 Runs 交互不得因 auth 和视觉改造回退。
 
 ## 验收标准

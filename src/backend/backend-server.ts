@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
+import { resolveLorumeAppMode, type LorumeAppMode } from "../app-mode";
 import {
   createAuthHttpApiHandler,
   createAuthRuntimeGuards,
@@ -17,6 +18,7 @@ import { createRuntimeHttpApiHandler } from "../server/runtime-http-api";
 import { createRuntimeInventoryStore } from "../server/runtime-inventory-store";
 import { createPostgresStore, type PostgresStore } from "../server/postgres-store";
 import { createRuntimeWorkStateStore } from "../server/runtime-work-state-store";
+import { createStructuredLogger, type StructuredLogger } from "../logging/structured-logger";
 import { createBackendEmailProvider } from "./email-provider";
 
 /** Construction options for the standalone Lorume backend. */
@@ -49,12 +51,16 @@ export interface LorumeBackendServerOptions {
   operationRunnerIntervalMs?: number;
   /** Optional email provider injection for tests. */
   emailProvider?: AuthEmailProvider;
+  /** Permission profile for local agent, development, or production operation. */
+  appMode?: LorumeAppMode;
   /** Whether Runtime Fleet / Runs read APIs require a valid user session. */
   authRequired?: boolean;
   /** Whether collector ingestion and device WebSocket require a valid device token. */
   deviceTokenRequired?: boolean;
   /** Auth HMAC pepper override for tests. */
   authPepper?: string;
+  /** Structured logger injection for tests and production wiring. */
+  logger?: StructuredLogger;
 }
 
 /** Running standalone backend handle used by tests and local dev. */
@@ -103,6 +109,7 @@ export function createLorumeBackendServer(
     ? null
     : createPostgresNotificationStore({ connectionString: options.databaseUrl });
   const notificationStore = options.notificationStore ?? ownedNotificationStore;
+  const logger = options.logger ?? createStructuredLogger({ service: "lorume-backend" });
   const operationRunnerEnabled = options.operationRunnerEnabled
     ?? Boolean(options.databaseUrl ?? process.env.DATABASE_URL);
   const operationRunnerIntervalMs = options.operationRunnerIntervalMs
@@ -115,7 +122,8 @@ export function createLorumeBackendServer(
       runnerId: process.env.LORUME_OPERATION_RUNNER_ID ?? "lorume-backend",
     })
     : undefined;
-  const authRequired = options.authRequired ?? process.env.LORUME_AUTH_REQUIRED === "1";
+  const appMode = options.appMode ?? resolveLorumeAppMode(process.env.LORUME_APP_MODE ?? process.env.LORUME_AUTH_MODE);
+  const authRequired = options.authRequired ?? readBooleanEnv("LORUME_AUTH_REQUIRED", appMode !== "agent");
   const deviceTokenRequired = options.deviceTokenRequired ?? process.env.LORUME_DEVICE_TOKEN_REQUIRED === "1";
   const authHandler = authStore
     ? createAuthHttpApiHandler({
@@ -146,6 +154,7 @@ export function createLorumeBackendServer(
         listRecipientUserIds: (organizationId) => authStore.listOrganizationAdminUserIds(organizationId),
       }
       : undefined,
+    logger,
   });
   const operationHandler = authGuards && operationStore
     ? createOperationHttpApiHandler({
@@ -408,6 +417,13 @@ function closeHttpServer(server: Server): Promise<void> {
 
 function isDirectRun(): boolean {
   return process.argv[1] === fileURLToPath(import.meta.url);
+}
+
+function readBooleanEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (value === "1" || value?.toLowerCase() === "true") return true;
+  if (value === "0" || value?.toLowerCase() === "false") return false;
+  return fallback;
 }
 
 if (isDirectRun()) {

@@ -6,6 +6,7 @@ import type {
   AuthSessionContext,
   AuthStore,
 } from "./auth-store";
+import { authErrorMessage } from "./auth-errors";
 
 const maxJsonBodyChars = 1_000_000;
 const sessionCookieName = "lorume_session";
@@ -55,7 +56,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const body = await readJsonBody(request);
       const email = normalizeEmail(readString(body, "email"));
       if (!email) {
-        sendJson(response, 400, { error: "email_required" });
+        sendAuthError(response, 400, "email_required");
         return;
       }
       const code = createLoginCode();
@@ -67,10 +68,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       try {
         await options.emailProvider.sendLoginCode({ code, email });
       } catch (error) {
-        sendJson(response, 503, {
-          error: "email_provider_unavailable",
-          message: error instanceof Error ? error.message : "email provider unavailable",
-        });
+        sendAuthError(response, 503, "email_provider_unavailable");
         return;
       }
       sendJson(response, 202, { ok: true, email });
@@ -82,7 +80,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const email = normalizeEmail(readString(body, "email"));
       const code = readString(body, "code").trim();
       if (!email || !code) {
-        sendJson(response, 400, { error: "email_and_code_required" });
+        sendAuthError(response, 400, "email_and_code_required");
         return;
       }
       const consumedCode = await options.store.consumeLoginCode({
@@ -91,7 +89,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         now: now(),
       });
       if (!consumedCode) {
-        sendJson(response, 401, { error: "invalid_or_expired_code" });
+        sendAuthError(response, 401, "invalid_or_expired_code");
         return;
       }
       const user = await options.store.upsertUserForEmail(email);
@@ -125,7 +123,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
     if (request.method === "GET" && requestUrl.pathname === "/api/me") {
       const session = await readSessionContext(request, options.store, now(), pepper);
       if (!session) {
-        sendJson(response, 401, { error: "unauthorized" });
+        sendAuthError(response, 401, "unauthorized");
         return;
       }
       sendJson(response, 200, session);
@@ -146,7 +144,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const name = readString(body, "name").trim();
       const slug = readString(body, "slug").trim() || slugify(name);
       if (!name || !slug) {
-        sendJson(response, 400, { error: "organization_name_required" });
+        sendAuthError(response, 400, "organization_name_required");
         return;
       }
       const organization = await options.store.createOrganization({
@@ -168,14 +166,14 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const organizationId = decodeURIComponent(invitationCreateMatch[1] ?? "");
       const membership = session.organizations.find((item) => item.organizationId === organizationId);
       if (!membership || !canManageOrganization(membership.role)) {
-        sendJson(response, 403, { error: "forbidden" });
+        sendAuthError(response, 403, "forbidden");
         return;
       }
       const body = await readJsonBody(request);
       const email = normalizeEmail(readString(body, "email"));
       const role = normalizeRole(readString(body, "role"));
       if (!email || !role) {
-        sendJson(response, 400, { error: "invitation_email_and_role_required" });
+        sendAuthError(response, 400, "invitation_email_and_role_required");
         return;
       }
       const token = createInvitationToken();
@@ -205,7 +203,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         userId: session.user.id,
       });
       if (!organization) {
-        sendJson(response, 403, { error: "invitation_not_available" });
+        sendAuthError(response, 403, "invitation_not_available");
         return;
       }
       sendJson(response, 200, { organization });
@@ -219,7 +217,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const organizationId = decodeURIComponent(deviceTokenCreateMatch[1] ?? "");
       const membership = session.organizations.find((item) => item.organizationId === organizationId);
       if (!membership || !canManageOrganization(membership.role)) {
-        sendJson(response, 403, { error: "forbidden" });
+        sendAuthError(response, 403, "forbidden");
         return;
       }
       const body = await readJsonBody(request);
@@ -282,7 +280,7 @@ async function requireSession(
 ): Promise<AuthSessionContext | null> {
   const session = await readSessionContext(request, store, now, pepper);
   if (!session) {
-    sendJson(response, 401, { error: "unauthorized" });
+    sendAuthError(response, 401, "unauthorized");
     return null;
   }
   return session;
@@ -379,4 +377,8 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function sendAuthError(response: ServerResponse, statusCode: number, code: string): void {
+  sendJson(response, statusCode, { error: code, message: authErrorMessage(code) });
 }

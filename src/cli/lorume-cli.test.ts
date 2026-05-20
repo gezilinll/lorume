@@ -41,6 +41,75 @@ describe("lorume CLI", () => {
     expect(output.agents.map((agent: { name: string }) => agent.name)).toContain("tester");
   });
 
+  it("collects inventory through the Lorume CLI contract", () => {
+    const output = runCli(["collect", "inventory", "--json", "--snapshot", fixturePath]);
+
+    expect(output.command).toBe("collect.inventory");
+    expect(output.device.id).toBe("fixture-mac");
+    expect(output.collector).toMatchObject({ status: "online" });
+    expect(output.runtimes.map((runtime: { deviceId: string }) => runtime.deviceId)).toEqual(["fixture-mac", "fixture-mac"]);
+    expect(output.agents.map((agent: { runtimeId: string }) => agent.runtimeId)).toContain("fixture-mac:slock:slock-daemon");
+  });
+
+  it("collects an empty work-state snapshot without probing outside the CLI boundary", () => {
+    const output = runCli([
+      "collect",
+      "work-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ]);
+
+    expect(output).toMatchObject({
+      command: "collect.work-state",
+      deviceId: "test-device",
+      workItems: [],
+      conversations: [],
+      executions: [],
+      capabilities: [],
+    });
+    expect(output.observedAt).toEqual(expect.any(String));
+  });
+
+  it("probes read-only Agent Skill metadata from explicit local roots", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-skill-"));
+    const skillRoot = path.join(root, "review-assistant");
+    mkdirSync(path.join(skillRoot, "references"), { recursive: true });
+    writeFileSync(path.join(skillRoot, "SKILL.md"), "# Review assistant");
+    writeFileSync(path.join(skillRoot, "references", "guide.md"), "# Guide");
+    writeFileSync(path.join(skillRoot, "config.json"), "{\"safe\":true}");
+
+    const output = runCli([
+      "agent",
+      "skill-probe",
+      "--json",
+      "--agent-id",
+      "agent-1",
+      "--runtime-id",
+      "runtime-1",
+      "--device-id",
+      "device-1",
+      "--skill-root",
+      skillRoot,
+    ]);
+
+    expect(output.command).toBe("agent.skill-probe");
+    expect(output.status).toBe("succeeded");
+    expect(output.targetAgentId).toBe("agent-1");
+    expect(output.skills).toHaveLength(1);
+    expect(output.skills[0]).toMatchObject({
+      name: "review-assistant",
+      entryPath: path.join(skillRoot, "SKILL.md"),
+    });
+    expect(output.skills[0].markdownFiles.map((file: { relativePath: string }) => file.relativePath)).toEqual([
+      "SKILL.md",
+      "references/guide.md",
+    ]);
+    expect(output.skills[0].nonMarkdownFiles.map((file: { relativePath: string }) => file.relativePath)).toEqual([
+      "config.json",
+    ]);
+  });
+
   it("checks connector status only from an authorized backend context", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "lorume-cli-context-"));
     const contextPath = path.join(dir, "context.json");

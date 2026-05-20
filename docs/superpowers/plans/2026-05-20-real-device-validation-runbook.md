@@ -21,6 +21,17 @@
 | No frontend dependency | Do not add or rely on a frontend registration flow. Token creation may use the authenticated backend API or a simple operator path. |
 | Secrets discipline | Do not paste device tokens, session cookies, login codes, or production DB URLs into docs, commits, screenshots, or final summaries. |
 
+## 2026-05-20 Execution Notes
+
+This run discovered two environment-specific validation details:
+
+| Observation | Handling |
+|---|---|
+| `curl https://lorume.com/...` from macOS clients can fail during TLS handshake before Nginx access logging, while Node fetch and Linux curl can still reach the same backend. | Treat this as a deployment/ICP/TLS blocker for the final `lorume.com` one-line install experience. For this validation run, `claw.gezilinll.com` was configured as a temporary device validation alias that proxies Lorume `/api/`, `/healthz`, and `/readyz` while leaving the existing claw root page intact. |
+| The deployed DB may not have every future Agent Skill probe request table named in older cleanup examples. | Clear only existing runtime/device validation tables, and keep cleanup SQL inside a transaction. |
+
+The alias does not change the product requirement: the final user-facing one-line install command should use a stable Lorume-owned HTTPS endpoint that macOS `curl` can fetch without `-k`, custom headers, or host aliases.
+
 ## Known Real Device
 
 | Field | Value |
@@ -199,8 +210,6 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
 BEGIN;
 TRUNCATE TABLE
   collector_ingestions,
-  agent_skill_probe_snapshots,
-  agent_skill_probe_requests,
   work_executions,
   work_conversations,
   work_items,
@@ -536,11 +545,11 @@ SELECT
   os,
   architecture,
   last_seen_at,
-  raw->'device'->'user'->>'username' AS username,
-  raw->'device'->'network'->'localIps' AS local_ips,
-  raw->'device'->'network'->>'publicIp' AS public_ip,
-  raw->'collector'->>'status' AS collector_status,
-  raw->'collector'->>'installPath' AS collector_install_path
+  raw->'user'->>'username' AS username,
+  raw->'network'->'localIps' AS local_ips,
+  raw->'network'->>'publicIp' AS public_ip,
+  collector->>'status' AS collector_status,
+  collector->>'installPath' AS collector_install_path
 FROM devices
 WHERE id = 'gezilinll-claw';
 "

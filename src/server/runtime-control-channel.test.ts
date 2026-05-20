@@ -73,63 +73,28 @@ describe("runtime control channel", () => {
     });
   });
 
-  it("dispatches an inventory refresh command and records accepted and result messages", () => {
+  it("reports unsupported control messages without changing connection state", () => {
     const store = createStore();
-    let currentTime = new Date("2026-05-08T08:00:00.000Z");
+    const currentTime = new Date("2026-05-08T08:00:00.000Z");
     const channel = createRuntimeControlChannel({
       store,
       now: () => currentTime,
-      createCommandId: () => "cmd-refresh-1",
     });
     const socket = new MemorySocket();
 
     channel.attach(socket);
     channel.receive(socket, JSON.stringify({ type: "hello", deviceId: "fixture-mac" }));
+    channel.receive(socket, JSON.stringify({ type: "unknown.message", deviceId: "fixture-mac" }));
 
-    const command = channel.requestInventoryRefresh("fixture-mac");
-
-    expect(command).toMatchObject({
-      commandId: "cmd-refresh-1",
-      deviceId: "fixture-mac",
-      status: "sent",
-      type: "inventory.refresh",
-    });
     expect(socket.sent).toContainEqual(expect.objectContaining({
-      type: "inventory.refresh",
-      commandId: "cmd-refresh-1",
-      deviceId: "fixture-mac",
+      type: "error",
+      error: "unsupported message type: unknown.message",
     }));
-
-    currentTime = new Date("2026-05-08T08:00:01.000Z");
-    channel.receive(socket, JSON.stringify({
-      type: "command.accepted",
-      commandId: "cmd-refresh-1",
+    expect(store.readDeviceConnection("fixture-mac", currentTime)).toMatchObject({
       deviceId: "fixture-mac",
-    }));
-    currentTime = new Date("2026-05-08T08:00:03.000Z");
-    channel.receive(socket, JSON.stringify({
-      type: "command.result",
-      commandId: "cmd-refresh-1",
-      deviceId: "fixture-mac",
-      status: "succeeded",
-      result: { observedAt: "2026-05-08T08:00:02.000Z" },
-    }));
-
-    expect(store.readRuntimeCommand("cmd-refresh-1")).toMatchObject({
-      status: "succeeded",
-      acceptedAt: "2026-05-08T08:00:01.000Z",
-      completedAt: "2026-05-08T08:00:03.000Z",
-      result: { observedAt: "2026-05-08T08:00:02.000Z" },
+      status: "online",
     });
   });
-
-  it("rejects refresh requests for disconnected devices", () => {
-    const store = createStore();
-    const channel = createRuntimeControlChannel({ store });
-
-    expect(() => channel.requestInventoryRefresh("missing-device")).toThrow(/not connected/i);
-  });
-
 });
 
 function createStore() {

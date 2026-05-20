@@ -17,6 +17,7 @@ run_package_script check:commit-message
 run_package_script check:cli
 run_package_script check:db
 run_package_script check:backend
+run_package_script check:backend:e2e
 run_package_script check:quick
 run_package_script check:build
 run_package_script check:deploy

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,14 +51,60 @@ describe("lorume CLI", () => {
     expect(output.agents.map((agent: { runtimeId: string }) => agent.runtimeId)).toContain("fixture-mac:slock:slock-daemon");
   });
 
-  it("collects an empty work-state snapshot without probing outside the CLI boundary", () => {
+  it("collects locally detected CLI runtimes through the Lorume CLI contract", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-runtime-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "codex"), "#!/bin/sh\nprintf 'codex 1.2.3\\n'\n");
+    writeExecutable(path.join(binDir, "openclaw"), "#!/bin/sh\nexit 127\n");
+    writeExecutable(path.join(binDir, "multica"), "#!/bin/sh\nexit 127\n");
+    writeExecutable(path.join(binDir, "claude"), "#!/bin/sh\nexit 127\n");
+
+    const output = runCli([
+      "collect",
+      "inventory",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+      },
+    });
+
+    expect(output.command).toBe("collect.inventory");
+    expect(output.device.id).toBe("test-device");
+    expect(output.runtimes).toContainEqual(expect.objectContaining({
+      deviceId: "test-device",
+      kind: "codex",
+      name: "Codex CLI",
+      status: "online",
+      version: "codex 1.2.3",
+    }));
+  });
+
+  it("collects work-state through the Lorume CLI contract", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-work-state-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "openclaw"), "#!/bin/sh\nexit 127\n");
+    writeExecutable(path.join(binDir, "multica"), "#!/bin/sh\nexit 127\n");
+    writeExecutable(path.join(binDir, "slock"), "#!/bin/sh\nexit 127\n");
+
     const output = runCli([
       "collect",
       "work-state",
       "--json",
       "--device-id",
       "test-device",
-    ]);
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+        SLOCK_SERVER_URL: "http://127.0.0.1:9",
+      },
+    });
 
     expect(output).toMatchObject({
       command: "collect.work-state",
@@ -66,8 +112,8 @@ describe("lorume CLI", () => {
       workItems: [],
       conversations: [],
       executions: [],
-      capabilities: [],
     });
+    expect(output.capabilities).toEqual(expect.any(Array));
     expect(output.observedAt).toEqual(expect.any(String));
   });
 
@@ -184,11 +230,19 @@ describe("lorume CLI", () => {
   });
 });
 
-function runCli(args: string[]): Record<string, any> {
-  return JSON.parse(execFileSync(process.execPath, [cliPath, ...args], { encoding: "utf8" }));
+function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Record<string, any> {
+  return JSON.parse(execFileSync(process.execPath, [cliPath, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...options.env },
+  }));
 }
 
 function spawnCli(args: string[]): { status: number | null; stderr: string } {
   const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8" });
   return { status: result.status, stderr: result.stderr.trim() };
+}
+
+function writeExecutable(filePath: string, content: string) {
+  writeFileSync(filePath, content);
+  chmodSync(filePath, 0o755);
 }

@@ -36,11 +36,11 @@ Runtime Fleet 必须区分“数据从哪里采集”和“产品上归属哪一
 
 ## 数据源
 
-页面使用 `GET /api/runtime-fleet` 读取正式后端查询结果，并用 `GET /api/runtime-work-items` 的标准化工作项辅助推导 Runtime 与 Agent 展示状态。页面也可以读取 `GET /api/devices/:deviceId/collection-health` 作为状态折叠输入，但不渲染独立采集健康区块。Agent 行级 Skill 操作使用 `GET /api/agents/:agentId/skill-probe` 读取只读元数据，使用 `POST /api/agents/:agentId/skill-probe` 请求目标设备执行一次本地探测。Runtime Fleet 做状态推导时必须读取完整 work-item 分页，不能只用第一页 500 条推断 Runtime / Agent 忙闲。没有后端数据或本地 backend 不可用时，页面只在非 production 模式允许使用明确标识的 `fixtures/runtime/collector-snapshot.sample.json` 做开发期离线预览；production 构建必须展示明确错误和空状态，不回退 fixture，不读取兼容期 latest API。组件不直接理解 OpenClaw、Slock 或 Multica 的内部结构，只消费标准化后的 Runtime Fleet view model。
+页面使用 `GET /api/runtime-fleet` 读取正式后端查询结果，并用 `GET /api/runtime-work-items` 的标准化工作项辅助推导 Runtime 与 Agent 展示状态。页面也可以读取 `GET /api/devices/:deviceId/collection-health` 作为状态折叠输入，但不渲染独立采集健康区块。Agent 行级 Skill 元数据只读取 `GET /api/agents/:agentId/skill-probe` 返回的最新已存储只读快照；P0 页面不请求目标设备执行本地探测。Runtime Fleet 做状态推导时必须读取完整 work-item 分页，不能只用第一页 500 条推断 Runtime / Agent 忙闲。没有后端数据或本地 backend 不可用时，页面只在非 production 模式允许使用明确标识的 `fixtures/runtime/collector-snapshot.sample.json` 做开发期离线预览；production 构建必须展示明确错误和空状态，不回退 fixture，不读取兼容期 latest API。组件不直接理解 OpenClaw、Slock 或 Multica 的内部结构，只消费标准化后的 Runtime Fleet view model。
 
 `GET /api/runtime-fleet` 可能返回多个设备。页面不能把 `devices[0]` 当作全局主设备再混合全部 Runtime / Agent；必须按真实 `deviceId -> runtimeId -> agentId` 归属渲染、筛选和展示详情。开发期本地数据库中的 fixture 历史数据可以清理，但产品能力必须保留多设备展示。
 
-页面挂载后每 30 秒读取一次后端查询结果，并显示页面自己的上次刷新时间。自动刷新只读取后端已有数据，不自动下发远端 `inventory.refresh` 命令；远端采集仍由 collector 定时上报或后端内部控制面触发。`POST /api/devices/:deviceId/refresh` 属于底层控制面 / 后续能力，当前 Runtime Fleet 页面不渲染对应按钮、不展示命令轮询状态，也不把远端刷新包装成用户可用功能。
+页面挂载后每 30 秒读取一次后端查询结果，并显示页面自己的上次刷新时间。自动刷新只读取后端已有数据，不下发远端 `inventory.refresh` 命令；远端采集由 collector 启动、周期刷新或本机显式命令触发。当前 Runtime Fleet 页面不渲染请求设备刷新按钮、不展示命令轮询状态，也不把远端刷新包装成用户可用功能。
 
 ## 统一语义
 

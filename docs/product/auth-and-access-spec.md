@@ -95,14 +95,14 @@ Invitation 是加入组织的链接凭证。
 
 ### Device Token
 
-Device Token 是设备侧 Collector 上报和控制面的凭证。
+Device Token 是设备侧 Collector 上报和连接健康通道的凭证。
 
 规则：
 
 - token 由 owner / admin 创建。
 - token 明文只在创建时返回一次。
 - 数据库存储 token 哈希和短 prefix，用于识别与排查。
-- Collector 上报 inventory / work-state、设备 WebSocket 控制面和 refresh command 都使用 device token。
+- Collector 上报 inventory / work-state 和设备 WebSocket 连接健康通道都使用 device token。
 - 如果 backend 开启 device token 校验，缺失、过期或撤销的 token 必须被拒绝。
 
 ## API 边界
@@ -127,7 +127,7 @@ Device token API：
 - `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要。
 - `POST /api/device-snapshots`：Collector 上报 inventory，使用 device token。
 - `POST /api/runtime-work-state-snapshots`：Collector 上报 work-state，使用 device token。
-- `GET /api/device-control/ws`：设备控制面连接，使用 device token。
+- `GET /api/device-control/ws`：设备连接健康通道，使用 device token。
 
 Runtime / Runs 读取 API：
 

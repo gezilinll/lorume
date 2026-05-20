@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "skill-registry-auth.spec.ts",
+  testIgnore: ["skill-registry-auth.spec.ts", "runtime-backend-api.spec.ts"],
   timeout: 30_000,
   workers: 1,
   expect: {

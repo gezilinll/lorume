@@ -5,18 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
 import type { RuntimeInventorySnapshot } from "../runtime";
-import { createRuntimeControlChannel, type RuntimeControlSocket } from "./runtime-control-channel";
+import { createRuntimeControlChannel } from "./runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "./runtime-http-api";
 import { createRuntimeInventoryStore } from "./runtime-inventory-store";
 import { createRuntimeWorkStateStore } from "./runtime-work-state-store";
-
-class MemorySocket implements RuntimeControlSocket {
-  readonly sent: unknown[] = [];
-
-  send(data: string): void {
-    this.sent.push(JSON.parse(data));
-  }
-}
 
 const servers: Server[] = [];
 
@@ -51,58 +43,6 @@ describe("runtime HTTP API", () => {
 
     expect(inventoryResponse.status).toBe(404);
     expect(workStateResponse.status).toBe(404);
-  });
-
-  it("dispatches a refresh command to a connected device", async () => {
-    const { baseUrl, channel } = await startRuntimeApi({ createCommandId: () => "cmd-refresh-1" });
-    const socket = new MemorySocket();
-    channel.attach(socket);
-    channel.receive(socket, JSON.stringify({ type: "hello", deviceId: "fixture-mac" }));
-
-    const response = await fetch(`${baseUrl}/api/devices/fixture-mac/refresh`, { method: "POST" });
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(202);
-    expect(body).toMatchObject({
-      ok: true,
-      commandId: "cmd-refresh-1",
-      status: "sent",
-    });
-    expect(socket.sent).toContainEqual(expect.objectContaining({
-      type: "inventory.refresh",
-      commandId: "cmd-refresh-1",
-    }));
-  });
-
-  it("returns a clear refresh error when the device is disconnected", async () => {
-    const { baseUrl } = await startRuntimeApi();
-
-    const response = await fetch(`${baseUrl}/api/devices/missing-device/refresh`, { method: "POST" });
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(409);
-    expect(body).toMatchObject({
-      error: "device_not_connected",
-      deviceId: "missing-device",
-    });
-  });
-
-  it("returns command status by device and command id", async () => {
-    const { baseUrl, channel } = await startRuntimeApi({ createCommandId: () => "cmd-refresh-1" });
-    const socket = new MemorySocket();
-    channel.attach(socket);
-    channel.receive(socket, JSON.stringify({ type: "hello", deviceId: "fixture-mac" }));
-    await fetch(`${baseUrl}/api/devices/fixture-mac/refresh`, { method: "POST" });
-
-    const response = await fetch(`${baseUrl}/api/devices/fixture-mac/commands/cmd-refresh-1`);
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      commandId: "cmd-refresh-1",
-      deviceId: "fixture-mac",
-      status: "sent",
-    });
   });
 
   it("accepts runtime work state snapshots without exposing a latest GET API", async () => {
@@ -208,7 +148,6 @@ describe("runtime HTTP API", () => {
 
 async function startRuntimeApi(options: {
   auth?: Parameters<typeof createRuntimeHttpApiHandler>[0]["auth"];
-  createCommandId?: () => string;
 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-api-"));
   const store = createRuntimeInventoryStore({
@@ -220,7 +159,6 @@ async function startRuntimeApi(options: {
   });
   const channel = createRuntimeControlChannel({
     store,
-    createCommandId: options.createCommandId,
     now: () => new Date("2026-05-08T08:00:00.000Z"),
   });
   const handler = createRuntimeHttpApiHandler({ auth: options.auth, store, controlChannel: channel, workStateStore });
@@ -238,6 +176,5 @@ async function startRuntimeApi(options: {
     baseUrl: `http://127.0.0.1:${address.port}`,
     store,
     workStateStore,
-    channel,
   };
 }

@@ -12,7 +12,7 @@ Lorume 需要把分散在多台设备、多个 runtime、多个外部平台上�
 - Collector 主动向 Lorume 上报 snapshot；在没有服务端域名的开发期，可以本地路径安装并以 `--once` 输出 snapshot。
 - 本地开发后端接收 collector 上报，维护设备连接状态，并提供 Runtime Fleet / Runs 页面读取的正式查询 API。
 - Lorume 统一消费标准化后的 Device、Runtime、ManagedAgent、ChannelBinding、DeviceConnection 对象。
-- WebSocket 控制面支持设备注册、心跳和远程刷新 snapshot。
+- WebSocket 控制面只支持设备主动注册、心跳和连接健康判定；不下发采集、探测、调度或任意命令。
 - Collector 常驻模式必须周期性上报 inventory snapshot 和 work-state snapshot，不能只刷新资产清单。
 - 为任务看板和 Agent 调度定义 WorkItem、Conversation、Execution 三层工作态模型，但 Runtime Fleet 不直接接管调度。
 
@@ -32,7 +32,7 @@ Lorume 需要把分散在多台设备、多个 runtime、多个外部平台上�
 flowchart LR
   UI["Lorume UI"]
   Registry["Lorume Registry"]
-  Control["Device Control Channel"]
+  Control["Device Connection Channel"]
   Collector["Device Agent / Collector"]
   Adapters["Runtime Adapters"]
   OpenClaw["OpenClaw"]
@@ -120,16 +120,14 @@ Lorume 只展示对识别设备、排查连接和理解 runtime 来源有用的�
 
 - `POST /api/device-snapshots`：Collector 上报一次 `RuntimeInventorySnapshot`，服务端做最小结构校验并写入 Postgres 查询表。
 - `GET /api/runtime-fleet`：Runtime Fleet 页面读取的正式查询 API。
-- `POST /api/devices/:deviceId/refresh`：后端控制面可以向在线设备下发 `inventory.refresh`。命令名保持只读刷新语义，设备侧执行时必须同时刷新 inventory snapshot 与 work-state snapshot。当前 Runtime Fleet 页面不暴露该入口。
-- `GET /api/devices/:deviceId/commands/:commandId`：读取远程刷新命令状态。
-- `WS /api/device-control/ws`：设备侧 collector 建立 outbound WebSocket，用于 `hello`、`heartbeat`、`inventory.refresh`、`command.result`。
+- `WS /api/device-control/ws`：设备侧 collector 建立 outbound WebSocket，用于 `hello`、`heartbeat`、连接断开和 stale 判定。后端不得通过该通道下发 `inventory.refresh`、`agent.skill_probe`、任务调度或任意命令。
 - `POST /api/runtime-work-state-snapshots`：Collector 上报一次 `RuntimeWorkStateSnapshot`，服务端做最小结构校验并写入 Postgres 查询表。
 - `GET /api/runtime-work-items`：Runs / Work Board 页面读取的正式查询 API。
 - `GET /api/runtime-work-items/:id`：读取单个工作项详情。
 - `GET /api/devices/:deviceId/ingestions`：读取设备最近采集记录，用于解释数据新鲜度和缺口。
 - `GET /api/devices/:deviceId/collection-health`：读取设备采集诊断摘要，区分 inventory 与 work-state 最近是否成功、是否有 adapter warning 或失败。该接口服务于状态折叠、排查和通知，不要求 Runtime Fleet 渲染独立采集健康区块。
 
-`runtime-inventory-store` 和 `runtime-work-state-store` 仍可作为内部校验、控制面命令状态和测试辅助使用，但不暴露 latest GET API，也不是 Runtime Fleet / Runs 的正式读取路径。
+`runtime-inventory-store` 和 `runtime-work-state-store` 仍可作为内部校验、连接状态和测试辅助使用，但不暴露 latest GET API，也不是 Runtime Fleet / Runs 的正式读取路径。
 
 ## WebSocket 控制面
 
@@ -142,13 +140,9 @@ WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lor
 - `hello`：设备连接后声明 `deviceId`、`deviceName`、collector version 和 hostname。
 - `hello.ack`：后端确认连接已登记。
 - `heartbeat`：设备周期性上报 collector 状态、负载摘要和最近错误。
-- `inventory.refresh`：后端向设备下发刷新 snapshot 命令。设备侧 collector 必须调用 `lorume collect inventory --json` 与 `lorume collect work-state --json` 做只读采集，并依次上报 inventory snapshot 与 work-state snapshot；命令结果需要返回 inventory `observedAt` 和 `workStateObservedAt`。
-- `agent.skill_probe`：后端向设备下发目标 Agent 本地 Skill metadata 探测命令。设备侧 collector 必须调用 `lorume agent skill-probe --json --agent-id <id>`，并通过 `POST /api/agent-skill-probe-snapshots` 上报结果。
-- `command.accepted`：设备确认收到命令。
-- `command.result`：设备回传命令执行结果。
 - `error`：任何一方回传可解释错误。
 
-命令必须包含 `commandId`。设备侧需要按 `commandId` 做幂等保护，避免同一刷新或探测命令重复执行危险动作。当前远程命令只允许触发只读采集或只读 Skill metadata 探测。
+设备采集由 collector 自己的启动、周期调度或本机显式 `--once` 命令触发。后端只维护连接健康和数据入库，不通过 WebSocket 请求设备立即采集。
 
 连接状态分层：
 
@@ -240,8 +234,8 @@ curl -fsSL https://lorume.example/install.sh | bash -s -- \
 - 能通过脚本 harness 验证 collector 在 fixture 模式下输出 RuntimeSnapshot。
 - 能通过脚本 harness 验证 collector 可把 RuntimeSnapshot POST 到 Lorume 后端。
 - 能通过后端 harness 验证 collector POST 写入、查询 API、最小结构校验和不暴露 legacy latest GET API。
-- 能通过后端 harness 验证 device WebSocket 连接、heartbeat、断连和远程刷新命令生命周期。
-- 能通过 collector harness 验证 daemon 启动和远程刷新命令都会同时上报 inventory snapshot 与 work-state snapshot。
+- 能通过后端 harness 验证 device WebSocket 连接、heartbeat、断连和 stale 判定。
+- 能通过 collector harness 验证 daemon 启动和周期刷新都会同时上报 inventory snapshot 与 work-state snapshot。
 - 能通过安装脚本 harness 验证本地路径安装、配置写入、一次性采集运行。
 - 能通过 Runtime harness 验证 adapter 把平台字段转换成 Lorume 状态、`lastSeenAt` 和 Agent 工作负载统计语义。
 - 能通过前端 harness 验证 Runtime Fleet 当前不展示 `请求设备刷新` 入口。

@@ -126,10 +126,12 @@ console.log(JSON.stringify({
 
     const configPath = path.join(installDir, "config.json");
     const installedCollector = path.join(installDir, "lorume-device-collector.mjs");
+    const installedAdapters = path.join(installDir, "lorume-runtime-adapters.mjs");
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     const snapshot = JSON.parse(output.slice(output.indexOf("{")));
 
     expect(existsSync(installedCollector)).toBe(true);
+    expect(existsSync(installedAdapters)).toBe(true);
     expect(config).toMatchObject({
       deviceId: "test-device",
       deviceName: "Test Device",
@@ -1214,6 +1216,47 @@ console.log(JSON.stringify({
     });
   });
 
+  it("reports Slock CLI fallback capability for empty task channels without referencing undefined state", () => {
+    const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-slock-cli-empty-home-"));
+    const fakeBin = mkdtempSync(path.join(tmpdir(), "lorume-slock-cli-empty-bin-"));
+    const fakeSlock = path.join(fakeBin, "slock");
+    writeFileSync(fakeSlock, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "task" && args[1] === "list") {
+  console.log(JSON.stringify({ tasks: [] }));
+  process.exit(0);
+}
+process.exit(1);
+`);
+    chmodSync(fakeSlock, 0o755);
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-slock-cli-empty-config-"));
+    const configPath = path.join(configDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "slock-cli-empty-device",
+      slockTaskChannels: [{ label: "Team General", externalId: "team-general" }],
+    }));
+
+    const output = execFileSync(process.execPath, [
+      collectorScript,
+      "--work-state-once",
+      "--config",
+      configPath,
+      "--print-only",
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: `${fakeBin}:/usr/bin:/bin` },
+    });
+
+    const snapshot = JSON.parse(output);
+    const slockCapability = snapshot.capabilities.find((capability: { source: string }) => capability.source === "slock");
+
+    expect(snapshot.workItems.filter((item: { source: string }) => item.source === "slock")).toEqual([]);
+    expect(slockCapability).toMatchObject({
+      source: "slock",
+      workItems: { support: "supported" },
+    });
+  });
+
   it("maps Slock internal agent API task board into work items without requiring a local CLI", async () => {
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-slock-api-home-"));
     const agentDir = path.join(fakeHome, ".slock", "agents", "tester", ".slock");
@@ -1507,7 +1550,7 @@ console.log(JSON.stringify({
     }
   });
 
-  it("connects to the control channel and refreshes inventory plus work-state in daemon mode", async () => {
+  it("uploads inventory and work-state on daemon startup while the control channel stays heartbeat-only", async () => {
     const controlServer = await startControlServer();
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-control-home-"));
     const child = spawn(process.execPath, [
@@ -1524,22 +1567,17 @@ console.log(JSON.stringify({
     });
 
     try {
-      const result = await controlServer.refreshResult;
+      const result = await controlServer.startupResult;
 
       expect(result.hello).toMatchObject({
         type: "hello",
         deviceId: "fixture-mac",
         collectorVersion: "0.1.0",
       });
-      expect(result.commandResult).toMatchObject({
-        type: "command.result",
-        commandId: "cmd-refresh-1",
+      expect(result.heartbeat).toMatchObject({
+        type: "heartbeat",
         deviceId: "fixture-mac",
-        status: "succeeded",
-        result: {
-          observedAt: expect.any(String),
-          workStateObservedAt: expect.any(String),
-        },
+        collectorVersion: "0.1.0",
       });
       expect(result.snapshots.map((snapshot) => (snapshot.device as { id: string }).id)).toEqual(["fixture-mac"]);
       expect(result.workStateSnapshots.map((snapshot) => snapshot.deviceId)).toEqual(["fixture-mac"]);
@@ -1549,7 +1587,7 @@ console.log(JSON.stringify({
     }
   });
 
-  it("uses the configured Lorume device token for control refreshes", async () => {
+  it("uses the configured Lorume device token for heartbeat-only control connections", async () => {
     const controlServer = await startControlServer({
       expectedHelloDeviceToken: "device-token-test",
     });
@@ -1575,109 +1613,12 @@ console.log(JSON.stringify({
     });
 
     try {
-      const result = await controlServer.refreshResult;
+      const result = await controlServer.startupResult;
 
       expect(result.hello.deviceId).toBe("fixture-mac");
+      expect(result.heartbeat.deviceId).toBe("fixture-mac");
       expect(result.snapshots.map((snapshot) => (snapshot.device as { id: string }).id)).toEqual(["fixture-mac"]);
       expect(result.workStateSnapshots.map((snapshot) => snapshot.deviceId)).toEqual(["fixture-mac"]);
-    } finally {
-      child.kill();
-      controlServer.close();
-    }
-  });
-
-  it("handles Agent Skill probe control commands through the Lorume CLI contract", async () => {
-    const controlServer = await startControlServer({
-      controlCommand: "agent.skill_probe",
-    });
-    const fakeDir = mkdtempSync(path.join(tmpdir(), "lorume-cli-skill-control-"));
-    const fakeCli = path.join(fakeDir, "lorume.mjs");
-    const callsPath = path.join(fakeDir, "calls.jsonl");
-    writeFileSync(fakeCli, `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
-const args = process.argv.slice(2);
-appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + "\\n");
-if (args[0] === "agent" && args[1] === "skill-probe") {
-  console.log(JSON.stringify({
-    command: "agent.skill-probe",
-    targetAgentId: "agent-1",
-    deviceId: "fixture-mac",
-    runtimeId: "runtime-1",
-    status: "succeeded",
-    observedAt: "2026-05-19T00:00:00.000Z",
-    probedAt: "2026-05-19T00:00:00.000Z",
-    skills: []
-  }));
-} else if (args[0] === "collect" && args[1] === "inventory") {
-  console.log(JSON.stringify({
-    command: "collect.inventory",
-    observedAt: "2026-05-19T00:00:00.000Z",
-    collector: { version: "test", status: "online" },
-    device: { id: "fixture-mac", name: "Fixture Mac", hostname: "fixture-mac.local", os: "darwin", status: "online", connectionMode: "collector" },
-    runtimes: [],
-    agents: [],
-    reports: []
-  }));
-} else {
-  console.log(JSON.stringify({
-    command: "collect.work-state",
-    observedAt: "2026-05-19T00:00:00.000Z",
-    deviceId: "fixture-mac",
-    workItems: [],
-    conversations: [],
-    executions: [],
-    capabilities: []
-  }));
-}
-`);
-    chmodSync(fakeCli, 0o755);
-    const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-skill-control-home-"));
-    const child = spawn(process.execPath, [
-      collectorScript,
-      "--fixture",
-      fixturePath,
-      "--server-url",
-      controlServer.baseUrl,
-      "--interval-ms",
-      "100000",
-    ], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        LORUME_CLI_PATH: fakeCli,
-        LORUME_COLLECTOR_HOME: fakeHome,
-        PATH: "/usr/bin:/bin",
-      },
-    });
-
-    try {
-      const result = await controlServer.refreshResult;
-      const calls = readFileSync(callsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-
-      expect(result.commandResult).toMatchObject({
-        type: "command.result",
-        commandId: "cmd-skill-probe-1",
-        status: "succeeded",
-      });
-      expect(result.agentSkillProbeSnapshots).toEqual([
-        expect.objectContaining({
-          targetAgentId: "agent-1",
-          deviceId: "fixture-mac",
-          runtimeId: "runtime-1",
-          status: "succeeded",
-        }),
-      ]);
-      expect(calls).toContainEqual([
-        "agent",
-        "skill-probe",
-        "--json",
-        "--agent-id",
-        "agent-1",
-        "--runtime-id",
-        "runtime-1",
-        "--device-id",
-        "fixture-mac",
-      ]);
     } finally {
       child.kill();
       controlServer.close();
@@ -2320,33 +2261,42 @@ async function startSlockInternalApiServer(): Promise<{
 
 async function startControlServer(options: {
   expectedHelloDeviceToken?: string;
-  controlCommand?: "inventory.refresh" | "agent.skill_probe";
 } = {}): Promise<{
   baseUrl: string;
   close: () => void;
-  refreshResult: Promise<{
+  startupResult: Promise<{
     hello: Record<string, unknown>;
-    commandResult: Record<string, unknown>;
+    heartbeat: Record<string, unknown>;
     snapshots: Array<Record<string, unknown>>;
     workStateSnapshots: Array<Record<string, unknown>>;
-    agentSkillProbeSnapshots: Array<Record<string, unknown>>;
   }>;
 }> {
   const snapshots: Array<Record<string, unknown>> = [];
   const workStateSnapshots: Array<Record<string, unknown>> = [];
-  const agentSkillProbeSnapshots: Array<Record<string, unknown>> = [];
   let webSocketServer: WebSocketServer | undefined;
   let server: Server | undefined;
   let helloMessage: Record<string, unknown> | undefined;
+  let heartbeatMessage: Record<string, unknown> | undefined;
 
-  const refreshResult = new Promise<{
+  const startupResult = new Promise<{
     hello: Record<string, unknown>;
-    commandResult: Record<string, unknown>;
+    heartbeat: Record<string, unknown>;
     snapshots: Array<Record<string, unknown>>;
     workStateSnapshots: Array<Record<string, unknown>>;
-    agentSkillProbeSnapshots: Array<Record<string, unknown>>;
   }>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("collector control refresh timed out")), 5000);
+    let resolved = false;
+    const timeout = setTimeout(() => reject(new Error("collector startup upload timed out")), 5000);
+    const maybeResolve = () => {
+      if (resolved || !helloMessage || !heartbeatMessage || snapshots.length === 0 || workStateSnapshots.length === 0) return;
+      resolved = true;
+      clearTimeout(timeout);
+      resolve({
+        hello: helloMessage,
+        heartbeat: heartbeatMessage,
+        snapshots,
+        workStateSnapshots,
+      });
+    };
 
     server = createServer((request, response) => {
       if (
@@ -2354,7 +2304,6 @@ async function startControlServer(options: {
         || ![
           "/api/device-snapshots",
           "/api/runtime-work-state-snapshots",
-          "/api/agent-skill-probe-snapshots",
         ].includes(request.url ?? "")
       ) {
         response.writeHead(404);
@@ -2371,9 +2320,9 @@ async function startControlServer(options: {
         const snapshot = JSON.parse(body);
         if (request.url === "/api/device-snapshots") snapshots.push(snapshot);
         if (request.url === "/api/runtime-work-state-snapshots") workStateSnapshots.push(snapshot);
-        if (request.url === "/api/agent-skill-probe-snapshots") agentSkillProbeSnapshots.push(snapshot);
         response.writeHead(201, { "content-type": "application/json" });
         response.end(JSON.stringify({ ok: true }));
+        maybeResolve();
       });
     });
 
@@ -2397,30 +2346,11 @@ async function startControlServer(options: {
             delete message.deviceToken;
           }
           helloMessage = message;
-          if (options.controlCommand === "agent.skill_probe") {
-            webSocket.send(JSON.stringify({
-              type: "agent.skill_probe",
-              deviceId: message.deviceId,
-              commandId: "cmd-skill-probe-1",
-              payload: { targetAgentId: "agent-1", runtimeId: "runtime-1" },
-            }));
-          } else {
-            webSocket.send(JSON.stringify({
-              type: "inventory.refresh",
-              deviceId: message.deviceId,
-              commandId: "cmd-refresh-1",
-            }));
-          }
+          maybeResolve();
         }
-        if (message.type === "command.result") {
-          clearTimeout(timeout);
-          resolve({
-            hello: helloMessage ?? {},
-            commandResult: message,
-            snapshots,
-            workStateSnapshots,
-            agentSkillProbeSnapshots,
-          });
+        if (message.type === "heartbeat") {
+          heartbeatMessage = message;
+          maybeResolve();
         }
       });
     });
@@ -2439,6 +2369,6 @@ async function startControlServer(options: {
       webSocketServer?.close();
       server?.close();
     },
-    refreshResult,
+    startupResult,
   };
 }

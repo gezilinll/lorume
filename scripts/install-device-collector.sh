@@ -111,6 +111,11 @@ if [[ ! -f "$SOURCE_CLI" ]]; then
   echo "Lorume CLI script not found: $SOURCE_CLI" >&2
   exit 1
 fi
+SOURCE_RUNTIME_ADAPTERS="$SOURCE_DIR/scripts/lorume-runtime-adapters.mjs"
+if [[ ! -f "$SOURCE_RUNTIME_ADAPTERS" ]]; then
+  echo "Lorume runtime adapter module not found: $SOURCE_RUNTIME_ADAPTERS" >&2
+  exit 1
+fi
 
 find_node() {
   if command -v node >/dev/null 2>&1; then
@@ -153,6 +158,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 install -m 0755 "$SOURCE_COLLECTOR" "$INSTALL_DIR/lorume-device-collector.mjs"
 install -m 0755 "$SOURCE_CLI" "$INSTALL_DIR/lorume.mjs"
+install -m 0644 "$SOURCE_RUNTIME_ADAPTERS" "$INSTALL_DIR/lorume-runtime-adapters.mjs"
 
 "$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_NAME" "$DEVICE_TOKEN" "$SLOCK_SERVER_URL" "$INTERVAL_MS" <<'NODE'
 const fs = require("node:fs");

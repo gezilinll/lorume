@@ -7,17 +7,9 @@ import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.js
 import type { RuntimeInventorySnapshot } from "../runtime";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
 import type { OperationRow, OperationStore } from "../operations/operation-store";
-import { createRuntimeControlChannel, type RuntimeControlSocket } from "./runtime-control-channel";
+import { createRuntimeControlChannel } from "./runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "./runtime-http-api";
 import { createRuntimeInventoryStore } from "./runtime-inventory-store";
-
-class MemorySocket implements RuntimeControlSocket {
-  readonly sent: unknown[] = [];
-
-  send(data: string): void {
-    this.sent.push(JSON.parse(data));
-  }
-}
 
 const servers: Server[] = [];
 
@@ -45,71 +37,6 @@ describe("runtime HTTP API agent Skill probing", () => {
           nonMarkdownFiles: [expect.not.objectContaining({ content: expect.any(String) })],
         }),
       ],
-    });
-  });
-
-  it("requests a connected device probe and records operation plus notification state", async () => {
-    const operationStore = createFakeOperationStore();
-    const notifications: CreateNotificationEventInput[] = [];
-    const { baseUrl, channel } = await startRuntimeApi({
-      createCommandId: () => "cmd-skill-probe-1",
-      operationStore,
-      skillProbeNotifications: {
-        createNotificationEvent: async (input) => {
-          notifications.push(input);
-          return {};
-        },
-        listRecipientUserIds: async () => ["user-1"],
-      },
-    });
-    const socket = new MemorySocket();
-    channel.attach(socket);
-    channel.receive(socket, JSON.stringify({ type: "hello", deviceId: "fixture-mac" }));
-
-    const response = await postJson(
-      `${baseUrl}/api/agents/${encodeURIComponent("fixture-mac:slock:slock-daemon:agent:tester")}/skill-probe`,
-      { deviceId: "fixture-mac", runtimeId: "fixture-mac:slock:slock-daemon", organizationId: "org-1" },
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({
-      commandId: "cmd-skill-probe-1",
-      operation: expect.objectContaining({ status: "running", type: "agent_skill_probe" }),
-      snapshot: expect.objectContaining({ status: "requested" }),
-    });
-    expect(socket.sent).toContainEqual(expect.objectContaining({
-      commandId: "cmd-skill-probe-1",
-      type: "agent.skill_probe",
-      payload: expect.objectContaining({
-        runtimeId: "fixture-mac:slock:slock-daemon",
-        targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
-      }),
-    }));
-    expect(notifications).toEqual([
-      expect.objectContaining({
-        eventType: "agent_skill_probe_requested",
-        operationId: "op-1",
-        recipientUserIds: ["user-1"],
-        resourceType: "agent",
-      }),
-    ]);
-  });
-
-  it("returns device-disconnected probe state when the owning device is offline", async () => {
-    const operationStore = createFakeOperationStore();
-    const { baseUrl } = await startRuntimeApi({ operationStore });
-
-    const response = await postJson(
-      `${baseUrl}/api/agents/${encodeURIComponent("fixture-mac:slock:slock-daemon:agent:tester")}/skill-probe`,
-      { deviceId: "fixture-mac", runtimeId: "fixture-mac:slock:slock-daemon", organizationId: "org-1" },
-    );
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(409);
-    expect(body).toMatchObject({
-      error: "device_not_connected",
-      snapshot: expect.objectContaining({ status: "device_disconnected" }),
-      operation: expect.objectContaining({ status: "failed" }),
     });
   });
 
@@ -157,7 +84,6 @@ describe("runtime HTTP API agent Skill probing", () => {
 });
 
 async function startRuntimeApi(options: {
-  createCommandId?: () => string;
   operationStore?: OperationStore;
   skillProbeNotifications?: Parameters<typeof createRuntimeHttpApiHandler>[0]["skillProbeNotifications"];
 } = {}) {
@@ -169,7 +95,6 @@ async function startRuntimeApi(options: {
   store.writeLatestSnapshot(fixtureSnapshot as RuntimeInventorySnapshot);
   const channel = createRuntimeControlChannel({
     store,
-    createCommandId: options.createCommandId,
     now: () => new Date("2026-05-18T10:00:00.000Z"),
   });
   const handler = createRuntimeHttpApiHandler({
@@ -190,7 +115,6 @@ async function startRuntimeApi(options: {
   if (!address || typeof address === "string") throw new Error("missing test server address");
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
-    channel,
     store,
   };
 }

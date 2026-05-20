@@ -4,7 +4,7 @@ import type { RuntimeInventoryStore } from "./runtime-inventory-store";
 import type { PostgresStore } from "./postgres-store";
 import type { RuntimeWorkStateStore } from "./runtime-work-state-store";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
-import { createErrorResponse, errorMessageForCode, normalizeErrorCode } from "../errors/error-catalog";
+import { createErrorResponse, normalizeErrorCode } from "../errors/error-catalog";
 import type { StructuredLogger } from "../logging/structured-logger";
 import {
   normalizeAgentSkillProbeSnapshot,
@@ -22,9 +22,9 @@ export interface RuntimeHttpApiHandlerOptions {
     requireDeviceToken?: (request: IncomingMessage) => Promise<unknown | null>;
     requireUserSession?: (request: IncomingMessage) => Promise<unknown | null>;
   };
-  /** Snapshot, connection, and command state store. */
+  /** Snapshot and connection state store. */
   store: RuntimeInventoryStore;
-  /** Device control channel for refresh dispatch. */
+  /** Device connection channel. */
   controlChannel: RuntimeControlChannel;
   /** Latest runtime work-state snapshot store. */
   workStateStore?: RuntimeWorkStateStore;
@@ -35,8 +35,8 @@ export interface RuntimeHttpApiHandlerOptions {
     createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
     listRecipientUserIds: (organizationId: string, deviceId: string) => Promise<string[]>;
   };
-  /** Optional Operation integration for user-visible Agent Skill probe lifecycle. */
-  operationStore?: Pick<OperationStore, "createOperation" | "readOperation" | "updateOperationStatus">;
+  /** Optional Operation integration for device-reported Agent Skill probe snapshots. */
+  operationStore?: Pick<OperationStore, "updateOperationStatus">;
   /** Optional notification integration for Agent Skill probe lifecycle. */
   skillProbeNotifications?: {
     createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
@@ -139,78 +139,6 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
-    if (request.method === "POST" && agentSkillProbeMatch) {
-      const session = await requireUserReadContext(options, request, response);
-      if (session === null) return;
-      let body: unknown = undefined;
-      try {
-        body = await readJsonBody(request);
-        const agentId = decodeURIComponent(agentSkillProbeMatch[1] ?? "");
-        const requestContext = await resolveAgentSkillProbeRequestContext(options, agentId, body);
-        const actor = resolveOperationActor(session, body);
-        const operation = await createAgentSkillProbeOperation(options, requestContext, actor);
-
-        if (!options.controlChannel.isDeviceConnected(requestContext.deviceId)) {
-          const snapshot = await persistAgentSkillProbeSnapshot(options, {
-            ...createAgentSkillProbeSnapshot(requestContext, "device_disconnected"),
-            errorSummary: "设备控制通道未连接",
-            operationId: operation?.id,
-          });
-          const failedOperation = operation
-            ? await updateAgentSkillProbeOperation(options, operation.id, "failed", "设备控制通道未连接")
-            : null;
-          await notifyAgentSkillProbe(options, {
-            eventType: "agent_skill_probe_device_disconnected",
-            operation: failedOperation ?? operation,
-            requestContext,
-            severity: "warning",
-            snapshot,
-            summary: `${requestContext.targetAgentName ?? requestContext.targetAgentId} Skill 探测失败：设备控制通道未连接`,
-            title: "Skill 探测失败",
-          });
-          sendJson(response, 409, {
-            error: "device_not_connected",
-            operation: failedOperation ?? operation,
-            snapshot,
-          });
-          return;
-        }
-
-        const command = options.controlChannel.requestAgentSkillProbe(requestContext.deviceId, {
-          ...(operation?.id ? { operationId: operation.id } : {}),
-          runtimeId: requestContext.runtimeId,
-          targetAgentId: requestContext.targetAgentId,
-        });
-        const snapshot = await persistAgentSkillProbeSnapshot(options, {
-          ...createAgentSkillProbeSnapshot(requestContext, "requested"),
-          commandId: command.commandId,
-          operationId: operation?.id,
-        });
-        const runningOperation = operation
-          ? await updateAgentSkillProbeOperation(options, operation.id, "running")
-          : null;
-        await notifyAgentSkillProbe(options, {
-          eventType: "agent_skill_probe_requested",
-          operation: runningOperation ?? operation,
-          requestContext,
-          severity: "info",
-          snapshot,
-          summary: `${requestContext.targetAgentName ?? requestContext.targetAgentId} Skill 探测请求已下发`,
-          title: "Skill 探测已请求",
-        });
-        sendJson(response, 202, {
-          commandId: command.commandId,
-          operation: runningOperation ?? operation,
-          snapshot,
-        });
-      } catch (error) {
-        sendJson(response, statusCodeForWriteError(error), {
-          error: error instanceof Error ? error.message : "skill probe request failed",
-        });
-      }
-      return;
-    }
-
     if (request.method === "POST" && requestUrl.pathname === "/api/agent-skill-probe-snapshots") {
       const deviceAuth = await authorizeDeviceWrite(options, request, response);
       if (deviceAuth === null) return;
@@ -285,42 +213,6 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
-    const refreshMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/refresh$/);
-    if (request.method === "POST" && refreshMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
-      const deviceId = decodeURIComponent(refreshMatch[1] ?? "");
-      try {
-        const command = options.controlChannel.requestInventoryRefresh(deviceId);
-        sendJson(response, 202, {
-          ok: true,
-          commandId: command.commandId,
-          deviceId: command.deviceId,
-          status: command.status,
-        });
-      } catch (error) {
-        sendJson(response, 409, {
-          error: "device_not_connected",
-          deviceId,
-          message: errorMessageForCode("device_not_connected"),
-        });
-      }
-      return;
-    }
-
-    const commandMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/commands\/([^/]+)$/);
-    if (request.method === "GET" && commandMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
-      const deviceId = decodeURIComponent(commandMatch[1] ?? "");
-      const commandId = decodeURIComponent(commandMatch[2] ?? "");
-      const command = options.store.readRuntimeCommand(commandId);
-      if (!command || command.deviceId !== deviceId) {
-        sendJson(response, 404, { error: "command_not_found", deviceId, commandId });
-        return;
-      }
-      sendJson(response, 200, command);
-      return;
-    }
-
     const ingestionMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/ingestions$/);
     if (request.method === "GET" && ingestionMatch) {
       if (!(await authorizeUserRead(options, request, response))) return;
@@ -359,11 +251,6 @@ interface AgentSkillProbeRequestContext {
   deviceName?: string;
   runtimeId: string;
   runtimeName?: string;
-}
-
-interface OperationActor {
-  organizationId?: string;
-  userId?: string;
 }
 
 async function readAgentSkillProbeSnapshot(
@@ -454,27 +341,6 @@ async function persistAgentSkillProbeSnapshot(
   const snapshot = options.store.writeAgentSkillProbeSnapshot(value);
   await options.postgresStore?.upsertAgentSkillProbeSnapshot(snapshot).catch(() => undefined);
   return snapshot;
-}
-
-async function createAgentSkillProbeOperation(
-  options: RuntimeHttpApiHandlerOptions,
-  context: AgentSkillProbeRequestContext,
-  actor: OperationActor,
-): Promise<OperationRow | null> {
-  if (!options.operationStore || !actor.organizationId) return null;
-  return options.operationStore.createOperation({
-    organizationId: actor.organizationId,
-    requestedByUserId: actor.userId ?? null,
-    resourceId: context.targetAgentId,
-    resourceType: "agent",
-    summary: `探测 ${context.targetAgentName ?? context.targetAgentId} 的 Skill`,
-    targetId: context.deviceId,
-    targetType: "device",
-    type: "agent_skill_probe",
-    metadata: {
-      runtimeId: context.runtimeId,
-    },
-  });
 }
 
 async function updateAgentSkillProbeOperation(
@@ -579,40 +445,6 @@ async function notifyAgentSkillProbe(
     summary: input.summary,
     title: input.title,
   }).catch(() => undefined);
-}
-
-async function requireUserReadContext(
-  options: RuntimeHttpApiHandlerOptions,
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<unknown | undefined | null> {
-  if (!options.auth?.requireUserSession) return undefined;
-  const session = await options.auth.requireUserSession(request);
-  if (session) return session;
-  sendJson(response, 401, { error: "unauthorized" });
-  return null;
-}
-
-function resolveOperationActor(session: unknown, body: unknown): OperationActor {
-  return {
-    organizationId: readSessionOrganizationId(session) ?? readString(body, "organizationId"),
-    userId: readSessionUserId(session) ?? readString(body, "requestedByUserId"),
-  };
-}
-
-function readSessionOrganizationId(session: unknown): string | undefined {
-  if (!isRecord(session) || !Array.isArray(session.organizations)) return undefined;
-  for (const organization of session.organizations) {
-    if (isRecord(organization) && typeof organization.organizationId === "string" && organization.organizationId) {
-      return organization.organizationId;
-    }
-  }
-  return undefined;
-}
-
-function readSessionUserId(session: unknown): string | undefined {
-  if (!isRecord(session) || !isRecord(session.user)) return undefined;
-  return typeof session.user.id === "string" && session.user.id ? session.user.id : undefined;
 }
 
 function readString(value: unknown, key: string): string {

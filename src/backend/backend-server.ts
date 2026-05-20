@@ -33,8 +33,6 @@ export interface LorumeBackendServerOptions {
   workStateSnapshotPath?: string;
   /** Milliseconds before a silent connected device is considered stale. */
   staleAfterMs?: number;
-  /** Deterministic command id injection for tests. */
-  createCommandId?: () => string;
   /** Postgres connection string for the formal backend repository. */
   databaseUrl?: string;
   /** Optional repository injection for tests. */
@@ -90,7 +88,6 @@ export function createLorumeBackendServer(
   });
   const controlChannel = createRuntimeControlChannel({
     store,
-    createCommandId: options.createCommandId,
   });
   const ownedPostgresStore = options.postgresStore
     ? null

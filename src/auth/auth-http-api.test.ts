@@ -105,6 +105,53 @@ describe("auth HTTP API", () => {
     expect(wrongAccept.status).toBe(403);
   });
 
+  it("creates device tokens only for organization admins and returns the plaintext token once", async () => {
+    const store = new MemoryAuthStore();
+    const { baseUrl } = await startAuthApi(store, []);
+
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "owner@gaoding.com" });
+    const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "owner@gaoding.com", code: "246810" });
+    const ownerCookie = ownerLogin.headers.get("set-cookie") ?? "";
+    const orgResponse = await postJson(`${baseUrl}/api/organizations`, { name: "Lorume" }, ownerCookie);
+    const orgBody = await orgResponse.json() as { organization: { id: string } };
+
+    const tokenResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens`, {
+      deviceId: "fixture-device",
+      name: "Fixture collector",
+    }, ownerCookie);
+    const tokenBody = await tokenResponse.json() as {
+      deviceToken: { deviceId: string; name?: string; token?: string; tokenHash?: string; tokenPrefix: string };
+    };
+
+    expect(tokenResponse.status).toBe(201);
+    expect(tokenBody.deviceToken).toMatchObject({
+      deviceId: "fixture-device",
+      tokenPrefix: expect.stringMatching(/^agt_device_/),
+    });
+    expect(tokenBody.deviceToken.token).toEqual(expect.stringMatching(/^agt_device_/));
+    expect(tokenBody.deviceToken.tokenHash).toBeUndefined();
+    expect(store.createdDeviceTokens).toEqual([
+      expect.not.objectContaining({ token: expect.any(String) }),
+    ]);
+
+    const inviteResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      email: "member@gaoding.com",
+      role: "member",
+    }, ownerCookie);
+    expect(inviteResponse.status).toBe(201);
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "member@gaoding.com" });
+    const memberLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "member@gaoding.com", code: "246810" });
+    const memberCookie = memberLogin.headers.get("set-cookie") ?? "";
+    const acceptResponse = await postJson(`${baseUrl}/api/invitations/invite-token/accept`, {}, memberCookie);
+    expect(acceptResponse.status).toBe(200);
+
+    const forbiddenTokenResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens`, {
+      name: "Member collector",
+    }, memberCookie);
+
+    expect(forbiddenTokenResponse.status).toBe(403);
+  });
+
   it("returns a readable message when the email provider is unavailable", async () => {
     const store = new MemoryAuthStore();
     const handler = createAuthHttpApiHandler({
@@ -200,6 +247,7 @@ class MemoryAuthStore implements AuthStore {
   private readonly organizations: Array<{ createdByUserId: string; id: string; name: string; slug: string }> = [];
   private readonly sessions: Array<{ expiresAt: Date; id: string; revokedAt?: Date; sessionHash: string; userId: string }> = [];
   private readonly users: AuthUser[] = [];
+  readonly createdDeviceTokens: AuthDeviceTokenVerification[] = [];
 
   async createLoginCode(input: { codeHash: string; email: string; expiresAt: Date }): Promise<AuthLoginCode> {
     const code = {
@@ -269,8 +317,7 @@ class MemoryAuthStore implements AuthStore {
   }
 
   async listOrganizationsForUser(userId: string): Promise<AuthOrganizationMembership[]> {
-    const organizationIds = new Set(this.membershipsByUser.get(userId) ?? []);
-    return this.memberships.filter((membership) => organizationIds.has(membership.organizationId));
+    return this.memberships.filter((membership) => this.membershipUserIds.get(membership.id) === userId);
   }
 
   async listOrganizationAdminUserIds(organizationId: string): Promise<string[]> {
@@ -318,8 +365,21 @@ class MemoryAuthStore implements AuthStore {
     return membership;
   }
 
-  async createDeviceToken(): Promise<AuthDeviceTokenVerification> {
-    throw new Error("not needed by HTTP unit tests");
+  async createDeviceToken(input: {
+    deviceId?: string | null;
+    name: string;
+    organizationId: string;
+    tokenHash: string;
+    tokenPrefix: string;
+  }): Promise<AuthDeviceTokenVerification> {
+    const token = {
+      deviceId: input.deviceId ?? null,
+      id: `devtok-${this.createdDeviceTokens.length + 1}`,
+      organizationId: input.organizationId,
+      tokenPrefix: input.tokenPrefix,
+    };
+    this.createdDeviceTokens.push(token);
+    return token;
   }
 
   async verifyDeviceToken(): Promise<AuthDeviceTokenVerification | null> {
@@ -328,11 +388,10 @@ class MemoryAuthStore implements AuthStore {
 
   async close(): Promise<void> {}
 
-  private readonly membershipsByUser = new Map<string, string[]>();
   private readonly membershipUserIds = new Map<string, string>();
 
-  private linkUserToOrganization(userId: string, organizationId: string): void {
-    this.membershipsByUser.set(userId, [...(this.membershipsByUser.get(userId) ?? []), organizationId]);
+  private linkUserToOrganization(_userId: string, _organizationId: string): void {
+    // Membership rows carry their user mapping through membershipUserIds.
   }
 }
 

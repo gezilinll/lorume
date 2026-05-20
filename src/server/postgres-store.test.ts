@@ -105,6 +105,20 @@ describeDb("Postgres runtime store", () => {
 
         await store.upsertInventorySnapshot(inventorySnapshot);
         await store.upsertWorkStateSnapshot(workStateSnapshot);
+        await store.upsertInventorySnapshot(inventorySnapshot);
+        await store.upsertWorkStateSnapshot(workStateSnapshot);
+
+        await expect(store.readEntityCounts()).resolves.toMatchObject({
+          agents: 2,
+          channelBindings: 2,
+          collectorIngestions: 4,
+          devices: 1,
+          runtimes: 2,
+          workConversations: 1,
+          workExecutions: 1,
+          workItems: 1,
+        });
+
         await store.upsertInventorySnapshot(reducedInventorySnapshot);
         await store.upsertWorkStateSnapshot(emptyWorkStateSnapshot);
 

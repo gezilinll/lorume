@@ -184,6 +184,7 @@ Multica 特别规则：
 已确认字段：
 
 - Server info：channel list、joined state、agent list、agent `active/inactive`。真实 API 中 task board channel 参数使用 `#${channel.name}`。
+- Slock `channel` 是 Slock 任务/会话的路由上下文，例如 workspace channel、team channel、群组或 task-board 标识；它不是 OpenClaw 的 DingTalk / Telegram / Slack 用户触达 Channel，也不能跨 Runtime 混用语义。
 - Task board：`id`、`taskNumber`、`status`、`taskStatus`、`title`、`content`、`channelName`、`channelType`、`messageId`、`threadId`、`createdByName`、`claimedByName`、`createdAt`、`updatedAt`、`completedAt`。
 - History：message `id`、`seq`、`channelId`、`senderType`、`senderId`、`messageType`、`content`、`threadId`、`taskStatus`、`taskNumber`、`createdAt`、`updatedAt`、`replyCount`。
 
@@ -224,7 +225,7 @@ Multica 特别规则：
 
 `scripts/lorume-device-collector.mjs --work-state-once` 必须是 live-first。它不再生成内置 work-state fixture，也不允许在探测失败时伪造工作项、会话或执行态。设备侧只安装 Lorume device package，collector 必须通过 `lorume collect work-state --json` 获取工作态。
 
-Collector 常驻模式和控制面 `inventory.refresh` 命令也必须刷新 work-state。`--once` 只适合一次性 inventory smoke；正式 daemon 启动、周期刷新和远程刷新都要同时上报 `POST /api/device-snapshots` 与 `POST /api/runtime-work-state-snapshots`，避免 Runtime Fleet 已更新但 Runs 仍停留在旧工作态。
+Collector 常驻模式必须刷新 work-state。`--once` 只适合一次性 inventory smoke；正式 daemon 启动和周期刷新都要同时上报 `POST /api/device-snapshots` 与 `POST /api/runtime-work-state-snapshots`，避免 Runtime Fleet 已更新但 Runs 仍停留在旧工作态。后端 WebSocket 只维护连接健康，不请求设备执行 work-state 采集。
 
 CLI Adapter 实现：
 
@@ -236,7 +237,7 @@ Collector 实现：
 
 - `--once` 调用 `lorume collect inventory --json` 后上报 inventory snapshot。
 - `--work-state-once` 调用 `lorume collect work-state --json` 后上报 work-state snapshot。
-- 控制面 `inventory.refresh` 只负责编排两条 CLI 命令、POST snapshot、回传 command result 和记录用户可读错误。
+- 后端不通过控制面编排 CLI 命令。collector 自己负责在启动、周期刷新或本机显式命令中调用两条 CLI 命令、POST snapshot 和记录用户可读错误。
 - 新增平台探测能力时，先扩展 `lorume` CLI adapter 与 CLI harness，再让 collector 消费 CLI 输出。
 
 失败规则：
@@ -249,7 +250,7 @@ Collector 实现：
 
 Harness：
 
-- `src/runtime/device-collector-script.test.ts` 覆盖 live probe contract：无探测来源时不伪造数据、OpenClaw fake CLI + DingTalk local state 映射已关联的 message-backed WorkItem/execution、OpenClaw 未关联入站消息只生成会话证据、OpenClaw DingTalk requester session 在 message context 为空时映射 WorkItem、OpenClaw trajectory 在 session JSONL 缺失时仍能用 prompt 生成 WorkItem、OpenClaw shim 在最小 `PATH` 下仍可运行、OpenClaw 大 JSON 输出不会被截断成不可用、Multica fake CLI 映射 issue/task、Slock internal API 自动发现 channel 并映射 task board、Slock transient task-board failure 会重试、Slock workspace-only 不生成 board state。
+- `src/runtime/device-collector-script.test.ts` 覆盖 live probe contract：无探测来源时不伪造数据、OpenClaw fake CLI + DingTalk local state 映射已关联的 message-backed WorkItem/execution、OpenClaw 未关联入站消息只生成会话证据、OpenClaw DingTalk requester session 在 message context 为空时映射 WorkItem、OpenClaw trajectory 在 session JSONL 缺失时仍能用 prompt 生成 WorkItem、OpenClaw shim 在最小 `PATH` 下仍可运行、OpenClaw 大 JSON 输出不会被截断成不可用、Multica fake CLI 映射 issue/task、Slock internal API 自动发现 channel 并映射 task board、Slock CLI fallback 在空任务 channel 下仍返回 capability、不引用未定义状态、Slock transient task-board failure 会重试、Slock workspace-only 不生成 board state。
 - `src/runtime/runtime-work-state-adapters.test.ts` 覆盖 TypeScript adapter 语义：OpenClaw 已关联 DingTalk message / requester session / trajectory 与 execution 分层、未关联 DingTalk message 只作为会话上下文、Multica issue/task 分层、Slock task board 与 activity evidence 分层。
 
 ## 前端闭环范围

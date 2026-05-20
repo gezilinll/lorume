@@ -22,7 +22,7 @@ afterEach(async () => {
 
 describe("standalone Lorume backend server", () => {
   it("keeps the device control websocket available outside Vite", async () => {
-    const backend = await startBackend({ createCommandId: () => "cmd-standalone-refresh" });
+    const backend = await startBackend();
     const socket = new WebSocket(`${backend.wsUrl}/api/device-control/ws`);
     await waitForOpen(socket);
 
@@ -36,21 +36,13 @@ describe("standalone Lorume backend server", () => {
     const helloAck = await helloAckPromise;
     expect(helloAck).toMatchObject({ type: "hello.ack", deviceId: "standalone-device" });
 
-    const commandPromise = waitForMessage(socket);
-    const refreshResponse = await fetch(`${backend.url}/api/devices/standalone-device/refresh`, { method: "POST" });
-    const refreshBody = await refreshResponse.json();
-    const command = await commandPromise;
-
-    expect(refreshResponse.status).toBe(202);
-    expect(refreshBody).toMatchObject({
-      commandId: "cmd-standalone-refresh",
-      status: "sent",
-    });
-    expect(command).toMatchObject({
-      type: "inventory.refresh",
-      commandId: "cmd-standalone-refresh",
+    socket.send(JSON.stringify({
+      type: "heartbeat",
       deviceId: "standalone-device",
-    });
+      summary: { inventoryUploadedAt: "2026-05-20T08:00:00.000Z" },
+    }));
+    await sleep(10);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
 
     socket.close();
   });
@@ -81,7 +73,6 @@ describe("standalone Lorume backend server", () => {
     const backend = await startBackend({
       authPepper: "test-pepper",
       authStore: createDeviceTokenAuthStore("device-token-ok", { verifyDelayMs: 20 }),
-      createCommandId: () => "cmd-secured-refresh",
       deviceTokenRequired: true,
     });
     const socket = new WebSocket(`${backend.wsUrl}/api/device-control/ws`);
@@ -101,22 +92,8 @@ describe("standalone Lorume backend server", () => {
     const helloAck = await helloAckPromise;
 
     expect(helloAck).toMatchObject({ type: "hello.ack", deviceId: "secured-device" });
-
-    const commandPromise = waitForMessage(socket);
-    const refreshResponse = await fetch(`${backend.url}/api/devices/secured-device/refresh`, { method: "POST" });
-    const refreshBody = await refreshResponse.json();
-    const command = await commandPromise;
-
-    expect(refreshResponse.status).toBe(202);
-    expect(refreshBody).toMatchObject({
-      commandId: "cmd-secured-refresh",
-      status: "sent",
-    });
-    expect(command).toMatchObject({
-      type: "inventory.refresh",
-      commandId: "cmd-secured-refresh",
-      deviceId: "secured-device",
-    });
+    await sleep(10);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
 
     socket.close();
   });
@@ -280,14 +257,12 @@ async function startBackend(options: {
   appMode?: "production" | "development" | "agent";
   authPepper?: string;
   authStore?: AuthStore;
-  createCommandId?: () => string;
   databaseUrl?: string;
   deviceTokenRequired?: boolean;
 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-standalone-backend-"));
   const backend = createLorumeBackendServer({
     appMode: options.appMode ?? "agent",
-    createCommandId: options.createCommandId,
     databaseUrl: options.databaseUrl,
     authPepper: options.authPepper,
     authStore: options.authStore,
@@ -327,6 +302,12 @@ function postJson(url: string, payload: unknown): Promise<Response> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
   });
 }
 

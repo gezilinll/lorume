@@ -1,12 +1,8 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { hostname, arch, platform, userInfo, networkInterfaces } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const COLLECTOR_SCRIPT = path.join(SCRIPT_DIR, "lorume-device-collector.mjs");
+import { collectInventorySnapshot, collectWorkStateSnapshot } from "./lorume-runtime-adapters.mjs";
 
 function parseFlags(argv) {
   const positionals = [];
@@ -34,7 +30,7 @@ function parseFlags(argv) {
   return { flags, positionals };
 }
 
-function main() {
+async function main() {
   const { flags, positionals } = parseFlags(process.argv.slice(2));
   if (flags.get("help") || positionals.length === 0) {
     process.stdout.write(helpText());
@@ -51,11 +47,11 @@ function main() {
     return;
   }
   if (group === "collect" && command === "inventory") {
-    writeJson(collectInventory(flags));
+    writeJson(await collectInventory(flags));
     return;
   }
   if (group === "collect" && command === "work-state") {
-    writeJson(collectWorkState(flags));
+    writeJson(await collectWorkState(flags));
     return;
   }
   if (group === "agent" && command === "skill-probe") {
@@ -110,7 +106,7 @@ function listRuntimes(flags) {
   };
 }
 
-function collectInventory(flags) {
+async function collectInventory(flags) {
   const snapshotPath = stringFlag(flags, "snapshot");
   if (snapshotPath) {
     const snapshot = applyInventoryDeviceOverrides(readRuntimeInventorySnapshot(snapshotPath), flags);
@@ -119,22 +115,13 @@ function collectInventory(flags) {
       command: "collect.inventory",
     };
   }
-  if (process.env.LORUME_CLI_USE_COLLECTOR_ADAPTERS === "1") {
-    return { ...runInternalCollectorJson(["--once", "--print-only"], flags), command: "collect.inventory" };
-  }
-  const identity = identifyDevice(flags);
   return {
-    agents: [],
-    collector: { version: "0.1.0", status: "online" },
+    ...collectInventorySnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags)),
     command: "collect.inventory",
-    device: { ...identity.device, status: "unknown" },
-    observedAt: identity.observedAt,
-    reports: [],
-    runtimes: [],
   };
 }
 
-function collectWorkState(flags) {
+async function collectWorkState(flags) {
   const snapshotPath = stringFlag(flags, "snapshot");
   if (snapshotPath) {
     const snapshot = readJson(snapshotPath);
@@ -143,42 +130,10 @@ function collectWorkState(flags) {
     }
     return { ...snapshot, command: "collect.work-state" };
   }
-  if (process.env.LORUME_CLI_USE_COLLECTOR_ADAPTERS === "1") {
-    return { ...runInternalCollectorJson(["--work-state-once", "--print-only"], flags), command: "collect.work-state" };
-  }
-  const identity = identifyDevice(flags);
   return {
+    ...(await collectWorkStateSnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags))),
     command: "collect.work-state",
-    observedAt: identity.observedAt,
-    deviceId: identity.device.id,
-    workItems: [],
-    conversations: [],
-    executions: [],
-    capabilities: [],
   };
-}
-
-function runInternalCollectorJson(baseArgs, flags) {
-  const collectorArgs = [...baseArgs];
-  if (stringFlag(flags, "config")) collectorArgs.push("--config", stringFlag(flags, "config"));
-  if (stringFlag(flags, "device-id")) collectorArgs.push("--device-id", stringFlag(flags, "device-id"));
-  if (stringFlag(flags, "device-name")) collectorArgs.push("--device-name", stringFlag(flags, "device-name"));
-  const result = spawnSync(process.execPath, [COLLECTOR_SCRIPT, ...collectorArgs], {
-    encoding: "utf8",
-    env: { ...process.env, LORUME_COLLECTOR_INTERNAL_LEGACY: "1" },
-    maxBuffer: 20 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120_000,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw createCliError("collector_adapter_failed", result.stderr.trim() || "Collector adapter failed", 1);
-  }
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw createCliError("invalid_json", "Collector adapter returned non-JSON output", 1);
-  }
 }
 
 function probeAgentSkills(flags) {
@@ -307,6 +262,22 @@ function readJson(filePath) {
   } catch (error) {
     throw createCliError("invalid_json", error instanceof Error ? error.message : "Invalid JSON", 2);
   }
+}
+
+function readCollectorConfig(flags) {
+  const configPath = stringFlag(flags, "config");
+  if (!configPath) return {};
+  if (!existsSync(configPath)) return {};
+  return readJson(configPath);
+}
+
+function collectorAdapterArgs(flags) {
+  return {
+    configPath: stringFlag(flags, "config"),
+    deviceId: stringFlag(flags, "device-id"),
+    deviceName: stringFlag(flags, "device-name"),
+    fixturePath: stringFlag(flags, "snapshot"),
+  };
 }
 
 function requireFlag(flags, key) {
@@ -441,7 +412,7 @@ Commands:
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   writeError(error);
 }

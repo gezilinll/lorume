@@ -33,42 +33,6 @@ export interface RuntimeDeviceConnection {
   lastError?: string;
 }
 
-/** Runtime control command supported by Lorume. */
-export type RuntimeCommandType = "inventory.refresh" | "agent.skill_probe";
-
-/** Runtime command lifecycle status. */
-export type RuntimeCommandStatus =
-  | "pending"
-  | "sent"
-  | "accepted"
-  | "succeeded"
-  | "failed"
-  | "timed_out";
-
-/** Device control command state. */
-export interface RuntimeCommand {
-  /** Stable command id used for idempotency. */
-  commandId: string;
-  /** Device expected to execute the command. */
-  deviceId: string;
-  /** Command type. */
-  type: RuntimeCommandType;
-  /** Current lifecycle state. */
-  status: RuntimeCommandStatus;
-  /** ISO timestamp when Lorume created the command. */
-  createdAt: string;
-  /** ISO timestamp when Lorume sent the command to the device. */
-  sentAt?: string;
-  /** ISO timestamp when the device accepted the command. */
-  acceptedAt?: string;
-  /** ISO timestamp when the command completed. */
-  completedAt?: string;
-  /** Optional command result payload. */
-  result?: Record<string, unknown>;
-  /** Optional command error reason. */
-  error?: string;
-}
-
 /** Runtime inventory persistence options for the local Lorume backend. */
 export interface RuntimeInventoryStoreOptions {
   /** Absolute or repository-relative path for the latest snapshot JSON file. */
@@ -91,12 +55,6 @@ export interface RuntimeInventoryStore {
   writeDeviceConnection: (connection: RuntimeDeviceConnection) => RuntimeDeviceConnection;
   /** Mark a previously connected device as disconnected. */
   markDeviceDisconnected: (deviceId: string, disconnectedAt: string, reason?: string) => RuntimeDeviceConnection | null;
-  /** Create a runtime control command in pending state. */
-  createRuntimeCommand: (command: Omit<RuntimeCommand, "status"> & { status?: RuntimeCommandStatus }) => RuntimeCommand;
-  /** Read a runtime control command by id. */
-  readRuntimeCommand: (commandId: string) => RuntimeCommand | null;
-  /** Merge command lifecycle changes into an existing runtime control command. */
-  updateRuntimeCommand: (commandId: string, patch: Partial<RuntimeCommand>) => RuntimeCommand;
   /** Read the latest read-only Skill probe snapshot for one Agent. */
   readAgentSkillProbeSnapshot: (agentId: string) => AgentSkillProbeSnapshot | null;
   /** Validate and store the latest read-only Skill probe snapshot for one Agent. */
@@ -115,7 +73,6 @@ export function createRuntimeInventoryStore(
   );
   const staleAfterMs = options.staleAfterMs ?? defaultStaleAfterMs;
   const deviceConnections = new Map<string, RuntimeDeviceConnection>();
-  const runtimeCommands = new Map<string, RuntimeCommand>();
   const skillProbeSnapshots = new Map<string, AgentSkillProbeSnapshot>();
 
   return {
@@ -160,25 +117,6 @@ export function createRuntimeInventoryStore(
       };
       deviceConnections.set(deviceId, nextConnection);
       return { ...nextConnection };
-    },
-    createRuntimeCommand(command) {
-      const nextCommand = {
-        ...command,
-        status: command.status ?? "pending",
-      };
-      runtimeCommands.set(command.commandId, nextCommand);
-      return { ...nextCommand };
-    },
-    readRuntimeCommand(commandId) {
-      const command = runtimeCommands.get(commandId);
-      return command ? { ...command } : null;
-    },
-    updateRuntimeCommand(commandId, patch) {
-      const current = runtimeCommands.get(commandId);
-      if (!current) throw new Error(`unknown runtime command: ${commandId}`);
-      const nextCommand = { ...current, ...patch, commandId };
-      runtimeCommands.set(commandId, nextCommand);
-      return { ...nextCommand };
     },
     readAgentSkillProbeSnapshot(agentId) {
       const snapshot = skillProbeSnapshots.get(agentId);

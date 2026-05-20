@@ -12,4 +12,16 @@ describe("dev e2e server configuration", () => {
     expect(source).toContain('path.join(e2eSnapshotRoot, "runtime-inventory", "latest.json")');
     expect(source).toContain('path.join(e2eSnapshotRoot, "runtime-work-state", "latest.json")');
   });
+
+  it("keeps backend-only e2e state isolated from browser and manual dev state", () => {
+    const source = readFileSync(path.resolve("scripts/dev-backend-e2e.ts"), "utf8");
+    const config = readFileSync(path.resolve("playwright.backend.config.ts"), "utf8");
+
+    expect(source).toContain('path.join(repoRoot, ".lorume", "backend-e2e")');
+    expect(source).toContain("lorume_backend_e2e");
+    expect(source).toContain("deviceTokenRequired: true");
+    expect(config).toContain("runtime-backend-api.spec.ts");
+    expect(config).toContain("lorume_backend_e2e");
+    expect(readFileSync(path.resolve("playwright.config.ts"), "utf8")).toContain("runtime-backend-api.spec.ts");
+  });
 });

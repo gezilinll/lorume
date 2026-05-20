@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "VITE_LORUME_APP_MODE=${VITE_LORUME_APP_MODE:-development} vite --host 0.0.0.0",
     "dev:backend": "LORUME_APP_MODE=${LORUME_APP_MODE:-development} tsx src/backend/backend-server.ts",
+    "dev:backend-e2e": "tsx scripts/dev-backend-e2e.ts",
     "dev:e2e": "tsx scripts/dev-e2e.ts",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "node scripts/db-migrate.mjs",
@@ -24,6 +25,7 @@
     "check:cli": "vitest run src/cli",
     "check:repo": "./scripts/check-repo.sh",
     "check:backend": "vitest run src/auth/auth-crypto.test.ts src/auth/auth-http-api.test.ts src/backend src/server src/operations src/notifications src/runtime/device-collector-script.test.ts",
+    "check:backend:e2e": "npm run test:backend-e2e",
     "check:backend:standalone": "vitest run src/backend",
     "check:db": "npm run db:up && LORUME_RUN_DB_TESTS=1 LORUME_TEST_DATABASE_URL=postgres://lorume:lorume@127.0.0.1:54329/postgres vitest run src/auth/auth-store.test.ts src/server/db-migrate.test.ts src/server/postgres-store.test.ts src/server/runtime-http-api-postgres.test.ts src/backend/backend-server.test.ts src/operations/operation-store.test.ts src/notifications/notification-store.test.ts",
     "check:runtime": "vitest run src/runtime",
@@ -35,6 +37,7 @@
     "harness": "npm run check:full",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest",
+    "test:backend-e2e": "env -u NO_COLOR playwright test -c playwright.backend.config.ts",
     "test:run": "vitest run",
     "test:e2e": "env -u NO_COLOR playwright test",
     "test:e2e:install": "npm run setup:e2e"

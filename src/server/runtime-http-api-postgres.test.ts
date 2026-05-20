@@ -53,6 +53,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         const inventorySnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
         const workStateSnapshot = createWorkStateSnapshot(inventorySnapshot);
 
+        const noIngestionHealthResponse = await fetch(`${baseUrl}/api/devices/fixture-mac/collection-health`);
         const inventoryResponse = await postJson(`${baseUrl}/api/device-snapshots`, inventorySnapshot);
         const workStateResponse = await postJson(`${baseUrl}/api/runtime-work-state-snapshots`, workStateSnapshot);
         const fleetResponse = await fetch(`${baseUrl}/api/runtime-fleet`);
@@ -61,6 +62,14 @@ describeDb("runtime HTTP API with Postgres store", () => {
         const ingestionsResponse = await fetch(`${baseUrl}/api/devices/fixture-mac/ingestions`);
         const healthResponse = await fetch(`${baseUrl}/api/devices/fixture-mac/collection-health`);
 
+        await expect(noIngestionHealthResponse.json()).resolves.toMatchObject({
+          deviceId: "fixture-mac",
+          status: "failed",
+          checks: [
+            expect.objectContaining({ id: "inventory", message: "尚未收到采集记录", status: "failed" }),
+            expect.objectContaining({ id: "work_state", message: "尚未收到采集记录", status: "failed" }),
+          ],
+        });
         expect(inventoryResponse.status).toBe(201);
         expect(workStateResponse.status).toBe(201);
         await expect(fleetResponse.json()).resolves.toMatchObject({
@@ -130,6 +139,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
           deviceId: "broken-device",
         });
         const ingestionsResponse = await fetch(`${baseUrl}/api/devices/broken-device/ingestions`);
+        const healthResponse = await fetch(`${baseUrl}/api/devices/broken-device/collection-health`);
 
         expect(inventoryResponse.status).toBe(400);
         expect(workStateResponse.status).toBe(400);
@@ -151,6 +161,14 @@ describeDb("runtime HTTP API with Postgres store", () => {
               status: "failed",
               error: expect.stringContaining("invalid_collector_snapshot: 设备采集数据无效"),
             }),
+          ],
+        });
+        await expect(healthResponse.json()).resolves.toMatchObject({
+          deviceId: "broken-device",
+          status: "failed",
+          checks: [
+            expect.objectContaining({ id: "inventory", message: "采集失败", status: "failed" }),
+            expect.objectContaining({ id: "work_state", message: "采集失败", status: "failed" }),
           ],
         });
       } finally {

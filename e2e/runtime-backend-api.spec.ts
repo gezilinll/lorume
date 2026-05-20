@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { readFileSync, rmSync } from "node:fs";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
@@ -9,8 +11,10 @@ import { resetE2eDatabase } from "./db";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const backendBaseUrl = process.env.LORUME_BACKEND_E2E_BASE_URL ?? "http://127.0.0.1:4184";
 const loginCodePath = path.join(repoRoot, ".lorume", "backend-e2e", "latest-login-code.json");
+const collectorScriptPath = path.join(repoRoot, "scripts", "lorume-device-collector.mjs");
+const fixtureSnapshotPath = path.join(repoRoot, "fixtures", "runtime", "collector-snapshot.sample.json");
 const fixtureSnapshot = JSON.parse(
-  readFileSync(path.join(repoRoot, "fixtures", "runtime", "collector-snapshot.sample.json"), "utf8"),
+  readFileSync(fixtureSnapshotPath, "utf8"),
 ) as RuntimeInventorySnapshot;
 
 const inventorySnapshot: RuntimeInventorySnapshot = {
@@ -104,12 +108,55 @@ test.describe("Runtime backend API", () => {
 
     await expectDeviceHeartbeatAccepted(deviceToken);
   });
+
+  test("accepts inventory and work-state uploaded by a real collector process", async ({ request }) => {
+    await expect((await request.get("/healthz")).ok()).toBe(true);
+    const deviceId = "collector-e2e-device";
+    const deviceName = "Collector E2E Device";
+    const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
+      deviceId,
+      name: "Collector E2E Token",
+    });
+
+    const collectorHome = mkdtempSync(path.join(tmpdir(), "lorume-backend-e2e-collector-"));
+    const collector = spawn(process.execPath, [
+      collectorScriptPath,
+      "--server-url",
+      backendBaseUrl,
+      "--device-id",
+      deviceId,
+      "--device-name",
+      deviceName,
+      "--device-token",
+      deviceToken,
+      "--fixture",
+      fixtureSnapshotPath,
+      "--interval-ms",
+      "600000",
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: collectorHome,
+        LORUME_COLLECTOR_LOG_PATH: path.join(collectorHome, "collector.jsonl"),
+      },
+    });
+
+    try {
+      await waitForCollectorDevice(request, collector, deviceId, deviceName);
+      await waitForCollectorHealth(request, collector, deviceId);
+    } finally {
+      await stopCollector(collector);
+      rmSync(collectorHome, { force: true, recursive: true });
+    }
+  });
 });
 
 async function createLoggedInOrganizationAndDeviceToken(
   request: APIRequestContext,
+  input: { deviceId?: string; name?: string } = {},
 ): Promise<{ deviceToken: string; organizationId: string }> {
-  const email = "backend-e2e-owner@example.com";
+  const email = input.deviceId ? `backend-e2e-${input.deviceId}@example.com` : "backend-e2e-owner@example.com";
   const emailCodeResponse = await request.post("/api/auth/email-code", { data: { email } });
   expect(emailCodeResponse.status()).toBe(202);
   const code = await readLatestLoginCode(email);
@@ -125,7 +172,7 @@ async function createLoggedInOrganizationAndDeviceToken(
   const organizationId = organizationBody.organization.id;
 
   const tokenResponse = await request.post(`/api/organizations/${organizationId}/device-tokens`, {
-    data: { deviceId: "fixture-mac", name: "Backend E2E Collector" },
+    data: { deviceId: input.deviceId ?? "fixture-mac", name: input.name ?? "Backend E2E Collector" },
   });
   expect(tokenResponse.status()).toBe(201);
   const tokenBody = await tokenResponse.json() as {
@@ -136,6 +183,79 @@ async function createLoggedInOrganizationAndDeviceToken(
   expect(tokenBody.deviceToken.tokenHash).toBeUndefined();
 
   return { deviceToken: tokenBody.deviceToken.token, organizationId };
+}
+
+async function waitForCollectorDevice(
+  request: APIRequestContext,
+  collector: ChildProcessWithoutNullStreams,
+  deviceId: string,
+  deviceName: string,
+): Promise<void> {
+  await pollCollector("collector inventory upload", collector, async () => {
+    const fleetResponse = await request.get("/api/runtime-fleet");
+    if (!fleetResponse.ok()) return false;
+    const body = await fleetResponse.json() as { devices?: Array<{ id?: string; name?: string }> };
+    return body.devices?.some((device) => device.id === deviceId && device.name === deviceName) ?? false;
+  });
+}
+
+async function waitForCollectorHealth(
+  request: APIRequestContext,
+  collector: ChildProcessWithoutNullStreams,
+  deviceId: string,
+): Promise<void> {
+  let lastHealthBody: unknown = null;
+  await pollCollector("collector work-state upload", collector, async () => {
+    const healthResponse = await request.get(`/api/devices/${encodeURIComponent(deviceId)}/collection-health`);
+    if (!healthResponse.ok()) return false;
+    const body = await healthResponse.json() as { checks?: Array<{ id?: string; status?: string }> };
+    lastHealthBody = body;
+    return Boolean(
+      body.checks?.some((check) => check.id === "inventory" && check.status === "healthy")
+      && body.checks?.some((check) => check.id === "work_state" && check.status === "healthy"),
+    );
+  }).catch((error) => {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nlast health:\n${JSON.stringify(lastHealthBody, null, 2)}`);
+  });
+}
+
+async function pollCollector(
+  label: string,
+  collector: ChildProcessWithoutNullStreams,
+  predicate: () => Promise<boolean>,
+): Promise<void> {
+  let stdout = "";
+  let stderr = "";
+  collector.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  collector.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30_000) {
+    if (await predicate()) return;
+    if (collector.exitCode !== null) {
+      throw new Error(`${label} failed before completion: exit ${collector.exitCode}\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`${label} timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+}
+
+async function stopCollector(collector: ChildProcessWithoutNullStreams): Promise<void> {
+  if (collector.exitCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      collector.kill("SIGKILL");
+      resolve();
+    }, 2_000);
+    collector.once("close", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    collector.kill("SIGTERM");
+  });
 }
 
 async function readLatestLoginCode(email: string): Promise<string> {

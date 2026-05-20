@@ -2364,6 +2364,40 @@ button.tableRow:hover,
   text-overflow: ellipsis;
 }
 
+.deviceRegistrationPanel {
+  margin-top: 18px;
+}
+
+.deviceRegistrationGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.installCommandBlock {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.installCommandControl {
+  min-width: 0;
+}
+
+.installCommandInput {
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  min-height: 92px;
+  resize: vertical;
+}
+
+.deviceRegistrationActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .emptyState {
   align-items: center;
   display: grid;
@@ -2671,6 +2705,10 @@ button.tableRow:hover,
   }
 
   .inviteLinkBlock {
+    grid-template-columns: 1fr;
+  }
+
+  .deviceRegistrationGrid {
     grid-template-columns: 1fr;
   }
 

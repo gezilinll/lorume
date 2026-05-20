@@ -102,11 +102,13 @@ Collector 保持主动上报：
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /api/device-collector/install.sh`
+- `GET /api/device-collector/files/:fileName`
 - `POST /api/device-snapshots`
 - `POST /api/runtime-work-state-snapshots`
 - `WS /api/device-control/ws`
 
-后端触发式采集命令不属于 P0 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
+Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于 P0 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
 
 正式查询 API：
 

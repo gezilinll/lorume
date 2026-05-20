@@ -18,11 +18,18 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AuthMemberRole>("member");
   const [inviteLink, setInviteLink] = useState("");
+  const [deviceName, setDeviceName] = useState("");
+  const [deviceId, setDeviceId] = useState("");
+  const [deviceToken, setDeviceToken] = useState("");
+  const [installCommand, setInstallCommand] = useState("");
   const [copiedInviteLink, setCopiedInviteLink] = useState(false);
+  const [copiedInstallCommand, setCopiedInstallCommand] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [deviceErrorMessage, setDeviceErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCreatingDeviceToken, setIsCreatingDeviceToken] = useState(false);
 
-  const canInvite = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
+  const canManage = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
 
   async function createInvitation() {
     if (!organization) return;
@@ -56,6 +63,51 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
       setCopiedInviteLink(true);
     } catch {
       setCopiedInviteLink(false);
+    }
+  }
+
+  async function createDeviceInstallCommand() {
+    if (!organization) return;
+    setIsCreatingDeviceToken(true);
+    setDeviceErrorMessage("");
+    setDeviceToken("");
+    setInstallCommand("");
+    setCopiedInstallCommand(false);
+    try {
+      const response = await fetch(`/api/organizations/${encodeURIComponent(organization.organizationId)}/device-tokens`, {
+        body: JSON.stringify({ deviceId: deviceId.trim(), name: deviceName.trim() }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : `设备 token 创建失败: HTTP ${response.status}`);
+      }
+      const token = typeof payload?.deviceToken?.token === "string" ? payload.deviceToken.token : "";
+      const registeredDeviceId = typeof payload?.deviceToken?.deviceId === "string" ? payload.deviceToken.deviceId : deviceId.trim();
+      const registeredDeviceName = typeof payload?.deviceToken?.name === "string" ? payload.deviceToken.name : deviceName.trim();
+      if (!token) throw new Error("设备 token 创建失败");
+      setDeviceToken(token);
+      setInstallCommand(buildInstallCommand({
+        deviceId: registeredDeviceId,
+        deviceName: registeredDeviceName,
+        origin: window.location.origin,
+        token,
+      }));
+    } catch (error) {
+      setDeviceErrorMessage(error instanceof Error ? error.message : "设备 token 创建失败");
+    } finally {
+      setIsCreatingDeviceToken(false);
+    }
+  }
+
+  async function copyInstallCommand() {
+    if (!installCommand) return;
+    try {
+      await navigator.clipboard?.writeText(installCommand);
+      setCopiedInstallCommand(true);
+    } catch {
+      setCopiedInstallCommand(false);
     }
   }
 
@@ -113,7 +165,7 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
               <h2>邀请成员</h2>
             </div>
           </div>
-          {canInvite ? (
+          {canManage ? (
             <div className="skillForm">
               <label className="toolbarField">
                 <span className="controlLabel">邮箱</span>
@@ -163,6 +215,80 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
           )}
         </aside>
       </section>
+
+      <section className="tablePanel deviceRegistrationPanel" aria-label="设备注册">
+        <div className="runtimePanelHeader">
+          <div>
+            <p className="eyebrow">Device</p>
+            <h2>设备注册</h2>
+          </div>
+          <PixelIcon name="terminal" size={18} />
+        </div>
+        {canManage ? (
+          <div className="skillForm">
+            <div className="deviceRegistrationGrid">
+              <label className="toolbarField">
+                <span className="controlLabel">设备名称</span>
+                <input
+                  value={deviceName}
+                  onChange={(event) => setDeviceName(event.target.value)}
+                  placeholder="Fixture Mac"
+                />
+              </label>
+              <label className="toolbarField">
+                <span className="controlLabel">Device ID</span>
+                <input
+                  value={deviceId}
+                  onChange={(event) => setDeviceId(event.target.value)}
+                  placeholder="fixture-mac"
+                />
+              </label>
+            </div>
+            <button
+              className="primaryButton"
+              type="button"
+              disabled={isCreatingDeviceToken || !deviceName.trim() || !deviceId.trim()}
+              onClick={() => void createDeviceInstallCommand()}
+            >
+              生成安装命令
+            </button>
+            {installCommand ? (
+              <div className="installCommandBlock">
+                <label className="toolbarField installCommandControl">
+                  <span className="controlLabel">Device token</span>
+                  <input
+                    aria-label="Device token"
+                    className="inviteLinkInput"
+                    readOnly
+                    value={deviceToken}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </label>
+                <label className="toolbarField installCommandControl">
+                  <span className="controlLabel">安装命令</span>
+                  <textarea
+                    aria-label="安装命令"
+                    className="installCommandInput"
+                    readOnly
+                    rows={3}
+                    value={installCommand}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </label>
+                <div className="deviceRegistrationActions">
+                  <button className="secondaryButton compactButton" type="button" onClick={() => void copyInstallCommand()}>
+                    复制安装命令
+                  </button>
+                  {copiedInstallCommand ? <span className="skillStatusInline">已复制</span> : null}
+                </div>
+              </div>
+            ) : null}
+            {deviceErrorMessage ? <p className="skillErrorMessage">{deviceErrorMessage}</p> : null}
+          </div>
+        ) : (
+          <p>当前角色不能注册设备。</p>
+        )}
+      </section>
     </section>
   );
 }
@@ -174,4 +300,23 @@ function Metric({ label, value, tone }: { label: string; value: number | string;
       <strong>{value}</strong>
     </div>
   );
+}
+
+function buildInstallCommand(input: { deviceId: string; deviceName: string; origin: string; token: string }): string {
+  const installerUrl = `${input.origin}/api/device-collector/install.sh`;
+  return [
+    `curl -fsSL ${shellQuote(installerUrl)} | bash -s --`,
+    "--server-url",
+    shellQuote(input.origin),
+    "--device-id",
+    shellQuote(input.deviceId),
+    "--device-name",
+    shellQuote(input.deviceName),
+    "--device-token",
+    shellQuote(input.token),
+  ].join(" ");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

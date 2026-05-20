@@ -125,6 +125,27 @@ describe("standalone Lorume backend server", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({ error: "unauthorized" });
   });
+
+  it("serves the remote device collector installer bundle", async () => {
+    const backend = await startBackend();
+
+    const installerResponse = await fetch(`${backend.url}/api/device-collector/install.sh`);
+    expect(installerResponse.status).toBe(200);
+    expect(installerResponse.headers.get("content-type")).toContain("text/x-shellscript");
+    const installerScript = await installerResponse.text();
+    expect(installerScript).toContain("api/device-collector/files/$name");
+    expect(installerScript).toContain('download "install-device-collector.sh"');
+    expect(installerScript).toContain('download "lorume-device-collector.mjs"');
+    expect(installerScript).toContain("--source-dir");
+
+    const cliResponse = await fetch(`${backend.url}/api/device-collector/files/lorume.mjs`);
+    expect(cliResponse.status).toBe(200);
+    expect(cliResponse.headers.get("content-type")).toContain("text/javascript");
+    await expect(cliResponse.text()).resolves.toContain("Unsupported lorume command");
+
+    const missingResponse = await fetch(`${backend.url}/api/device-collector/files/not-allowed.txt`);
+    expect(missingResponse.status).toBe(404);
+  });
 });
 
 describeDb("standalone Lorume backend server with Postgres", () => {

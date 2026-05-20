@@ -118,6 +118,8 @@ Lorume 只展示对识别设备、排查连接和理解 runtime 来源有用的�
 
 本地开发阶段使用独立 backend 服务承载最小 API 闭环；Vite 只负责前端开发并把 `/api` 代理到 backend：
 
+- `GET /api/device-collector/install.sh`：返回无密钥的远程安装入口脚本，用于前端生成一行设备注册命令。
+- `GET /api/device-collector/files/:fileName`：只允许下载 `install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs` 和 `lorume.mjs` 这几个白名单设备包文件。
 - `POST /api/device-snapshots`：Collector 上报一次 `RuntimeInventorySnapshot`，服务端做最小结构校验并写入 Postgres 查询表。
 - `GET /api/runtime-fleet`：Runtime Fleet 页面读取的正式查询 API。
 - `WS /api/device-control/ws`：设备侧 collector 建立 outbound WebSocket，用于 `hello`、`heartbeat`、连接断开和 stale 判定。后端不得通过该通道下发 `inventory.refresh`、`agent.skill_probe`、任务调度或任意命令。
@@ -194,7 +196,21 @@ Lorume 把业务任务、会话线程和真实运行执行分开建模。TypeScr
 
 ## 安装方式
 
-开发期没有域名时，安装脚本可以通过本地路径传到远端设备执行：
+组织 owner / admin 可以在组织设置中生成 device token，并得到一条包含 server URL、device id、device name 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
+
+当前远程安装命令形态：
+
+```sh
+curl -fsSL https://lorume.example/api/device-collector/install.sh | bash -s -- \
+  --server-url https://lorume.example \
+  --device-id <device-id> \
+  --device-name <device-name> \
+  --device-token <device-token>
+```
+
+远程安装入口不包含密钥。它只从同一个 Lorume backend 下载白名单设备包文件到临时目录，再调用 `scripts/install-device-collector.sh --source-dir <temp-dir>` 完成本机安装、配置写入和 launchd / systemd 服务注册。
+
+开发期也可以通过本地路径安装：
 
 ```sh
 bash scripts/install-device-collector.sh \
@@ -220,20 +236,14 @@ bash scripts/install-device-collector.sh \
   --slock-server-url https://api.slock.ai
 ```
 
-产品化后再切换为一条远程安装命令：
-
-```sh
-curl -fsSL https://lorume.example/install.sh | bash -s -- \
-  --server-url https://lorume.example \
-  --device-id <device-id>
-```
-
 ## 验收
 
 - 能通过 TypeScript harness 验证 adapter report 可以标准化成 Device、Runtime、ManagedAgent、ChannelBinding。
 - 能通过脚本 harness 验证 collector 在 fixture 模式下输出 RuntimeSnapshot。
 - 能通过脚本 harness 验证 collector 可把 RuntimeSnapshot POST 到 Lorume 后端。
 - 能通过后端 harness 验证 collector POST 写入、查询 API、最小结构校验和不暴露 legacy latest GET API。
+- 能通过 backend API E2E 验证一行安装命令引用的 installer endpoint 和设备包文件可下载。
+- 能通过 backend API E2E 启动真实 collector 进程，验证它通过 CLI 采集 inventory / work-state 并上报到正式 backend 查询 API。
 - 能通过后端 harness 验证 device WebSocket 连接、heartbeat、断连和 stale 判定。
 - 能通过 collector harness 验证 daemon 启动和周期刷新都会同时上报 inventory snapshot 与 work-state snapshot。
 - 能通过安装脚本 harness 验证本地路径安装、配置写入、一次性采集运行。

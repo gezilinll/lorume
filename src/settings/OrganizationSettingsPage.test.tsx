@@ -44,11 +44,43 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.getByRole("button", { name: "复制邀请链接" })).toBeInTheDocument();
   });
 
+  it("creates a device token and one-line install command for organization admins", async () => {
+    const user = userEvent.setup();
+    globalThis.fetch = vi.fn(async (input, init) => {
+      expect(input.toString()).toBe("/api/organizations/org_1/device-tokens");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ deviceId: "fixture-mac", name: "Fixture Mac" });
+      return jsonResponse({
+        deviceToken: {
+          deviceId: "fixture-mac",
+          name: "Fixture Mac",
+          token: "agt_device_secret_123",
+          tokenPrefix: "agt_device_s",
+        },
+      }, 201);
+    }) as unknown as typeof fetch;
+
+    render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
+
+    await user.type(screen.getByLabelText("设备名称"), "Fixture Mac");
+    await user.type(screen.getByLabelText("Device ID"), "fixture-mac");
+    await user.click(screen.getByRole("button", { name: "生成安装命令" }));
+
+    const tokenInput = await screen.findByLabelText("Device token");
+    expect((tokenInput as HTMLInputElement).value).toBe("agt_device_secret_123");
+    const installCommand = screen.getByLabelText("安装命令") as HTMLTextAreaElement;
+    expect(installCommand.value).toContain(`${window.location.origin}/api/device-collector/install.sh`);
+    expect(installCommand.value).toContain("--device-token 'agt_device_secret_123'");
+    expect(installCommand.value).toContain("--device-id 'fixture-mac'");
+    expect(installCommand.value).toContain("--device-name 'Fixture Mac'");
+  });
+
   it("hides invitation creation from regular members", () => {
     render(<OrganizationSettingsPage session={sessionWithRole("member")} />);
 
     expect(screen.getByText("当前角色不能创建邀请链接。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建邀请链接" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成安装命令" })).not.toBeInTheDocument();
   });
 });
 
@@ -73,9 +105,9 @@ function sessionWithRole(role: AuthMemberRole): AuthSessionContext {
   };
 }
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json" },
-    status: 200,
+    status,
   });
 }

@@ -22,6 +22,7 @@ describe("dev e2e server configuration", () => {
     expect(source).toContain("deviceTokenRequired: true");
     expect(config).toContain("runtime-backend-api.spec.ts");
     expect(config).toContain("lorume_backend_e2e");
+    expect(config).toContain("process.env.LORUME_E2E_DATABASE_URL");
     expect(readFileSync(path.resolve("playwright.config.ts"), "utf8")).toContain("runtime-backend-api.spec.ts");
   });
 });

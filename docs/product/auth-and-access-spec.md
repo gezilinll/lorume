@@ -20,7 +20,7 @@
 - 不做计费、套餐、席位购买。
 - 不做通用细粒度资源 ACL，例如单个 Runtime、单个 Agent、单条 Run 的授权。
 - 不做跨组织共享数据。
-- 不在前端、日志、fixture、文档或截图中保留验证码、session token、device token、邮件 API key。
+- 不在日志、fixture、文档或截图中保留验证码、session token、device token、邮件 API key。Device token 只允许在管理员创建后的一次性响应和当前受保护页面状态中明文出现，页面刷新后不能从后端再次读取明文。
 
 ## 对象模型
 
@@ -123,11 +123,12 @@ Organization API：
 
 Device token API：
 
-- `POST /api/organizations/:organizationId/device-tokens`：创建设备 token。
-- `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要。
+- `POST /api/organizations/:organizationId/device-tokens`：创建设备 token，当前已实现，只有 owner / admin 可用，响应只在本次返回明文 token。
+- `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要，当前未实现，后续只能返回名称、device id、token prefix、创建时间、撤销状态等摘要，不能返回明文 token。
 - `POST /api/device-snapshots`：Collector 上报 inventory，使用 device token。
 - `POST /api/runtime-work-state-snapshots`：Collector 上报 work-state，使用 device token。
 - `GET /api/device-control/ws`：设备连接健康通道，使用 device token。
+- `GET /api/device-collector/install.sh` 和 `GET /api/device-collector/files/:fileName`：公开无密钥 installer 与设备包下载入口；鉴权边界在 device token 创建 API 和组织设置页面。
 
 Runtime / Runs 读取 API：
 
@@ -155,6 +156,7 @@ Runtime / Runs 读取 API：
 - 不回退复古像素边框、厚黑线、高饱和黄色侧栏、错位阴影、像素 sprite 或装饰性调试文案。
 - 登录页的 `/api/me` 匿名会话探测返回 `401` 或 `404` 属于正常未登录状态，不能直接把 `Not Found`、接口错误或调试字段暴露在页面上；其他后端故障仍应展示可读错误，避免把真实服务异常吞掉。
 - Auth API 错误必须使用稳定 `error` code，并通过共享错误字典维护用户可读 `message`。前端遇到只有 code 的响应时，也必须映射成可读提示，不能把 `invalid_or_expired_code` 等技术字符串直接展示给用户。
+- 组织设置页生成安装命令时可以显示 device token 和包含 token 的命令，但只显示当前创建结果，不提供历史明文 token 查询。
 
 ## Runtime Profiles
 

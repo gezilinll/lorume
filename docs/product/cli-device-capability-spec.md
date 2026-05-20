@@ -2,7 +2,7 @@
 
 状态：当前规则
 
-本规格定义 `lorume` CLI 的设备侧确定性能力边界。被采集设备上只有 Lorume device package 这一条安装入口，稳定本地调用面是 `lorume` CLI；collector / daemon 只能编排 CLI 命令、上传结果和回传命令状态，不能直接探测第三方 Runtime 的私有目录、内部 API、token 或进程语义。CLI 不具备推理能力，也不负责分析、编辑、安装或迁移 Skill。
+本规格定义 `lorume` CLI 的设备侧确定性能力边界。被采集设备上只有 Lorume device package 这一条安装入口，稳定本地调用面是 `lorume` CLI；collector / daemon 只能编排 CLI 命令、上传结果和维护连接健康，不能直接探测第三方 Runtime 的私有目录、内部 API、token 或进程语义，也不能承担后端命令执行器角色。CLI 不具备推理能力，也不负责分析、编辑、安装或迁移 Skill。
 
 ## 目标
 
@@ -11,7 +11,7 @@
 - 允许读取本机设备身份。
 - 允许 live-first 采集 Runtime / Agent inventory、work-state 和 Agent Skill metadata。
 - 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent，用于测试、迁移和离线诊断。
-- 允许在后端下发的授权 context 中查询 connector / device 在线状态。
+- 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
 
 ## 非目标
@@ -92,7 +92,7 @@ Runtime 和 Agent 可附带 `paths`：
 
 ### `lorume connector status --json --context <path> --target <id>`
 
-读取后端或测试提供的授权 context。CLI 只能查询 context 中显式出现的 target。缺失 target 返回 `not_found`，不能扫描网络或猜测设备状态。
+读取本地或测试提供的授权 context。CLI 只能查询 context 中显式出现的 target。缺失 target 返回 `not_found`，不能扫描网络、猜测设备状态，或把该命令当作后端触发采集入口。
 
 ### `lorume files copy --json --from <path> --to <path> --allow-root <path>`
 

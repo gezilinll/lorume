@@ -22,7 +22,7 @@ Current source of truth:
 - `docs/product/operation-job-runner-spec.md`: product and engineering spec for Postgres-backed asynchronous Operations, executable Jobs, retry/lease semantics, and user-visible status.
 - `docs/product/notification-spec.md`: product spec for in-app and email notifications, recipient scope, dedupe, rate limits, and recovery notifications.
 - `src/console/ConsoleUtilityDrawer.tsx`: protected Console utility drawer for user-visible Operation / Job status and Notification threads.
-- `src/settings/OrganizationSettingsPage.tsx`: protected Organization Settings page for current organization context and member invitations.
+- `src/settings/OrganizationSettingsPage.tsx`: protected Organization Settings page for current organization context, member invitations, device token creation, and one-line collector install commands.
 - `src/operations/operation-store.ts`: Postgres repository for asynchronous Operations and executable Jobs.
 - `src/operations/operation-http-api.ts`: authenticated Operation query API for user-visible asynchronous status and job details.
 - `src/operations/job-runner.ts`: minimal backend job runner over OperationStore claim, lease, handler, retry, and completion semantics.
@@ -48,6 +48,7 @@ Current source of truth:
 - `src/server/runtime-control-channel.ts`: in-memory device control channel for connection, heartbeat, and refresh command lifecycle.
 - `src/server/runtime-http-api.ts`: backend HTTP API for collector ingestion, Runtime Fleet / Runs query endpoints, refresh commands, Agent Skill probe request/snapshot endpoints, and ingestion diagnostics.
 - `src/backend/backend-server.ts`: standalone local-first backend service that composes auth, Operation / Notification, Runtime / Runs HTTP APIs, in-process Operation runner, and the device WebSocket control channel outside Vite.
+- `src/backend/device-installer-http-api.ts`: public secret-free installer and device package download API used by one-line device registration commands.
 - `src/ui/PixelLogo.tsx` and `public/favicon.svg`: shared brand mark source for app chrome and browser tab metadata.
 - `vite.backend.config.ts`: backend bundle entry for production-like Node execution.
 - `db/migrations/`: Postgres schema migrations for the formal backend service.
@@ -58,8 +59,8 @@ Current source of truth:
 - `scripts/lorume-runtime-adapters.mjs`: CLI-owned runtime and work-state adapter module used by `lorume collect inventory` and `lorume collect work-state`.
 - `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml`: production-like local deployment shape before ECS.
 - `scripts/lorume-device-collector.mjs`: device-side collector / Device Agent script.
-- `scripts/install-device-collector.sh`: local-path collector installer for development and remote-device testing.
-- `scripts/dev-backend-e2e.ts`, `playwright.backend.config.ts`, `e2e/runtime-backend-api.spec.ts`: backend API-only E2E harness for auth, device token creation, collector ingestion, query APIs, and heartbeat-only device WebSocket.
+- `scripts/install-device-collector.sh`: local-path collector installer used directly in development and indirectly by the remote installer wrapper.
+- `scripts/dev-backend-e2e.ts`, `playwright.backend.config.ts`, `e2e/runtime-backend-api.spec.ts`: backend API-only E2E harness for auth, device token creation, installer assets, real collector-process ingestion, query APIs, and heartbeat-only device WebSocket.
 - `e2e/runtime-fleet.spec.ts`: browser-level Runtime Fleet workflow and responsive layout harness.
 - `e2e/runtime-work-board.spec.ts`: browser-level Runs / Work Board workflow and responsive layout harness.
 - `docs/product/agent-network-runtime-panorama.png`: runtime panorama.
@@ -190,7 +191,7 @@ Current harness scripts:
 | `npm run check:cli` | Deterministic local `lorume` CLI command and safety checks. | CLI command contract, file-copy safety, connector context, or package `bin` changes. |
 | `npm run check:repo` | Required source-of-truth paths and local Markdown links. | Docs, assets, agent context, or product spec changes. |
 | `npm run check:backend:standalone` | Standalone backend HTTP and WebSocket smoke tests. | Backend server composition, local backend entrypoint, or server lifecycle changes. |
-| `npm run check:backend:e2e` | Playwright API-only backend harness using isolated Postgres, authenticated user APIs, device-token collector ingestion, backend query APIs, and heartbeat-only device WebSocket. | Backend auth/API contracts, device registration token flow, collector ingestion/query wiring, or device WebSocket connection-health changes. |
+| `npm run check:backend:e2e` | Playwright API-only backend harness using isolated Postgres, authenticated user APIs, installer assets, device-token collector ingestion, real collector-process upload, backend query APIs, and heartbeat-only device WebSocket. | Backend auth/API contracts, device registration token flow, installer command assets, collector ingestion/query wiring, or device WebSocket connection-health changes. |
 | `npm run check:db` | Starts local Postgres, runs migration/repository integration tests against temporary databases, and drops them. | Database schema, migration runner, Postgres repository, Docker Compose, or Postgres dependency changes. |
 | `npm run check:backend` | Focused local backend store, control channel, HTTP API, Agent Skill probe API, and collector POST / WebSocket harness. | Runtime snapshot API, backend API handler, Agent Skill probe snapshot paths, collector posting, device WebSocket heartbeat lifecycle, or backend persistence changes. |
 | `npm run check:runtime` | Focused Runtime / Device Registration and work-state unit/script harness. | Runtime inventory model, work-state model, collector, installer, fixture, probe adapter, or query changes. |

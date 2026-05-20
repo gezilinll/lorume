@@ -19,6 +19,7 @@ import { createRuntimeInventoryStore } from "../server/runtime-inventory-store";
 import { createPostgresStore, type PostgresStore } from "../server/postgres-store";
 import { createRuntimeWorkStateStore } from "../server/runtime-work-state-store";
 import { createStructuredLogger, type StructuredLogger } from "../logging/structured-logger";
+import { createDeviceInstallerHttpApiHandler } from "./device-installer-http-api";
 import { createBackendEmailProvider } from "./email-provider";
 
 /** Construction options for the standalone Lorume backend. */
@@ -165,6 +166,7 @@ export function createLorumeBackendServer(
       requireUserSession: authGuards.requireUserSession,
     })
     : undefined;
+  const deviceInstallerHandler = createDeviceInstallerHttpApiHandler();
   const webSocketServer = new WebSocketServer({ noServer: true });
   const server = createServer((request, response) => {
     const notFound = () => {
@@ -189,11 +191,14 @@ export function createLorumeBackendServer(
         runOperationHandler();
       }
     };
-    if (authHandler) {
-      void authHandler(request, response, runNotificationHandler);
-    } else {
-      runNotificationHandler();
-    }
+    const runAuthHandler = () => {
+      if (authHandler) {
+        void authHandler(request, response, runNotificationHandler);
+      } else {
+        runNotificationHandler();
+      }
+    };
+    void deviceInstallerHandler(request, response, runAuthHandler);
   });
   let baseUrl = "";
   let listening = false;

@@ -114,9 +114,16 @@ markdown_files = [
 
 problems = []
 link_pattern = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+forbidden_phrases = [
+    ("docs/product/cli-device-capability-spec.md", "回传命令状态", "collector must not describe backend command result reporting"),
+    ("docs/product/cli-device-capability-spec.md", "后端下发的授权 context", "connector status context is explicit local/test input, not backend-triggered collection"),
+]
 
 for md_path in markdown_files:
     text = md_path.read_text(encoding="utf-8")
+    for forbidden_path, phrase, reason in forbidden_phrases:
+        if md_path.as_posix() == forbidden_path and phrase in text:
+            problems.append(f"{md_path}: forbidden outdated wording `{phrase}` ({reason})")
     for match in link_pattern.finditer(text):
         raw_target = match.group(1).strip()
         if not raw_target or raw_target.startswith(("#", "http://", "https://", "mailto:")):

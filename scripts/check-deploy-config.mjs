@@ -27,6 +27,14 @@ assert(nginxConfig.includes("client_max_body_size 50m"), "nginx must allow colle
 const backendDockerfile = read("Dockerfile.backend");
 assert(backendDockerfile.includes("node scripts/db-migrate.mjs"), "backend container must run migrations before start");
 assert(backendDockerfile.includes("node dist/backend/backend-server.mjs"), "backend container must start bundled backend");
+for (const installerFile of [
+  "scripts/install-device-collector.sh",
+  "scripts/lorume-device-collector.mjs",
+  "scripts/lorume-runtime-adapters.mjs",
+  "scripts/lorume.mjs",
+]) {
+  assert(backendDockerfile.includes(installerFile), `backend container must include ${installerFile} for remote device registration`);
+}
 
 const composeFile = read("docker-compose.prod-like.yml");
 assert(composeFile.includes("condition: service_healthy"), "backend must wait for healthy Postgres in prod-like compose");

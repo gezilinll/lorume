@@ -133,12 +133,13 @@ export type TaskStatus =
 export interface Task {
   id: string;
   agentId: string;
+  taskType: "conversation" | "scheduled";
   title: string;
   description?: string;
   status: TaskStatus;
-  source?: { externalId?: string };
+  source?: { kind?: "openclaw"; externalId?: string };
   channel?: {
-    kind: "dingtalk" | "telegram" | "slack" | "other";
+    kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
     name?: string;
     externalId?: string;
   };
@@ -148,7 +149,25 @@ export interface Task {
     lastActivityAt?: string;
   };
   assignee?: { name?: string };
-  creator?: { name?: string };
+  creator?: { name?: string; externalId?: string };
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    status: "done" | "failed" | "unknown";
+    arguments?: unknown;
+    resultPreview?: string;
+    error?: string;
+  }>;
+  raw?: {
+    openclaw?: {
+      status?: string;
+      statusSource?: "session" | "trajectory" | "tool" | "tasks_list";
+      sessionId?: string;
+      sessionKey?: string;
+      messageId?: string;
+      trajectoryRunId?: string;
+    };
+  };
   error?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -206,7 +225,7 @@ export interface DeviceStateSnapshot {
 }
 ```
 
-上报是全量 snapshot。后端以当前 snapshot 为准 upsert 对象，并清理同一设备下本次没有出现的 Runtime、Agent 和 Task。
+上报是全量 snapshot。后端以当前 snapshot 为准 upsert 对象，并清理同一设备下本次没有出现的 Runtime、Agent 和 Task。OpenClaw 历史 session / trajectory 可能长期累积；adapter 必须在 CLI 侧把 Task 输出限制为最近任务窗口，并同时受字节预算约束，避免单次上报超过 collector buffer 或后端 JSON body 上限。被窗口裁掉的旧 Task 不进入本次 snapshot，并写入 diagnostics warning。
 
 ## API
 
@@ -228,6 +247,13 @@ OpenClaw 是本阶段唯一默认启用的 runtime adapter。
 | Runtime | OpenClaw config、`openclaw health --json`、`openclaw status --json` | 生成一个 `OpenClaw Gateway` runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw health/status agent 列表和 config agent 列表 | 每个真实 OpenClaw agent id 生成一个 Agent。 |
 | Task | OpenClaw task/message/run 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
+
+Task 上报窗口：
+
+- 默认最多保留最近 `200` 个 OpenClaw Task。
+- 默认 Task 数组 JSON 预算为 `8MiB`，为后端 `10MB` 请求体上限保留 envelope 空间。
+- 排序使用 `updatedAt -> lastSeenAt -> createdAt` 的最近时间优先。
+- 已保留 Task 的 `toolCalls.arguments` 不做裁剪或脱敏；如果窗口超限，丢弃更旧 Task，而不是改写保留下来的 Task。
 
 稳定 ID：
 

@@ -6,6 +6,8 @@ import path from "node:path";
 export const COLLECTOR_VERSION = "0.1.0";
 
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
+const DEFAULT_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS = 200;
+const DEFAULT_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -25,6 +27,11 @@ function sanitizeId(value) {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "unknown";
+}
+
+function positiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(String(process.env[name] || ""), 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function makeAgentId(runtimeId, externalId) {
@@ -268,6 +275,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
   const tasks = [];
   const warnings = [];
   const agentExternalIds = new Set();
+  const taskAgentExternalIds = new Map();
 
   for (const run of runs) {
     const taskType = inferOpenClawTaskType(run);
@@ -284,7 +292,6 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
     }
 
     const agentId = makeAgentId(runtimeId, agentResolution.agentExternalId);
-    agentExternalIds.add(agentResolution.agentExternalId);
     const trajectoryChannel = openClawChannelFromTrajectoryRun(run, dingtalkState.targetsByConversationId);
     const channel = trajectoryChannel ? openClawProductChannel(trajectoryChannel) : undefined;
     const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
@@ -294,7 +301,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
     const error = openClawTrajectoryError(run) || toolError;
     const sourceExternalId = run.messageId || runId;
 
-    tasks.push({
+    const task = {
       id: makeProductTaskId(agentId, runId),
       agentId,
       taskType,
@@ -323,10 +330,72 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
       ...(run.startedAt ? { createdAt: run.startedAt } : {}),
       ...(lastActivityAt ? { updatedAt: lastActivityAt, lastSeenAt: lastActivityAt } : { lastSeenAt: observedAt }),
       ...(status === "failed" && error ? { error } : {}),
-    });
+    };
+    tasks.push(task);
+    taskAgentExternalIds.set(task.id, agentResolution.agentExternalId);
   }
 
-  return { tasks, warnings, agentExternalIds: Array.from(agentExternalIds) };
+  const bounded = boundOpenClawProductTasks(tasks);
+  warnings.push(...bounded.warnings);
+  const visibleAgentExternalIds = new Set(
+    bounded.tasks
+      .map((task) => taskAgentExternalIds.get(task.id))
+      .filter(Boolean),
+  );
+  for (const agentExternalId of visibleAgentExternalIds) agentExternalIds.add(agentExternalId);
+
+  return { tasks: bounded.tasks, warnings, agentExternalIds: Array.from(agentExternalIds) };
+}
+
+function boundOpenClawProductTasks(tasks) {
+  const maxTasks = positiveIntegerEnv("LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS", DEFAULT_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS);
+  const maxBytes = positiveIntegerEnv("LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES", DEFAULT_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES);
+  const orderedTasks = [...tasks].sort(compareOpenClawTasksByRecency);
+  const selected = [];
+  let selectedBytes = 2;
+  let droppedForCount = 0;
+  let droppedForBytes = 0;
+
+  for (const task of orderedTasks) {
+    if (selected.length >= maxTasks) {
+      droppedForCount += 1;
+      continue;
+    }
+
+    const taskBytes = Buffer.byteLength(JSON.stringify(task), "utf8");
+    const nextBytes = selectedBytes + taskBytes + (selected.length ? 1 : 0);
+    if (taskBytes > maxBytes || nextBytes > maxBytes) {
+      droppedForBytes += 1;
+      continue;
+    }
+
+    selected.push(task);
+    selectedBytes = nextBytes;
+  }
+
+  const warnings = [];
+  if (selected.length !== tasks.length) {
+    warnings.push(
+      `OpenClaw task snapshot truncated from ${tasks.length} to ${selected.length} tasks ` +
+      `(maxTasks=${maxTasks}, maxBytes=${maxBytes}, droppedForCount=${droppedForCount}, droppedForBytes=${droppedForBytes}).`,
+    );
+  }
+  return { tasks: selected, warnings };
+}
+
+function compareOpenClawTasksByRecency(left, right) {
+  const rightTime = taskTimestampMillis(right);
+  const leftTime = taskTimestampMillis(left);
+  if (rightTime !== leftTime) return rightTime - leftTime;
+  return String(left.id).localeCompare(String(right.id));
+}
+
+function taskTimestampMillis(task) {
+  for (const value of [task.updatedAt, task.lastSeenAt, task.createdAt]) {
+    const timestamp = Date.parse(String(value || ""));
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return 0;
 }
 
 function resolveOpenClawTrajectoryAgentExternalId(run, knownAgentIds) {

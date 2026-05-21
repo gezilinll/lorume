@@ -33,7 +33,7 @@ describe("lorume CLI", () => {
     expect(output.observedAt).toEqual(expect.any(String));
   });
 
-  it("lists normalized runtimes and agents from a collector-compatible snapshot", () => {
+  it("lists normalized runtimes and agents from a device-state snapshot", () => {
     const output = runCli(["runtime", "list", "--json", "--snapshot", fixturePath]);
 
     expect(output.command).toBe("runtime.list");
@@ -466,6 +466,143 @@ exit 91
     });
     expect(output.tasks[0]).not.toHaveProperty("channel");
     expect(output.tasks[0]).not.toHaveProperty("conversation");
+  });
+
+  it("limits OpenClaw trajectory tasks to the most recent snapshot window", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-window-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "window");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+
+    for (let index = 1; index <= 5; index += 1) {
+      const minute = String(index).padStart(2, "0");
+      writeFileSync(path.join(sessionDir, `run-window-${index}.trajectory.jsonl`), [
+        JSON.stringify({
+          type: "session.started",
+          runId: `run-window-${index}`,
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          ts: `2026-05-21T04:${minute}:00.000Z`,
+          data: { agentId: "main" },
+        }),
+        JSON.stringify({
+          type: "prompt.submitted",
+          runId: `run-window-${index}`,
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          ts: `2026-05-21T04:${minute}:10.000Z`,
+          data: { prompt: `窗口任务 ${index}` },
+        }),
+        JSON.stringify({
+          type: "trace.artifacts",
+          runId: `run-window-${index}`,
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          ts: `2026-05-21T04:${minute}:30.000Z`,
+          data: { finalStatus: "success" },
+        }),
+      ].join("\n"));
+    }
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS: "3",
+        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES: "100000",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks.map((task: { id: string }) => task.id)).toEqual([
+      "test-device:runtime:openclaw:agent:main:task:run-window-5",
+      "test-device:runtime:openclaw:agent:main:task:run-window-4",
+      "test-device:runtime:openclaw:agent:main:task:run-window-3",
+    ]);
+    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 5 to 3"));
+  });
+
+  it("keeps OpenClaw task snapshots inside the byte budget without trimming kept tool arguments", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-bytes-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "bytes");
+    const largeArgument = "x".repeat(2500);
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+
+    for (let index = 1; index <= 3; index += 1) {
+      const minute = String(index).padStart(2, "0");
+      const sessionFile = path.join(sessionDir, `run-large-${index}.session.jsonl`);
+      writeFileSync(sessionFile, [
+        JSON.stringify({ role: "user", content: `大参数任务 ${index}` }),
+        JSON.stringify({
+          role: "assistant",
+          toolCall: {
+            id: `tool-${index}`,
+            name: "bash",
+            arguments: { payload: largeArgument },
+          },
+        }),
+      ].join("\n"));
+      writeFileSync(path.join(sessionDir, `run-large-${index}.trajectory.jsonl`), [
+        JSON.stringify({
+          type: "session.started",
+          runId: `run-large-${index}`,
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          ts: `2026-05-21T05:${minute}:00.000Z`,
+          data: { agentId: "main", sessionFile },
+        }),
+        JSON.stringify({
+          type: "prompt.submitted",
+          runId: `run-large-${index}`,
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          ts: `2026-05-21T05:${minute}:10.000Z`,
+          data: { prompt: `大参数任务 ${index}` },
+        }),
+      ].join("\n"));
+    }
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS: "10",
+        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES: "5000",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0].id).toBe("test-device:runtime:openclaw:agent:main:task:run-large-3");
+    expect(output.tasks[0].toolCalls[0].arguments.payload).toHaveLength(2500);
+    expect(Buffer.byteLength(JSON.stringify(output.tasks), "utf8")).toBeLessThanOrEqual(5000);
+    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 3 to 1"));
   });
 
   it("probes read-only Agent Skill metadata from explicit local roots", () => {

@@ -10,7 +10,7 @@
 - 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
 - 允许读取本机设备事实。
 - 允许 live-first 采集 Device / Runtime / Agent / Task device-state 和 Agent Skill metadata。
-- 允许从 collector-compatible `device_state` snapshot 列出已知 Runtime 和 Agent，用于测试和离线诊断。
+- 允许从标准 `device_state` snapshot 列出已知 Runtime 和 Agent，用于测试和离线诊断。
 - 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
 
@@ -63,7 +63,7 @@ OpenClaw-first 阶段默认只启用 OpenClaw adapter。被禁用的 adapter 不
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ```
 
-`DeviceStateSnapshot` 是全量 snapshot。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
+`DeviceStateSnapshot` 是全量 snapshot，但 OpenClaw Task 采集必须使用最近任务有界窗口，保证每次设备上报都能落在 collector buffer 和后端请求体上限以内。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
 ### `lorume collector stop --json --install-dir <path>`
 
@@ -79,14 +79,14 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 ### `lorume runtime list --json --snapshot <path>`
 
-读取 collector-compatible snapshot，返回：
+读取标准 `device_state` snapshot，返回：
 
 - `device`
 - `runtimes`
 - `agents`
 - `observedAt`
 
-该命令不解释平台原始字段，只消费已归一化 snapshot。新实现优先使用 `lorume collect device-state --json --snapshot <path>`。
+该命令不解释平台原始字段，只消费已归一化 snapshot。Collector 正式采集只调用 `lorume collect device-state --json`；`runtime list` 仅用于离线诊断和 fixture 检查。
 
 ### `lorume connector status --json --context <path> --target <id>`
 

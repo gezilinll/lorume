@@ -118,6 +118,17 @@ OpenClaw adapter 输出当前 `DeviceStateSnapshot` 内的 `runtimes`、`agents`
 | ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 内嵌到 `Task.toolCalls[]`。 |
 | Diagnostics | `openclaw tasks list --json` | 可保存为 warning/raw diagnostics，不作为产品 Task 来源。 |
 
+### OpenClaw Task Snapshot 窗口
+
+OpenClaw session / trajectory 是本机历史日志，不能无限制塞进每分钟上报。Adapter 在生成产品 Task 后必须先按最近活动时间排序，再应用当前窗口：
+
+| 约束 | 默认值 | 说明 |
+|---|---:|---|
+| 最大 Task 数 | `200` | 保留最近 Task，丢弃更旧 Task。 |
+| Task 数组最大 JSON 字节 | `8MiB` | 为后端 `10MB` 请求体上限预留 Device / Runtime / Agent / diagnostics envelope 空间。 |
+
+排序时间使用 `updatedAt`，缺失时依次使用 `lastSeenAt`、`createdAt`。被窗口裁掉的 Task 不进入本次 snapshot，并写 diagnostics warning。已保留 Task 的 `toolCalls.arguments` 保持原样，便于后端排障；需要降低体积时优先丢弃更旧 Task，不改写被保留 Task。
+
 ### OpenClaw Task 类型
 
 | `taskType` | 识别规则 | 入库规则 |

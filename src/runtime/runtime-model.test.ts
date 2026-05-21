@@ -79,9 +79,60 @@ describe("runtime four-object model", () => {
     expect(normalizeTaskStatus("running")).toBe("in_progress");
     expect(normalizeTaskStatus("in_review")).toBe("review");
     expect(normalizeTaskStatus("succeeded")).toBe("done");
+    expect(normalizeTaskStatus("success")).toBe("done");
     expect(normalizeTaskStatus("error")).toBe("failed");
+    expect(normalizeTaskStatus("timed_out")).toBe("failed");
+    expect(normalizeTaskStatus("lost")).toBe("failed");
     expect(normalizeTaskStatus("canceled")).toBe("cancelled");
+    expect(normalizeTaskStatus("interrupted")).toBe("cancelled");
     expect(normalizeTaskStatus("not-a-known-status")).toBe("unknown");
+  });
+
+  it("preserves OpenClaw task type, tool calls, creator external id, and raw status", () => {
+    const snapshot = createDeviceStateSnapshot({
+      observedAt: "2026-05-22T00:00:00.000Z",
+      device: { id: "fixture-device", hostname: "fixture.local", os: "darwin", collectionStatus: "online" },
+      runtimes: [],
+      agents: [],
+      tasks: [{
+        id: "fixture-device:runtime:openclaw:agent:main:task:msg-1",
+        agentId: "fixture-device:runtime:openclaw:agent:main",
+        taskType: "conversation",
+        title: "查 Seedance 指标",
+        status: "success",
+        source: { kind: "openclaw", externalId: "msg-1" },
+        channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "cid-example" },
+        conversation: { title: "日常工作提醒助手", externalId: "cid-example" },
+        creator: { name: "张良", externalId: "100854680226406967" },
+        toolCalls: [{
+          id: "exec-1",
+          name: "bash",
+          status: "failed",
+          arguments: { command: "python3 scripts/query_logs.py --query test" },
+          resultPreview: "partial failures",
+          error: "Column cannot be resolved",
+        }],
+        raw: {
+          openclaw: {
+            status: "done",
+            statusSource: "session",
+            sessionId: "session-1",
+            sessionKey: "agent:main:dingtalk:group:cid-example",
+            messageId: "msg-1",
+            trajectoryRunId: "run-1",
+          },
+        },
+      }],
+    });
+
+    expect(snapshot.tasks[0]).toMatchObject({
+      taskType: "conversation",
+      status: "done",
+      source: { kind: "openclaw", externalId: "msg-1" },
+      creator: { name: "张良", externalId: "100854680226406967" },
+      toolCalls: [expect.objectContaining({ id: "exec-1", status: "failed" })],
+      raw: { openclaw: expect.objectContaining({ status: "done", messageId: "msg-1" }) },
+    });
   });
 
   it("drops runtime source names from task channel context", () => {

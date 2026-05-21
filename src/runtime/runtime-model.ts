@@ -19,6 +19,14 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const TASK_TYPES = ["conversation", "scheduled"] as const;
+
+export type TaskType = (typeof TASK_TYPES)[number];
+
+export const TOOL_CALL_STATUSES = ["done", "failed", "unknown"] as const;
+
+export type ToolCallStatus = (typeof TOOL_CALL_STATUSES)[number];
+
 export interface Device {
   id: string;
   hostname: string;
@@ -69,14 +77,16 @@ export interface Agent {
 export interface Task {
   id: string;
   agentId: string;
+  taskType: TaskType;
   title: string;
   description?: string;
   status: TaskStatus;
   source?: {
+    kind?: "openclaw";
     externalId?: string;
   };
   channel?: {
-    kind: "dingtalk" | "telegram" | "slack" | "other";
+    kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
     name?: string;
     externalId?: string;
   };
@@ -90,6 +100,25 @@ export interface Task {
   };
   creator?: {
     name?: string;
+    externalId?: string;
+  };
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    status: ToolCallStatus;
+    arguments?: unknown;
+    resultPreview?: string;
+    error?: string;
+  }>;
+  raw?: {
+    openclaw?: {
+      status?: string;
+      statusSource?: "session" | "trajectory" | "tool" | "tasks_list";
+      sessionId?: string;
+      sessionKey?: string;
+      messageId?: string;
+      trajectoryRunId?: string;
+    };
   };
   error?: string;
   createdAt?: string;
@@ -149,11 +178,15 @@ export function normalizeTaskStatus(value: string): TaskStatus {
   if (normalized === "queued" || normalized === "pending" || normalized === "todo") return "todo";
   if (normalized === "running" || normalized === "active" || normalized === "in_progress") return "in_progress";
   if (normalized === "review" || normalized === "in_review") return "review";
-  if (normalized === "succeeded" || normalized === "completed" || normalized === "done") return "done";
+  if (normalized === "succeeded" || normalized === "completed" || normalized === "done" || normalized === "success") return "done";
   if (normalized === "blocked" || normalized === "waiting_on_dependency") return "blocked";
-  if (normalized === "failed" || normalized === "error") return "failed";
-  if (normalized === "cancelled" || normalized === "canceled") return "cancelled";
+  if (normalized === "failed" || normalized === "error" || normalized === "timed_out" || normalized === "timeout" || normalized === "lost") return "failed";
+  if (normalized === "cancelled" || normalized === "canceled" || normalized === "interrupted") return "cancelled";
   return "unknown";
+}
+
+export function normalizeTaskType(value: string | undefined): TaskType {
+  return value === "scheduled" ? "scheduled" : "conversation";
 }
 
 function cleanDevice(value: LooseRecord): Device {
@@ -197,17 +230,22 @@ function cleanAgent(value: LooseRecord): Agent {
 function cleanTask(value: LooseRecord): Task {
   const channel = cleanTaskChannel(value.channel);
   const conversation = channel ? cleanTaskConversation(value.conversation) : undefined;
+  const toolCalls = cleanToolCalls(value.toolCalls);
+  const raw = cleanTaskRaw(value.raw);
   return {
     id: value.id,
     agentId: value.agentId,
+    taskType: normalizeTaskType(value.taskType),
     title: value.title,
     ...(value.description ? { description: value.description } : {}),
     status: normalizeTaskStatus(String(value.status ?? "")),
-    ...(value.source ? { source: { externalId: value.source.externalId } } : {}),
+    ...(value.source ? { source: cleanTaskSource(value.source) } : {}),
     ...(channel ? { channel } : {}),
     ...(conversation ? { conversation } : {}),
     ...(value.assignee ? { assignee: { name: value.assignee.name } } : {}),
-    ...(value.creator ? { creator: { name: value.creator.name } } : {}),
+    ...(value.creator ? { creator: cleanTaskActor(value.creator) } : {}),
+    ...(toolCalls.length ? { toolCalls } : {}),
+    ...(raw ? { raw } : {}),
     ...(value.error ? { error: value.error } : {}),
     ...(value.createdAt ? { createdAt: value.createdAt } : {}),
     ...(value.updatedAt ? { updatedAt: value.updatedAt } : {}),
@@ -217,7 +255,7 @@ function cleanTask(value: LooseRecord): Task {
 
 function cleanTaskChannel(value: LooseRecord | undefined): Task["channel"] | undefined {
   if (!value || typeof value !== "object") return undefined;
-  if (value.kind !== "dingtalk" && value.kind !== "telegram" && value.kind !== "slack" && value.kind !== "other") {
+  if (value.kind !== "dingtalk" && value.kind !== "webchat" && value.kind !== "telegram" && value.kind !== "slack" && value.kind !== "other") {
     return undefined;
   }
   return {
@@ -225,6 +263,63 @@ function cleanTaskChannel(value: LooseRecord | undefined): Task["channel"] | und
     ...(value.name ? { name: value.name } : {}),
     ...(value.externalId ? { externalId: value.externalId } : {}),
   };
+}
+
+function cleanTaskSource(value: LooseRecord): NonNullable<Task["source"]> {
+  return {
+    ...(value.kind === "openclaw" ? { kind: value.kind } : {}),
+    ...(value.externalId ? { externalId: value.externalId } : {}),
+  };
+}
+
+function cleanTaskActor(value: LooseRecord): NonNullable<Task["creator"]> {
+  return {
+    ...(value.name ? { name: value.name } : {}),
+    ...(value.externalId ? { externalId: value.externalId } : {}),
+  };
+}
+
+function cleanToolCalls(value: unknown): NonNullable<Task["toolCalls"]> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as LooseRecord;
+      if (!isNonEmptyString(record.id) || !isNonEmptyString(record.name)) return null;
+      return {
+        id: record.id,
+        name: record.name,
+        status: normalizeToolCallStatus(record.status),
+        ...(record.arguments !== undefined ? { arguments: record.arguments } : {}),
+        ...(record.resultPreview ? { resultPreview: record.resultPreview } : {}),
+        ...(record.error ? { error: record.error } : {}),
+      };
+    })
+    .filter((entry): entry is NonNullable<Task["toolCalls"]>[number] => Boolean(entry));
+}
+
+function normalizeToolCallStatus(value: string | undefined): ToolCallStatus {
+  if (value === "done" || value === "failed") return value;
+  return "unknown";
+}
+
+function cleanTaskRaw(value: LooseRecord | undefined): Task["raw"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const openclaw = cleanOpenClawRaw(value.openclaw);
+  return openclaw ? { openclaw } : undefined;
+}
+
+function cleanOpenClawRaw(value: LooseRecord | undefined): NonNullable<NonNullable<Task["raw"]>["openclaw"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const output = {
+    ...(value.status ? { status: String(value.status) } : {}),
+    ...(value.statusSource === "session" || value.statusSource === "trajectory" || value.statusSource === "tool" || value.statusSource === "tasks_list" ? { statusSource: value.statusSource } : {}),
+    ...(value.sessionId ? { sessionId: String(value.sessionId) } : {}),
+    ...(value.sessionKey ? { sessionKey: String(value.sessionKey) } : {}),
+    ...(value.messageId ? { messageId: String(value.messageId) } : {}),
+    ...(value.trajectoryRunId ? { trajectoryRunId: String(value.trajectoryRunId) } : {}),
+  };
+  return Object.keys(output).length ? output : undefined;
 }
 
 function cleanTaskConversation(value: LooseRecord | undefined): Task["conversation"] | undefined {

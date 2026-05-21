@@ -10,7 +10,7 @@
 - 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
 - 允许读取本机设备事实。
 - 允许 live-first 采集 Device / Runtime / Agent / Task device-state 和 Agent Skill metadata。
-- 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent，用于测试、迁移和离线诊断。
+- 允许从 collector-compatible `device_state` snapshot 列出已知 Runtime 和 Agent，用于测试和离线诊断。
 - 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
 
@@ -65,13 +65,9 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 `DeviceStateSnapshot` 是全量 snapshot。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
-### `lorume collect inventory --json [--snapshot <path>]`
+### Removed collection commands
 
-兼容旧命令。新实现优先调用 `lorume collect device-state --json`，并在兼容期转换为旧调用方能读取的形状。新增产品能力不得依赖旧 inventory shape。
-
-### `lorume collect work-state --json`
-
-兼容旧命令。新产品模型不再把 work-state 暴露为 `workItems/conversations/executions/capabilities` 四组一等数组；OpenClaw adapter 必须把平台原始任务、消息和运行证据转换为 `Task[]`。collector 不能读取平台原始字段再做状态推断。
+`lorume collect inventory` 和 `lorume collect work-state` 不再是支持命令。当前没有历史用户需要兼容，新增代码和测试必须以 `lorume collect device-state --json` 为唯一采集入口。旧命令必须返回 `unsupported_command`，不能静默转换或回退。
 
 ### `lorume collector stop --json --install-dir <path>`
 
@@ -111,7 +107,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ## Harness
 
 - `src/cli/lorume-cli.test.ts` 覆盖命令 shape、JSON 输出、路径安全和 unsupported command。
-- `src/cli/lorume-cli.test.ts` 覆盖 `collect inventory`、`collect work-state`、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
-- `src/runtime/device-collector-script.test.ts` 必须验证 collector 通过 `lorume` CLI 获取 inventory / work-state / skill-probe，而不是直接新增第三方私有探测逻辑。
+- `src/cli/lorume-cli.test.ts` 覆盖 `collect device-state`、旧采集命令 unsupported、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
+- `src/runtime/device-collector-script.test.ts` 必须验证 collector 通过 `lorume` CLI 获取 `device_state`，而不是直接新增第三方私有探测逻辑。
 - `npm run check:cli` 运行 CLI harness。
 - `npm run check:runtime`、`npm run check:backend`、`npm run check:quick` 继续覆盖 collector、backend 和 TypeScript 边界。

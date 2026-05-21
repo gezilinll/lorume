@@ -2,16 +2,35 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
-import type { RuntimeInventorySnapshot } from "../runtime";
-import { createRuntimeInventoryStore, validateRuntimeInventorySnapshot } from "./runtime-inventory-store";
+import { createRuntimeDeviceStateStore, validateRuntimeDeviceStateSnapshot, type RuntimeDeviceStateSnapshot } from "./runtime-device-state-store";
 
-const fixture = fixtureSnapshot as RuntimeInventorySnapshot;
+const fixture: RuntimeDeviceStateSnapshot = {
+  observedAt: "2026-05-21T10:00:00.000Z",
+  device: {
+    id: "fixture-mac",
+    hostname: "fixture-mac.local",
+    os: "darwin",
+  },
+  runtimes: [{
+    id: "fixture-mac:runtime:openclaw",
+    deviceId: "fixture-mac",
+    kind: "openclaw",
+    name: "OpenClaw Gateway",
+    collectionStatus: "online",
+  }],
+  agents: [{
+    id: "fixture-mac:runtime:openclaw:agent:main",
+    runtimeId: "fixture-mac:runtime:openclaw",
+    name: "main",
+    collectionStatus: "online",
+  }],
+  tasks: [],
+};
 
-describe("runtime inventory store", () => {
-  it("writes and reads the latest runtime inventory snapshot", () => {
+describe("runtime device-state store", () => {
+  it("writes and reads the latest device_state snapshot", () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-store-"));
-    const store = createRuntimeInventoryStore({
+    const store = createRuntimeDeviceStateStore({
       snapshotPath: path.join(dataDir, "latest.json"),
     });
     expect(store.readLatestSnapshot()).toBeNull();
@@ -24,17 +43,17 @@ describe("runtime inventory store", () => {
 
   it("rejects malformed snapshots before persistence", () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-store-"));
-    const store = createRuntimeInventoryStore({
+    const store = createRuntimeDeviceStateStore({
       snapshotPath: path.join(dataDir, "latest.json"),
     });
 
-    expect(validateRuntimeInventorySnapshot({ device: { id: "missing-fields" } })).toBe(false);
+    expect(validateRuntimeDeviceStateSnapshot({ device: { id: "missing-fields" } })).toBe(false);
     expect(() => store.writeLatestSnapshot({ device: { id: "missing-fields" } })).toThrow(/invalid/i);
   });
 
   it("tracks device connection freshness separately from the latest snapshot", () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-store-"));
-    const store = createRuntimeInventoryStore({
+    const store = createRuntimeDeviceStateStore({
       snapshotPath: path.join(dataDir, "latest.json"),
       staleAfterMs: 60_000,
     });

@@ -67,7 +67,7 @@ describe("production smoke script", () => {
         sendJson(response, 200, { devices: [], runtimes: [], agents: [] });
         return;
       }
-      if (request.url === "/api/runtime-work-items?limit=1") {
+      if (request.url === "/api/runtime-tasks?limit=1") {
         sendJson(response, 200, { items: [], total: 0 });
         return;
       }
@@ -89,7 +89,7 @@ describe("production smoke script", () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("smoke:runtime fleet: ok");
-      expect(result.stdout).toContain("smoke:work items: ok");
+      expect(result.stdout).toContain("smoke:runtime tasks: ok");
       expect(result.stdout).toContain("smoke:collection health: ok");
       expect(result.stdout).toContain("smoke:diagnostics: ok");
       expect(requests.filter((request) => request.url?.startsWith("/api/runtime")).map((request) => request.cookie)).toEqual([

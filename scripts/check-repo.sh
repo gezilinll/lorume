@@ -26,8 +26,8 @@ required_paths=(
   "docs/product/design/review-and-harness.md"
   "docs/product/runtime-device-registration-spec.md"
   "docs/product/runtime-fleet-page-spec.md"
-  "docs/product/runtime-work-state-probe.md"
-  "docs/product/runtime-listening-acceptance-spec.md"
+  "docs/product/runtime-task-probe.md"
+  "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
   "docs/product/cli-device-capability-spec.md"
   "docs/product/agent-skill-probing-spec.md"
@@ -41,10 +41,10 @@ required_paths=(
   "src/console/ConsoleUtilityDrawer.tsx"
   "src/console/ConsoleUtilityDrawer.test.tsx"
   "src/settings/OrganizationSettingsPage.tsx"
-  "src/runtime/runtime-inventory-query.ts"
-  "src/runtime/runtime-normalize.ts"
+  "src/runtime/runtime-fleet-query.ts"
+  "src/runtime/runtime-model.ts"
   "src/backend/backend-server.ts"
-  "src/server/runtime-inventory-store.ts"
+  "src/server/runtime-device-state-store.ts"
   "src/server/postgres-store.ts"
   "src/server/runtime-http-api-postgres.test.ts"
   "src/test/postgres.ts"
@@ -104,8 +104,8 @@ markdown_files = [
     Path("docs/product/design/review-and-harness.md"),
     Path("docs/product/runtime-device-registration-spec.md"),
     Path("docs/product/runtime-fleet-page-spec.md"),
-    Path("docs/product/runtime-work-state-probe.md"),
-    Path("docs/product/runtime-listening-acceptance-spec.md"),
+    Path("docs/product/runtime-task-probe.md"),
+    Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
     Path("docs/product/agent-skill-probing-spec.md"),

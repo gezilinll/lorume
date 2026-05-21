@@ -29,7 +29,6 @@ describeDb("database migrations", () => {
         expect(tableNames).toEqual([
           "agent_skill_probe_snapshots",
           "agents",
-          "channel_bindings",
           "collector_ingestions",
           "device_tokens",
           "devices",
@@ -48,10 +47,17 @@ describeDb("database migrations", () => {
           "sessions",
           "tasks",
           "users",
-          "work_conversations",
-          "work_executions",
-          "work_items",
         ]);
+        await expect(listPublicColumnNames(client, "runtimes")).resolves.not.toEqual(expect.arrayContaining([
+          "endpoint",
+          "capabilities",
+          "source_refs",
+        ]));
+        await expect(listPublicColumnNames(client, "agents")).resolves.not.toEqual(expect.arrayContaining([
+          "origin",
+          "load",
+          "source_refs",
+        ]));
         expect(await listMigrationVersions(client)).toEqual([
           "0001_backend_core",
           "0002_auth_access",
@@ -60,6 +66,7 @@ describeDb("database migrations", () => {
           "0009_agent_skill_probing",
           "0010_narrow_device_facts",
           "0011_device_state_tasks",
+          "0012_remove_legacy_inventory_work_state",
         ]);
       } finally {
         await client.end();
@@ -79,6 +86,17 @@ async function listPublicTableNames(client: Client): Promise<string[]> {
     ORDER BY table_name
   `);
   return result.rows.map((row) => row.table_name);
+}
+
+async function listPublicColumnNames(client: Client, tableName: string): Promise<string[]> {
+  const result = await client.query<{ column_name: string }>(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = $1
+    ORDER BY ordinal_position
+  `, [tableName]);
+  return result.rows.map((row) => row.column_name);
 }
 
 async function listMigrationVersions(client: Client): Promise<string[]> {

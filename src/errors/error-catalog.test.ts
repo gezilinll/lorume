@@ -7,8 +7,8 @@ import {
 
 describe("Lorume error catalog", () => {
   it("maps stable error codes to user-readable messages", () => {
-    expect(errorMessageForCode("invalid_collector_snapshot")).toBe(
-      "设备采集数据无效，请检查 Lorume CLI 版本或上报结构。",
+    expect(errorMessageForCode("invalid_device_state_snapshot")).toBe(
+      "设备状态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
     );
     expect(errorMessageForCode("device_not_connected")).toBe(
       "设备控制通道未连接，请确认目标设备上的 Lorume CLI 正在运行。",
@@ -25,16 +25,15 @@ describe("Lorume error catalog", () => {
   });
 
   it("normalizes technical exception text into stable error codes", () => {
-    expect(normalizeErrorCode("invalid runtime inventory snapshot")).toBe("invalid_collector_snapshot");
-    expect(normalizeErrorCode("invalid runtime work state snapshot")).toBe("invalid_work_state_snapshot");
+    expect(normalizeErrorCode("invalid device state snapshot")).toBe("invalid_device_state_snapshot");
     expect(normalizeErrorCode("Snapshot post failed: HTTP 503")).toBe("collector_post_failed");
     expect(normalizeErrorCode("request body too large")).toBe("request_body_too_large");
   });
 
   it("builds API error responses with both code and readable message", () => {
-    expect(createErrorResponse(new Error("invalid runtime inventory snapshot"))).toEqual({
-      error: "invalid_collector_snapshot",
-      message: "设备采集数据无效，请检查 Lorume CLI 版本或上报结构。",
+    expect(createErrorResponse(new Error("invalid device state snapshot"))).toEqual({
+      error: "invalid_device_state_snapshot",
+      message: "设备状态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
     });
   });
 });

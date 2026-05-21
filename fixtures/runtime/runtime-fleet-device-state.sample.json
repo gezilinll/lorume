@@ -1,24 +1,26 @@
 {
   "observedAt": "2026-05-21T10:00:00.000Z",
-  "device": {
-    "id": "fixture-mac",
-    "hostname": "fixture-mac.local",
-    "os": "darwin",
-    "architecture": "arm64",
-    "collectionStatus": "online",
-    "lastSeenAt": "2026-05-21T10:00:00.000Z",
-    "user": {
-      "username": "tester"
-    },
-    "network": {
-      "localIps": ["10.0.0.2"],
-      "publicIp": "203.0.113.10"
-    },
-    "collector": {
-      "version": "0.1.0",
-      "installPath": "/opt/lorume"
+  "devices": [
+    {
+      "id": "fixture-mac",
+      "hostname": "fixture-mac.local",
+      "os": "darwin",
+      "architecture": "arm64",
+      "collectionStatus": "online",
+      "lastSeenAt": "2026-05-21T10:00:00.000Z",
+      "user": {
+        "username": "tester"
+      },
+      "network": {
+        "localIps": ["10.0.0.2"],
+        "publicIp": "203.0.113.10"
+      },
+      "collector": {
+        "version": "0.1.0",
+        "installPath": "/opt/lorume"
+      }
     }
-  },
+  ],
   "runtimes": [
     {
       "id": "fixture-mac:runtime:openclaw",
@@ -71,6 +73,17 @@
         "name": "main"
       },
       "lastSeenAt": "2026-05-21T09:59:00.000Z"
+    },
+    {
+      "id": "fixture-mac:runtime:openclaw:agent:main:task:running-1",
+      "agentId": "fixture-mac:runtime:openclaw:agent:main",
+      "title": "Execute OpenClaw run",
+      "status": "in_progress",
+      "channel": {
+        "kind": "dingtalk",
+        "name": "DingTalk 群聊"
+      },
+      "lastSeenAt": "2026-05-21T10:00:00.000Z"
     }
   ]
 }

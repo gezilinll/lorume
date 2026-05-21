@@ -1,5 +1,5 @@
-/** Snapshot types that the device collector reports independently. */
-export type CollectionHealthSnapshotType = "inventory" | "work_state";
+/** Snapshot type that the device collector reports for the current product model. */
+export type CollectionHealthSnapshotType = "device_state";
 
 /** Product-level collection health used by backend diagnostics and Runtime Fleet status folding. */
 export type CollectionHealthStatus = "healthy" | "failed";
@@ -64,22 +64,20 @@ export interface DeviceCollectionHealth {
   lastObservedAt?: string;
   /** Most recent backend receive time across checks. */
   lastReceivedAt?: string;
-  /** Individual inventory and work-state checks. */
+  /** Individual collection checks for the active collector contract. */
   checks: CollectionHealthCheck[];
 }
 
 /** Options for deterministic tests and future policy tuning. */
 export interface DeviceCollectionHealthOptions {
-  /** Kept for caller compatibility; recency is displayed as data and does not create a separate status. */
+  /** Current clock for deterministic tests; recency is displayed as data and does not create a separate status. */
   now?: Date;
-  /** Kept for caller compatibility; recency is displayed as data and does not create a separate status. */
+  /** Reserved policy knob for future freshness display; it does not create a separate status. */
   staleAfterMs?: number;
 }
 
-const snapshotTypes: CollectionHealthSnapshotType[] = ["inventory", "work_state"];
 const snapshotLabels: Record<CollectionHealthSnapshotType, string> = {
-  inventory: "设备资产",
-  work_state: "工作态",
+  device_state: "设备状态",
 };
 const statusSeverity: Record<CollectionHealthStatus, number> = {
   healthy: 0,
@@ -93,6 +91,7 @@ export function deriveDeviceCollectionHealth(
   options: DeviceCollectionHealthOptions = {},
 ): DeviceCollectionHealth {
   void options;
+  const snapshotTypes: CollectionHealthSnapshotType[] = ["device_state"];
   const checks = snapshotTypes.map((snapshotType) =>
     deriveCheck(snapshotType, latestIngestion(ingestions, snapshotType)),
   );
@@ -184,7 +183,10 @@ function createSummary(checks: CollectionHealthCheck[]): string {
     (current, check) => statusSeverity[check.status] > statusSeverity[current.status] ? check : current,
     checks[0],
   );
-  if (!worst || checks.every((check) => check.status === "healthy")) return "设备资产与工作态采集正常";
+  if (!worst) return "设备状态采集正常";
+  if (checks.every((check) => check.status === "healthy")) {
+    return `${checks[0].label}采集正常`;
+  }
   return `${worst.label}${summarySuffix(worst.status)}`;
 }
 

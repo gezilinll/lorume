@@ -39,51 +39,18 @@ describe("lorume CLI", () => {
     expect(output.command).toBe("runtime.list");
     expect(output.device.id).toBe("fixture-mac");
     expect(output.runtimes.map((runtime: { kind: string }) => runtime.kind)).toContain("openclaw");
-    expect(output.agents.map((agent: { name: string }) => agent.name)).toContain("tester");
+    expect(output.agents.map((agent: { name: string }) => agent.name)).toContain("main");
   });
 
-  it("collects inventory through the Lorume CLI contract", () => {
-    const output = runCli(["collect", "inventory", "--json", "--snapshot", fixturePath]);
-
-    expect(output.command).toBe("collect.inventory");
-    expect(output.device.id).toBe("fixture-mac");
-    expect(output.collector).toMatchObject({ status: "online" });
-    expect(output.runtimes.map((runtime: { deviceId: string }) => runtime.deviceId)).toEqual(["fixture-mac", "fixture-mac"]);
-    expect(output.agents.map((agent: { runtimeId: string }) => agent.runtimeId)).toContain("fixture-mac:slock:slock-daemon");
-  });
-
-  it("collects locally detected CLI runtimes through the Lorume CLI contract", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-runtime-"));
-    const binDir = path.join(root, "bin");
-    mkdirSync(binDir, { recursive: true });
-    writeExecutable(path.join(binDir, "codex"), "#!/bin/sh\nprintf 'codex 1.2.3\\n'\n");
-    writeExecutable(path.join(binDir, "openclaw"), "#!/bin/sh\nexit 127\n");
-    writeExecutable(path.join(binDir, "multica"), "#!/bin/sh\nexit 127\n");
-    writeExecutable(path.join(binDir, "claude"), "#!/bin/sh\nexit 127\n");
-
-    const output = runCli([
-      "collect",
-      "inventory",
-      "--json",
-      "--device-id",
-      "test-device",
-    ], {
-      env: {
-        LORUME_COLLECTOR_HOME: root,
-        LORUME_ENABLED_RUNTIME_ADAPTERS: "codex",
-        PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
-      },
+  it("does not expose legacy inventory or work-state collection commands", () => {
+    expect(runCliFailure(["collect", "inventory", "--json", "--snapshot", fixturePath])).toMatchObject({
+      status: 2,
+      stderr: expect.stringContaining("Unsupported lorume command: collect inventory"),
     });
-
-    expect(output.command).toBe("collect.inventory");
-    expect(output.device.id).toBe("test-device");
-    expect(output.runtimes).toContainEqual(expect.objectContaining({
-      deviceId: "test-device",
-      kind: "codex",
-      name: "Codex CLI",
-      status: "online",
-      version: "codex 1.2.3",
-    }));
+    expect(runCliFailure(["collect", "work-state", "--json", "--device-id", "test-device"])).toMatchObject({
+      status: 2,
+      stderr: expect.stringContaining("Unsupported lorume command: collect work-state"),
+    });
   });
 
   it("collects OpenClaw-only device state without invoking disabled adapters", () => {
@@ -318,81 +285,6 @@ exit 91
     expect(output.tasks[0]).not.toHaveProperty("runtimeId");
   });
 
-  it("keeps legacy inventory collection OpenClaw-only by default", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-inventory-openclaw-"));
-    const binDir = path.join(root, "bin");
-    const disabledCallsPath = path.join(root, "disabled-adapter-called");
-    mkdirSync(binDir, { recursive: true });
-    writeExecutable(path.join(binDir, "openclaw"), `#!/bin/sh
-if [ "$1" = "health" ]; then
-  printf '{"ok":true,"agents":[{"agentId":"main"}]}\\n'
-  exit 0
-fi
-if [ "$1" = "status" ]; then
-  printf '{"gateway":{"reachable":true,"url":"local","self":{"version":"openclaw 1.0.0"}},"agents":{"agents":[{"agentId":"main"}]}}\\n'
-  exit 0
-fi
-printf '{}\\n'
-`);
-    for (const command of ["multica", "slock", "codex", "claude"]) {
-      writeExecutable(path.join(binDir, command), `#!/bin/sh
-printf '${command}\\n' >> ${JSON.stringify(disabledCallsPath)}
-exit 91
-`);
-    }
-
-    const output = runCli([
-      "collect",
-      "inventory",
-      "--json",
-      "--device-id",
-      "test-device",
-    ], {
-      env: {
-        LORUME_COLLECTOR_HOME: root,
-        PATH: binDir,
-      },
-    });
-
-    expect(output.command).toBe("collect.inventory");
-    expect(output.runtimes.map((runtime: { kind: string }) => runtime.kind)).toEqual(["openclaw"]);
-    expect(output.agents.map((agent: { name: string }) => agent.name)).toEqual(["main"]);
-    expect(existsSync(disabledCallsPath)).toBe(false);
-  });
-
-  it("collects work-state through the Lorume CLI contract", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-work-state-"));
-    const binDir = path.join(root, "bin");
-    mkdirSync(binDir, { recursive: true });
-    writeExecutable(path.join(binDir, "openclaw"), "#!/bin/sh\nexit 127\n");
-    writeExecutable(path.join(binDir, "multica"), "#!/bin/sh\nexit 127\n");
-    writeExecutable(path.join(binDir, "slock"), "#!/bin/sh\nexit 127\n");
-
-    const output = runCli([
-      "collect",
-      "work-state",
-      "--json",
-      "--device-id",
-      "test-device",
-    ], {
-      env: {
-        LORUME_COLLECTOR_HOME: root,
-        PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
-        SLOCK_SERVER_URL: "http://127.0.0.1:9",
-      },
-    });
-
-    expect(output).toMatchObject({
-      command: "collect.work-state",
-      deviceId: "test-device",
-      workItems: [],
-      conversations: [],
-      executions: [],
-    });
-    expect(output.capabilities).toEqual(expect.any(Array));
-    expect(output.observedAt).toEqual(expect.any(String));
-  });
-
   it("probes read-only Agent Skill metadata from explicit local roots", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-skill-"));
     const skillRoot = path.join(root, "review-assistant");
@@ -555,6 +447,10 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Reco
     encoding: "utf8",
     env: { ...process.env, ...options.env },
   }));
+}
+
+function runCliFailure(args: string[]): { status: number | null; stderr: string } {
+  return spawnCli(args);
 }
 
 function spawnCli(args: string[]): { status: number | null; stderr: string } {

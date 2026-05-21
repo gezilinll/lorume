@@ -102,7 +102,7 @@ Device Token 是设备侧 Collector 上报和连接健康通道的凭证。
 - token 由 owner / admin 创建。
 - token 明文只在创建时返回一次。
 - 数据库存储 token 哈希和短 prefix，用于识别与排查。
-- Collector 上报 inventory / work-state 和设备 WebSocket 连接健康通道都使用 device token。
+- Collector 上报 `device_state` 和设备 WebSocket 连接健康通道都使用 device token。
 - 如果 backend 开启 device token 校验，缺失、过期或撤销的 token 必须被拒绝。
 
 ## API 边界
@@ -125,8 +125,7 @@ Device token API：
 
 - `POST /api/organizations/:organizationId/device-tokens`：创建设备 token，当前已实现，只有 owner / admin 可用，响应只在本次返回明文 token。
 - `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要，当前未实现，后续只能返回名称、device id、token prefix、创建时间、撤销状态等摘要，不能返回明文 token。
-- `POST /api/device-snapshots`：Collector 上报 inventory，使用 device token。
-- `POST /api/runtime-work-state-snapshots`：Collector 上报 work-state，使用 device token。
+- `POST /api/device-state-snapshots`：Collector 上报 `DeviceStateSnapshot`，使用 device token。
 - `GET /api/device-control/ws`：设备连接健康通道，使用 device token。
 - `GET /api/device-collector/install.sh` 和 `GET /api/device-collector/files/:fileName`：公开无密钥 installer 与设备包下载入口；鉴权边界在 device token 创建 API 和组织设置页面。
 

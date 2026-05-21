@@ -212,11 +212,9 @@ export interface DeviceStateSnapshot {
 - `GET /api/device-collector/install.sh`：返回无密钥远程安装入口脚本。
 - `GET /api/device-collector/files/:fileName`：只允许下载白名单设备包文件。
 - `POST /api/device-state-snapshots`：Collector 上报 `DeviceStateSnapshot`，使用 device token 鉴权。
-- `POST /api/device-snapshots`：兼容旧 inventory 写入口；迁移期可转换为 `DeviceStateSnapshot` 或仅保留旧读写测试。
-- `POST /api/runtime-work-state-snapshots`：兼容旧 work-state 写入口；迁移期不得作为新产品模型来源。
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
-- `GET /api/runtime-work-items`：兼容路由名，返回 Task 查询页。
-- `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要。
+- `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
+- `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
 - `WS /api/device-control/ws`：只处理 `hello`、`heartbeat`、断开和 stale 判定。
 
 ## OpenClaw Adapter

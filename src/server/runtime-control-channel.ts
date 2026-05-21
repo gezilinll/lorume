@@ -1,4 +1,4 @@
-import type { RuntimeInventoryStore } from "./runtime-inventory-store";
+import type { RuntimeDeviceStateStore } from "./runtime-device-state-store";
 
 /** Minimal socket interface shared by tests and the Vite WebSocket adapter. */
 export interface RuntimeControlSocket {
@@ -9,7 +9,7 @@ export interface RuntimeControlSocket {
 /** Runtime control channel construction options. */
 export interface RuntimeControlChannelOptions {
   /** Store used for connection state. */
-  store: RuntimeInventoryStore;
+  store: RuntimeDeviceStateStore;
   /** Clock injection for deterministic tests. */
   now?: () => Date;
 }

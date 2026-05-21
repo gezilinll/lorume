@@ -1,8 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RuntimeControlChannel } from "./runtime-control-channel";
-import type { RuntimeInventoryStore } from "./runtime-inventory-store";
+import type { RuntimeDeviceStateStore } from "./runtime-device-state-store";
 import type { PostgresStore } from "./postgres-store";
-import type { RuntimeWorkStateStore } from "./runtime-work-state-store";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
 import { createErrorResponse, normalizeErrorCode } from "../errors/error-catalog";
 import type { StructuredLogger } from "../logging/structured-logger";
@@ -17,7 +16,7 @@ import type { CollectionHealthIngestion } from "../runtime/runtime-collection-he
 import type { OperationRow, OperationStatus, OperationStore } from "../operations/operation-store";
 
 const maxJsonBodyChars = 10_000_000;
-type CollectorSnapshotType = "inventory" | "work_state" | "device_state";
+type CollectorSnapshotType = "device_state";
 
 /** Dependencies for the Runtime Fleet local HTTP API. */
 export interface RuntimeHttpApiHandlerOptions {
@@ -27,11 +26,9 @@ export interface RuntimeHttpApiHandlerOptions {
     requireUserSession?: (request: IncomingMessage) => Promise<unknown | null>;
   };
   /** Snapshot and connection state store. */
-  store: RuntimeInventoryStore;
+  store: RuntimeDeviceStateStore;
   /** Device connection channel. */
   controlChannel: RuntimeControlChannel;
-  /** Latest runtime work-state snapshot store. */
-  workStateStore?: RuntimeWorkStateStore;
   /** Optional Postgres-backed formal repository. */
   postgresStore?: PostgresStore;
   /** Optional notification integration for collector ingestion health events. */
@@ -98,39 +95,21 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === "/api/runtime-work-items") {
+    if (request.method === "GET" && requestUrl.pathname === "/api/runtime-tasks") {
       if (!(await authorizeUserRead(options, request, response))) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
       }
-      sendJson(response, 200, await options.postgresStore.listRuntimeWorkItems({
+      sendJson(response, 200, await options.postgresStore.listRuntimeTasks({
         channelKind: requestUrl.searchParams.get("channelKind"),
         endAt: requestUrl.searchParams.get("endAt"),
         limit: parseLimit(requestUrl.searchParams.get("limit")),
         cursor: requestUrl.searchParams.get("cursor"),
         search: requestUrl.searchParams.get("search"),
-        source: requestUrl.searchParams.get("source"),
-        stage: requestUrl.searchParams.get("stage"),
+        status: requestUrl.searchParams.get("status"),
         startAt: requestUrl.searchParams.get("startAt"),
       }));
-      return;
-    }
-
-    const workItemMatch = requestUrl.pathname.match(/^\/api\/runtime-work-items\/([^/]+)$/);
-    if (request.method === "GET" && workItemMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
-      if (!options.postgresStore) {
-        sendJson(response, 503, { error: "postgres_store_unavailable" });
-        return;
-      }
-      const workItemId = decodeURIComponent(workItemMatch[1] ?? "");
-      const workItem = await options.postgresStore.readWorkItem(workItemId);
-      if (!workItem) {
-        sendJson(response, 404, { error: "work_item_not_found", id: workItemId });
-        return;
-      }
-      sendJson(response, 200, workItem);
       return;
     }
 
@@ -195,56 +174,6 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
-    if (request.method === "POST" && requestUrl.pathname === "/api/device-snapshots") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
-      let body: unknown = undefined;
-      try {
-        body = await readJsonBody(request);
-        const snapshot = options.store.writeLatestSnapshot(enrichInventorySnapshotWithRequestNetwork(body, request));
-        await options.postgresStore?.upsertInventorySnapshot(snapshot);
-        sendJson(response, 201, {
-          ok: true,
-          deviceId: snapshot.device.id,
-          observedAt: snapshot.observedAt,
-        });
-      } catch (error) {
-        const errorResponse = createErrorResponse(error, "invalid_collector_snapshot");
-        await recordFailedCollectorIngestion(options, "inventory", body, error);
-        await notifyFailedCollectorIngestion(options, "inventory", body, error, deviceAuth);
-        logCollectorIngestionFailure(options, "inventory", body, errorResponse);
-        sendJson(response, statusCodeForWriteError(error), errorResponse);
-      }
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === "/api/runtime-work-state-snapshots") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
-      if (!options.workStateStore) {
-        sendJson(response, 503, { error: "work_state_store_unavailable" });
-        return;
-      }
-      let body: unknown = undefined;
-      try {
-        body = await readJsonBody(request);
-        const snapshot = options.workStateStore.writeLatestSnapshot(body);
-        await options.postgresStore?.upsertWorkStateSnapshot(snapshot);
-        sendJson(response, 201, {
-          ok: true,
-          deviceId: snapshot.deviceId,
-          observedAt: snapshot.observedAt,
-        });
-      } catch (error) {
-        const errorResponse = createErrorResponse(error, "invalid_work_state_snapshot");
-        await recordFailedCollectorIngestion(options, "work_state", body, error);
-        await notifyFailedCollectorIngestion(options, "work_state", body, error, deviceAuth);
-        logCollectorIngestionFailure(options, "work_state", body, errorResponse);
-        sendJson(response, statusCodeForWriteError(error), errorResponse);
-      }
-      return;
-    }
-
     const ingestionMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/ingestions$/);
     if (request.method === "GET" && ingestionMatch) {
       if (!(await authorizeUserRead(options, request, response))) return;
@@ -274,7 +203,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         deviceId,
         now,
         connection: options.store.readDeviceConnection(deviceId, now),
-        inventoryIngestions: toCollectionHealthIngestions(await options.postgresStore.listCollectorIngestions(deviceId)),
+        deviceStateIngestions: toCollectionHealthIngestions(await options.postgresStore.listCollectorIngestions(deviceId)),
       }));
       return;
     }
@@ -500,7 +429,7 @@ function readString(value: unknown, key: string): string {
   return typeof candidate === "string" ? candidate.trim() : "";
 }
 
-function enrichInventorySnapshotWithRequestNetwork(value: unknown, request: IncomingMessage): unknown {
+function enrichDeviceStateSnapshotWithRequestNetwork(value: unknown, request: IncomingMessage): unknown {
   const publicIp = readCollectorPublicIp(request);
   if (!publicIp || !isRecord(value) || !isRecord(value.device)) return value;
   const device = value.device;
@@ -517,15 +446,11 @@ function enrichInventorySnapshotWithRequestNetwork(value: unknown, request: Inco
   };
 }
 
-function enrichDeviceStateSnapshotWithRequestNetwork(value: unknown, request: IncomingMessage): unknown {
-  return enrichInventorySnapshotWithRequestNetwork(value, request);
-}
-
 function toCollectionHealthIngestions(
   rows: Array<{ snapshotType: CollectorSnapshotType } & Omit<CollectionHealthIngestion, "snapshotType">>,
 ): CollectionHealthIngestion[] {
   return rows
-    .filter((row) => row.snapshotType === "inventory" || row.snapshotType === "work_state")
+    .filter((row) => row.snapshotType === "device_state")
     .map((row) => ({
       ...row,
       snapshotType: row.snapshotType as CollectionHealthIngestion["snapshotType"],
@@ -653,28 +578,26 @@ function errorSummary(error: unknown): string {
 }
 
 function extractDeviceId(snapshotType: CollectorSnapshotType, body: unknown): string {
+  void snapshotType;
   if (!body || typeof body !== "object") return "unknown";
   const candidate = body as Record<string, unknown>;
-  if (snapshotType === "work_state" && typeof candidate.deviceId === "string") return candidate.deviceId;
-  if (snapshotType === "inventory" || snapshotType === "device_state") {
-    const device = candidate.device;
-    if (device && typeof device === "object" && typeof (device as Record<string, unknown>).id === "string") {
-      return (device as Record<string, string>).id;
-    }
+  const device = candidate.device;
+  if (device && typeof device === "object" && typeof (device as Record<string, unknown>).id === "string") {
+    return (device as Record<string, string>).id;
   }
   return "unknown";
 }
 
 function fallbackErrorCodeForSnapshotType(snapshotType: CollectorSnapshotType): string {
-  if (snapshotType === "inventory") return "invalid_collector_snapshot";
+  void snapshotType;
   if (snapshotType === "device_state") return "invalid_device_state_snapshot";
-  return "invalid_work_state_snapshot";
+  return "invalid_device_state_snapshot";
 }
 
 function labelForSnapshotType(snapshotType: CollectorSnapshotType): string {
-  if (snapshotType === "inventory") return "设备资产";
+  void snapshotType;
   if (snapshotType === "device_state") return "设备状态";
-  return "工作态";
+  return "设备状态";
 }
 
 function extractObservedAt(body: unknown): string | undefined {

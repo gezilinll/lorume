@@ -98,7 +98,7 @@ describeDb("Postgres operation store", () => {
           requestedByUserId: user.id,
           resourceId: "device_1",
           resourceType: "device",
-          summary: "Refresh device inventory",
+          summary: "Refresh device state",
           type: "device_refresh",
         });
         const job = await operationStore.enqueueJob({

@@ -3,13 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
-import type { RuntimeInventorySnapshot } from "../runtime";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
 import type { OperationRow, OperationStore } from "../operations/operation-store";
 import { createRuntimeControlChannel } from "./runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "./runtime-http-api";
-import { createRuntimeInventoryStore } from "./runtime-inventory-store";
+import { createRuntimeDeviceStateStore } from "./runtime-device-state-store";
 
 const servers: Server[] = [];
 
@@ -45,9 +43,9 @@ describe("runtime HTTP API agent Skill probing", () => {
     const operation = await operationStore.createOperation({
       organizationId: "org-1",
       requestedByUserId: "requester-1",
-      resourceId: "fixture-mac:slock:slock-daemon:agent:tester",
+      resourceId: "fixture-mac:runtime:openclaw:agent:main",
       resourceType: "agent",
-      summary: "探测 tester 的 Skill",
+      summary: "探测 main 的 Skill",
       targetId: "fixture-mac",
       targetType: "device",
       type: "agent_skill_probe",
@@ -77,7 +75,7 @@ describe("runtime HTTP API agent Skill probing", () => {
         eventType: "agent_skill_probe_succeeded",
         operationId: operation.id,
         recipientUserIds: ["requester-1", "owner-1"],
-        resourceId: "fixture-mac:slock:slock-daemon:agent:tester",
+        resourceId: "fixture-mac:runtime:openclaw:agent:main",
       }),
     ]);
   });
@@ -88,11 +86,32 @@ async function startRuntimeApi(options: {
   skillProbeNotifications?: Parameters<typeof createRuntimeHttpApiHandler>[0]["skillProbeNotifications"];
 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-skill-probe-api-"));
-  const store = createRuntimeInventoryStore({
+  const store = createRuntimeDeviceStateStore({
     snapshotPath: path.join(dataDir, "latest.json"),
     staleAfterMs: 24 * 60 * 60 * 1000,
   });
-  store.writeLatestSnapshot(fixtureSnapshot as RuntimeInventorySnapshot);
+  store.writeLatestSnapshot({
+    observedAt: "2026-05-21T10:00:00.000Z",
+    device: {
+      id: "fixture-mac",
+      hostname: "fixture-mac.local",
+      os: "darwin",
+    },
+    runtimes: [{
+      id: "fixture-mac:runtime:openclaw",
+      deviceId: "fixture-mac",
+      kind: "openclaw",
+      name: "OpenClaw Gateway",
+      collectionStatus: "online",
+    }],
+    agents: [{
+      id: "fixture-mac:runtime:openclaw:agent:main",
+      runtimeId: "fixture-mac:runtime:openclaw",
+      name: "main",
+      collectionStatus: "online",
+    }],
+    tasks: [],
+  });
   const channel = createRuntimeControlChannel({
     store,
     now: () => new Date("2026-05-18T10:00:00.000Z"),
@@ -121,11 +140,11 @@ async function startRuntimeApi(options: {
 
 function createProbeSnapshot(overrides: Record<string, unknown> = {}) {
   return {
-    targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
-    targetAgentName: "tester",
+    targetAgentId: "fixture-mac:runtime:openclaw:agent:main",
+    targetAgentName: "main",
     deviceId: "fixture-mac",
-    runtimeId: "fixture-mac:slock:slock-daemon",
-    runtimeName: "Slock daemon",
+    runtimeId: "fixture-mac:runtime:openclaw",
+    runtimeName: "OpenClaw Gateway",
     status: "succeeded",
     observedAt: "2026-05-18T10:00:00.000Z",
     skills: [{

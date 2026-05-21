@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Validate the deployed Lorume collector uninstall/reinstall flow on the real `gezilinll-claw` device, then verify only the Device-level inventory facts reported to the backend.
+**Goal:** Validate the deployed Lorume collector uninstall/reinstall flow on the real `gezilinll-claw` device, then verify only the Device-level `device_state` facts reported to the backend.
 
 **Architecture:** Treat the real device as an acceptance environment, not a place to patch state by hand. The backend/database preparation is operator-owned, while device cleanup must happen only through Lorume stop/uninstall/install product capabilities. Any behavior gap discovered on the real device must feed back into the test pyramid before the code is changed or the real-device step is retried.
 
@@ -65,11 +65,11 @@ Before changing code for any real-device issue, classify the finding:
 |---|---|---|
 | CLI command missing, wrong JSON, wrong exit code, wrong installer args | `src/cli/lorume-cli.test.ts` | `npm run check:cli -- src/cli/lorume-cli.test.ts` |
 | Installer does not stop service, keeps wrong files, deletes unsafe path, or writes wrong config | `src/runtime/device-collector-script.test.ts` | `npm run check:runtime -- src/runtime/device-collector-script.test.ts` |
-| Collector emits wrong Device facts or reintroduces `name/status/connectionMode` | `src/runtime/device-collector-script.test.ts` or `src/runtime/runtime-normalize.test.ts` | `npm run check:runtime` |
+| Collector emits wrong Device facts or reintroduces `name/status/connectionMode` | `src/runtime/device-collector-script.test.ts` or `src/runtime/runtime-model.ts` | `npm run check:runtime` |
 | Backend accepts bad payload or fails to enrich `network.publicIp` | `src/server/runtime-http-api.test.ts` | `npm run check:backend` |
 | DB persists old fields or migration misses deployed schema | `src/server/db-migrate.test.ts` and `src/server/postgres-store.test.ts` | `npm run check:db` |
 | Collector process cannot upload to backend in once mode | `e2e/runtime-backend-api.spec.ts` | `npm run check:backend:e2e` |
-| UI displays removed fields or mixes Device/Runtime/Agent state | `src/runtime/runtime-inventory-query.test.ts`, `src/App.test.tsx`, or `e2e/runtime-fleet.spec.ts` | `npm run check:quick && npm run check:e2e` |
+| UI displays removed fields or mixes Device/Runtime/Agent state | `src/runtime/runtime-fleet-query.test.ts`, `src/App.test.tsx`, or `e2e/runtime-fleet.spec.ts` | `npm run check:quick && npm run check:e2e` |
 | Pure environment issue with no code behavior gap | Record evidence in the validation notes, do not add artificial tests. |
 
 Every code fix discovered during this run must finish with:
@@ -169,10 +169,8 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
 SELECT 'devices' AS table_name, count(*) FROM devices
 UNION ALL SELECT 'runtimes', count(*) FROM runtimes
 UNION ALL SELECT 'agents', count(*) FROM agents
+UNION ALL SELECT 'tasks', count(*) FROM tasks
 UNION ALL SELECT 'collector_ingestions', count(*) FROM collector_ingestions
-UNION ALL SELECT 'work_items', count(*) FROM work_items
-UNION ALL SELECT 'work_conversations', count(*) FROM work_conversations
-UNION ALL SELECT 'work_executions', count(*) FROM work_executions
 ORDER BY table_name;
 "
 ```
@@ -210,9 +208,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
 BEGIN;
 TRUNCATE TABLE
   collector_ingestions,
-  work_executions,
-  work_conversations,
-  work_items,
+  tasks,
   agents,
   runtimes,
   devices
@@ -230,10 +226,8 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
 SELECT 'devices' AS table_name, count(*) FROM devices
 UNION ALL SELECT 'runtimes', count(*) FROM runtimes
 UNION ALL SELECT 'agents', count(*) FROM agents
+UNION ALL SELECT 'tasks', count(*) FROM tasks
 UNION ALL SELECT 'collector_ingestions', count(*) FROM collector_ingestions
-UNION ALL SELECT 'work_items', count(*) FROM work_items
-UNION ALL SELECT 'work_conversations', count(*) FROM work_conversations
-UNION ALL SELECT 'work_executions', count(*) FROM work_executions
 ORDER BY table_name;
 "
 ```
@@ -443,11 +437,11 @@ Expected before fix: failing test. After fix and redeploy: pass.
 ## Task 6: Validate Device-Level Data In Backend
 
 **Files:**
-- Read: `src/runtime/runtime-normalize.ts`
+- Read: `src/runtime/runtime-model.ts`
 - Read: `src/server/postgres-store.ts`
-- Read: `src/runtime/runtime-inventory-query.ts`
+- Read: `src/runtime/runtime-fleet-query.ts`
 - Optional modify after a gap: `src/server/runtime-http-api.test.ts`
-- Optional modify after a gap: `src/runtime/runtime-inventory-query.test.ts`
+- Optional modify after a gap: `src/runtime/runtime-fleet-query.test.ts`
 
 - [ ] **Step 1: Poll the Runtime Fleet API using the authenticated session cookie**
 
@@ -563,11 +557,11 @@ Use this mapping:
 
 | Wrong Observation | First Regression |
 |---|---|
-| API includes `name/status/connectionMode` | `src/runtime/runtime-normalize.test.ts` and `src/server/runtime-http-api.test.ts` |
+| API includes `name/status/connectionMode` | `src/runtime/runtime-model.ts` and `src/server/runtime-http-api.test.ts` |
 | DB still has old columns | `src/server/db-migrate.test.ts` |
 | `publicIp` is missing despite proxy/remote evidence | `src/server/runtime-http-api.test.ts` |
 | `localIps` is missing due to collector interface parsing | `src/runtime/device-collector-script.test.ts` |
-| Runtime/Agent status changes Device status | `src/runtime/runtime-inventory-query.test.ts` |
+| Runtime/Agent status changes Device status | `src/runtime/runtime-fleet-query.test.ts` |
 
 Run the focused check from the Testing Feedback Gate, then run:
 

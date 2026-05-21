@@ -5,9 +5,9 @@ export type DeviceHealthStatus = "syncing" | "online" | "offline" | "abnormal";
 export type DeviceHealthReason =
   | "first_sync_pending"
   | "first_sync_timeout"
-  | "heartbeat_and_inventory_fresh"
-  | "inventory_or_heartbeat_stale"
-  | "last_inventory_failed"
+  | "heartbeat_and_device_state_fresh"
+  | "device_state_or_heartbeat_stale"
+  | "last_device_state_failed"
   | "control_error";
 
 export interface DeviceHealthConnection {
@@ -22,10 +22,10 @@ export interface DeviceHealthStatusInput {
   deviceId: string;
   now: Date;
   connection?: DeviceHealthConnection | null;
-  inventoryIngestions: CollectionHealthIngestion[];
+  deviceStateIngestions: CollectionHealthIngestion[];
   firstSyncWindowMs?: number;
   heartbeatFreshMs?: number;
-  inventoryFreshMs?: number;
+  deviceStateFreshMs?: number;
 }
 
 export interface DeviceHealthStatusResult {
@@ -35,13 +35,13 @@ export interface DeviceHealthStatusResult {
   reason: DeviceHealthReason;
   message: string;
   lastHeartbeatAt?: string;
-  lastInventorySuccessAt?: string;
-  lastInventoryFailureAt?: string;
+  lastDeviceStateSuccessAt?: string;
+  lastDeviceStateFailureAt?: string;
 }
 
 const defaultFirstSyncWindowMs = 120_000;
 const defaultHeartbeatFreshMs = 90_000;
-const defaultInventoryFreshMs = 300_000;
+const defaultDeviceStateFreshMs = 300_000;
 
 const labels: Record<DeviceHealthStatus, DeviceHealthStatusResult["label"]> = {
   syncing: "同步中",
@@ -50,28 +50,28 @@ const labels: Record<DeviceHealthStatus, DeviceHealthStatusResult["label"]> = {
   abnormal: "异常",
 };
 
-/** Derive the user-visible Device status from connection freshness and inventory ingestion only. */
+/** Derive the user-visible Device status from connection freshness and device-state ingestion only. */
 export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): DeviceHealthStatusResult {
   const firstSyncWindowMs = input.firstSyncWindowMs ?? defaultFirstSyncWindowMs;
   const heartbeatFreshMs = input.heartbeatFreshMs ?? defaultHeartbeatFreshMs;
-  const inventoryFreshMs = input.inventoryFreshMs ?? defaultInventoryFreshMs;
-  const latestInventory = latestInventoryIngestion(input.inventoryIngestions);
-  const latestSuccess = latestSucceededInventory(input.inventoryIngestions);
+  const deviceStateFreshMs = input.deviceStateFreshMs ?? defaultDeviceStateFreshMs;
+  const latestDeviceState = latestDeviceStateIngestion(input.deviceStateIngestions);
+  const latestSuccess = latestSucceededDeviceState(input.deviceStateIngestions);
   const lastHeartbeatAt = input.connection?.lastHeartbeatAt;
 
   if (input.connection?.lastError) {
     return result(input, "abnormal", "control_error", "设备连接出现异常", {
       lastHeartbeatAt,
-      lastInventorySuccessAt: receivedAt(latestSuccess),
-      lastInventoryFailureAt: latestInventory?.status === "failed" ? receivedAt(latestInventory) : undefined,
+      lastDeviceStateSuccessAt: receivedAt(latestSuccess),
+      lastDeviceStateFailureAt: latestDeviceState?.status === "failed" ? receivedAt(latestDeviceState) : undefined,
     });
   }
 
-  if (latestInventory?.status === "failed") {
-    return result(input, "abnormal", "last_inventory_failed", "最近一次设备资产采集失败", {
+  if (latestDeviceState?.status === "failed") {
+    return result(input, "abnormal", "last_device_state_failed", "最近一次设备状态采集失败", {
       lastHeartbeatAt,
-      lastInventorySuccessAt: receivedAt(latestSuccess),
-      lastInventoryFailureAt: receivedAt(latestInventory),
+      lastDeviceStateSuccessAt: receivedAt(latestSuccess),
+      lastDeviceStateFailureAt: receivedAt(latestDeviceState),
     });
   }
 
@@ -87,17 +87,17 @@ export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): Device
   }
 
   const heartbeatFresh = isFresh(lastHeartbeatAt, input.now, heartbeatFreshMs);
-  const inventoryFresh = isFresh(receivedAt(latestSuccess), input.now, inventoryFreshMs);
-  if (heartbeatFresh && inventoryFresh) {
-    return result(input, "online", "heartbeat_and_inventory_fresh", "设备在线且采集正常", {
+  const deviceStateFresh = isFresh(receivedAt(latestSuccess), input.now, deviceStateFreshMs);
+  if (heartbeatFresh && deviceStateFresh) {
+    return result(input, "online", "heartbeat_and_device_state_fresh", "设备在线且采集正常", {
       lastHeartbeatAt,
-      lastInventorySuccessAt: receivedAt(latestSuccess),
+      lastDeviceStateSuccessAt: receivedAt(latestSuccess),
     });
   }
 
-  return result(input, "offline", "inventory_or_heartbeat_stale", "设备最近未保持在线同步", {
+  return result(input, "offline", "device_state_or_heartbeat_stale", "设备最近未保持在线同步", {
     lastHeartbeatAt,
-    lastInventorySuccessAt: receivedAt(latestSuccess),
+    lastDeviceStateSuccessAt: receivedAt(latestSuccess),
   });
 }
 
@@ -106,7 +106,7 @@ function result(
   status: DeviceHealthStatus,
   reason: DeviceHealthReason,
   message: string,
-  times: Pick<DeviceHealthStatusResult, "lastHeartbeatAt" | "lastInventorySuccessAt" | "lastInventoryFailureAt"> = {},
+  times: Pick<DeviceHealthStatusResult, "lastHeartbeatAt" | "lastDeviceStateSuccessAt" | "lastDeviceStateFailureAt"> = {},
 ): DeviceHealthStatusResult {
   return {
     deviceId: input.deviceId,
@@ -118,15 +118,15 @@ function result(
   };
 }
 
-function latestInventoryIngestion(ingestions: CollectionHealthIngestion[]): CollectionHealthIngestion | undefined {
+function latestDeviceStateIngestion(ingestions: CollectionHealthIngestion[]): CollectionHealthIngestion | undefined {
   return ingestions
-    .filter((ingestion) => ingestion.snapshotType === "inventory")
+    .filter((ingestion) => ingestion.snapshotType === "device_state")
     .sort((left, right) => Date.parse(receivedAt(right) ?? "") - Date.parse(receivedAt(left) ?? ""))[0];
 }
 
-function latestSucceededInventory(ingestions: CollectionHealthIngestion[]): CollectionHealthIngestion | undefined {
+function latestSucceededDeviceState(ingestions: CollectionHealthIngestion[]): CollectionHealthIngestion | undefined {
   return ingestions
-    .filter((ingestion) => ingestion.snapshotType === "inventory" && ingestion.status === "succeeded")
+    .filter((ingestion) => ingestion.snapshotType === "device_state" && ingestion.status === "succeeded")
     .sort((left, right) => Date.parse(receivedAt(right) ?? "") - Date.parse(receivedAt(left) ?? ""))[0];
 }
 

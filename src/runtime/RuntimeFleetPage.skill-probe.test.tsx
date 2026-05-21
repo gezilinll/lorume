@@ -24,13 +24,13 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    await user.click(screen.getByRole("button", { name: "tester Skill 探测" }));
+    await user.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     expect(screen.getByText("正在读取 Skill 探测")).toBeInTheDocument();
     resolveProbe(new Response(JSON.stringify({
-      targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
+      targetAgentId: "fixture-mac:runtime:openclaw:agent:main",
       deviceId: "fixture-mac",
-      runtimeId: "fixture-mac:slock:slock-daemon",
+      runtimeId: "fixture-mac:runtime:openclaw",
       status: "unknown",
       observedAt: null,
       skills: [],
@@ -52,7 +52,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    await user.click(screen.getByRole("button", { name: "tester Skill 探测" }));
+    await user.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("reviewer")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    fireEvent.click(screen.getByRole("button", { name: "tester Skill 探测" }));
+    fireEvent.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("不支持探测")).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     }) as unknown as typeof fetch;
 
     render(<RuntimeFleetPage />);
-    fireEvent.click(screen.getByRole("button", { name: "tester Skill 探测" }));
+    fireEvent.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("本地后端暂不可用，请稍后重试。")).toBeInTheDocument();
@@ -111,11 +111,11 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
 
 function createProbeSnapshot(status: string, errorSummary?: string) {
   return {
-    targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
-    targetAgentName: "tester",
+    targetAgentId: "fixture-mac:runtime:openclaw:agent:main",
+    targetAgentName: "main",
     deviceId: "fixture-mac",
-    runtimeId: "fixture-mac:slock:slock-daemon",
-    runtimeName: "Slock daemon",
+    runtimeId: "fixture-mac:runtime:openclaw",
+    runtimeName: "OpenClaw Gateway",
     status,
     observedAt: "2026-05-18T10:00:00.000Z",
     errorSummary,

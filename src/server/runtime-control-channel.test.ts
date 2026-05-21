@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createRuntimeControlChannel, type RuntimeControlSocket } from "./runtime-control-channel";
-import { createRuntimeInventoryStore } from "./runtime-inventory-store";
+import { createRuntimeDeviceStateStore } from "./runtime-device-state-store";
 
 class MemorySocket implements RuntimeControlSocket {
   readonly sent: unknown[] = [];
@@ -98,7 +98,7 @@ describe("runtime control channel", () => {
 
 function createStore() {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-control-store-"));
-  return createRuntimeInventoryStore({
+  return createRuntimeDeviceStateStore({
     snapshotPath: path.join(dataDir, "latest.json"),
     staleAfterMs: 24 * 60 * 60 * 1000,
   });

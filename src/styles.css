@@ -1714,7 +1714,7 @@ button.tableRow:hover,
 }
 
 .agentTableRow {
-  grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.9fr) minmax(150px, 0.8fr) 92px minmax(150px, 0.8fr) 74px;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 0.9fr) 92px minmax(150px, 0.8fr) 74px;
 }
 
 .rowCellButton {
@@ -1980,6 +1980,7 @@ button.tableRow:hover,
 .status-degraded,
 .status-warning,
 .status-stale,
+.status-error,
 .status-exception {
   background: color-mix(in srgb, var(--lorume-color-warning) 9%, var(--lorume-color-paper));
   border-color: color-mix(in srgb, var(--lorume-color-warning) 24%, var(--lorume-color-line));
@@ -1998,6 +1999,12 @@ button.tableRow:hover,
   background: color-mix(in srgb, var(--lorume-color-muted) 8%, var(--lorume-color-paper));
   border-color: color-mix(in srgb, var(--lorume-color-muted) 18%, var(--lorume-color-line));
   color: var(--lorume-color-muted);
+}
+
+.status-syncing {
+  background: color-mix(in srgb, var(--lorume-color-info) 8%, var(--lorume-color-paper));
+  border-color: color-mix(in srgb, var(--lorume-color-info) 20%, var(--lorume-color-line));
+  color: var(--lorume-color-link);
 }
 
 .status-idle {

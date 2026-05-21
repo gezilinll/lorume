@@ -1,80 +1,93 @@
-import type { ChannelKind, RuntimeSource } from "./runtime-normalize";
-import type {
-  RuntimeConversation,
-  RuntimeWorkItem,
-  RuntimeWorkItemStatus,
-  RuntimeWorkParticipant,
-  RuntimeWorkStageId,
-  RuntimeWorkStateSnapshot,
-} from "./runtime-work-state";
-import { WORK_STAGE_IDS } from "./runtime-work-state";
-import type { RuntimeWorkBoardFilters } from "./runtime-work-state-query";
+import {
+  createDeviceStateSnapshot,
+  TASK_STATUSES,
+  type Task,
+  type TaskStatus,
+} from "./runtime-model";
+import { channelKindLabels } from "./runtime-fleet-query";
 
-/** Backend query response for normalized Runtime work items. */
-export interface RuntimeWorkItemsQueryResponse {
-  /** Work item rows returned after backend filtering. */
-  items: RuntimeWorkItemQueryRow[];
+export type RuntimeTaskChannelKind = NonNullable<Task["channel"]>["kind"];
+export type RuntimeTaskStatusFilter = TaskStatus | "all";
+
+export interface RuntimeTaskTimeRangeFilter {
+  start?: string;
+  end?: string;
+}
+
+export interface RuntimeTaskBoardFilters {
+  channelKind?: RuntimeTaskChannelKind | "all";
+  search?: string;
+  status?: RuntimeTaskStatusFilter;
+  timeRange?: RuntimeTaskTimeRangeFilter;
+}
+
+/** Backend query response for normalized Task rows. */
+export interface RuntimeTasksQueryResponse {
+  /** Task rows returned after backend filtering. */
+  items: unknown[];
   /** Total matching rows before pagination. */
   total: number;
   /** Cursor for the next page when more rows are available. */
   nextCursor?: string;
 }
 
-/** Parsed backend query page plus converted shared work-state snapshot. */
-export interface RuntimeWorkItemsQueryPage {
-  /** Converted snapshot for the current backend page. */
-  snapshot: RuntimeWorkStateSnapshot;
+/** Parsed backend query page plus pagination metadata. */
+export interface RuntimeTasksQueryPage {
+  /** Product Task rows for the current page. */
+  tasks: Task[];
   /** Total matching rows before pagination. */
   total: number;
   /** Cursor for the next page when more rows are available. */
   nextCursor?: string;
 }
 
-/** One normalized work item row returned by the backend query API. */
-export interface RuntimeWorkItemQueryRow {
-  /** Stable Lorume work item id. */
-  id: string;
-  /** External platform work item id. */
-  externalId?: string;
-  /** Normalized source runtime/platform. */
-  source: string;
-  /** Normalized work item status. */
-  status: string;
-  /** Derived Lorume work stage. */
-  stage: string;
-  /** User-facing work item title. */
-  title: string;
-  /** Optional user-facing request/message excerpt. */
-  description: string | null;
-  /** Owning runtime id. */
-  runtimeId: string | null;
-  /** Owning or assignee agent id. */
-  agentId: string | null;
-  /** Linked conversation/thread id. */
-  conversationId: string | null;
-  /** User-facing channel kind, not runtime kind. */
-  channelKind: string | null;
-  /** User-facing channel/group/thread label. */
-  channelLabel: string | null;
-  /** Normalized creator participant. */
-  creator: unknown;
-  /** Normalized assignee participant. */
-  assignee: unknown;
-  /** Last observed timestamp. */
-  lastSeenAt: string | null;
+export interface RuntimeTaskBoardItem extends Task {
+  statusLabel: string;
+  channelKindLabel?: string;
+  channelLabel?: string;
+  creatorLabel: string;
+  assigneeLabel: string;
+  requestExcerpt: string;
 }
 
-/** Create the formal backend query URL for Runtime work items. */
-export function createWorkItemsQueryUrl(
+export interface RuntimeTaskBoardLane {
+  status: TaskStatus;
+  label: string;
+  items: RuntimeTaskBoardItem[];
+}
+
+export interface RuntimeTaskBoard {
+  lanes: RuntimeTaskBoardLane[];
+  summary: Record<TaskStatus, number> & { total: number };
+  visibleItems: RuntimeTaskBoardItem[];
+}
+
+export interface RuntimeTaskChannelOption {
+  value: RuntimeTaskChannelKind;
+  label: string;
+}
+
+export const taskStatusLabels: Record<TaskStatus, string> = {
+  todo: "待处理",
+  in_progress: "进行中",
+  review: "待验收",
+  done: "已完成",
+  blocked: "阻塞",
+  failed: "失败",
+  cancelled: "已取消",
+  unknown: "未知",
+};
+
+/** Create the formal backend query URL for Runtime Tasks. */
+export function createTasksQueryUrl(
   origin: string,
-  filters: RuntimeWorkBoardFilters | undefined,
+  filters: RuntimeTaskBoardFilters | undefined,
   options: { cursor?: string } = {},
 ): URL {
-  const requestUrl = new URL("/api/runtime-work-items", origin);
+  const requestUrl = new URL("/api/runtime-tasks", origin);
   requestUrl.searchParams.set("limit", "500");
   if (options.cursor) requestUrl.searchParams.set("cursor", options.cursor);
-  if (filters?.source && filters.source !== "all") requestUrl.searchParams.set("source", filters.source);
-  if (filters?.stage && filters.stage !== "all") requestUrl.searchParams.set("stage", filters.stage);
+  if (filters?.status && filters.status !== "all") requestUrl.searchParams.set("status", filters.status);
   if (filters?.channelKind && filters.channelKind !== "all") {
     requestUrl.searchParams.set("channelKind", filters.channelKind);
   }
@@ -86,168 +99,118 @@ export function createWorkItemsQueryUrl(
   return requestUrl;
 }
 
-/** Convert a backend work-item query response into the shared work-state shape. */
-export function runtimeWorkStateSnapshotFromQueryResponse(value: unknown): RuntimeWorkStateSnapshot | null {
-  return runtimeWorkItemsQueryPageFromResponse(value)?.snapshot ?? null;
-}
-
-/** Convert a backend work-item query response into a snapshot and pagination metadata. */
-export function runtimeWorkItemsQueryPageFromResponse(value: unknown): RuntimeWorkItemsQueryPage | null {
-  if (!isRuntimeWorkItemsQueryResponse(value)) return null;
-  const workItems = value.items.map(runtimeWorkItemFromQueryRow);
+/** Convert a backend Task query response into product Task rows. */
+export function runtimeTasksQueryPageFromResponse(value: unknown): RuntimeTasksQueryPage | null {
+  if (!isRuntimeTasksQueryResponse(value)) return null;
+  const tasks = createDeviceStateSnapshot({
+    observedAt: new Date().toISOString(),
+    device: { id: "query", hostname: "query", os: "unknown" },
+    runtimes: [],
+    agents: [],
+    tasks: value.items,
+  }).tasks;
   return {
     nextCursor: typeof value.nextCursor === "string" ? value.nextCursor : undefined,
-    snapshot: {
-      observedAt: latestWorkItemTimestamp(workItems) ?? new Date().toISOString(),
-      deviceId: inferDeviceId(workItems),
-      workItems,
-      conversations: conversationsFromWorkItems(workItems),
-      executions: [],
-      capabilities: [],
-    },
-    total: typeof value.total === "number" ? value.total : value.items.length,
+    tasks,
+    total: typeof value.total === "number" ? value.total : tasks.length,
   };
 }
 
-function runtimeWorkItemFromQueryRow(row: RuntimeWorkItemQueryRow): RuntimeWorkItem {
+/** Group Task rows into status lanes for the Runs / Work Board surface. */
+export function createRuntimeTaskBoard(
+  tasks: Task[],
+  filters: RuntimeTaskBoardFilters = {},
+): RuntimeTaskBoard {
+  const query = normalizeSearch(filters.search ?? "");
+  const visibleTasks = tasks.filter((task) =>
+    matchesStatus(task, filters.status) &&
+    matchesChannel(task, filters.channelKind) &&
+    matchesSearch(task, query) &&
+    matchesTimeRange(task, filters.timeRange)
+  );
+  const visibleItems = visibleTasks.map(taskBoardItem);
+  const lanes = TASK_STATUSES.map((status) => ({
+    items: visibleItems.filter((item) => item.status === status),
+    label: taskStatusLabels[status],
+    status,
+  }));
+  const summary = Object.fromEntries(TASK_STATUSES.map((status) => [
+    status,
+    tasks.filter((task) => task.status === status).length,
+  ])) as Record<TaskStatus, number>;
   return {
-    id: row.id,
-    source: normalizeRuntimeSource(row.source),
-    externalId: row.externalId || row.id,
-    title: row.title,
-    description: row.description ?? undefined,
-    status: normalizeWorkItemStatus(row.status),
-    stage: normalizeWorkStage(row.stage),
-    channel: row.channelKind || row.channelLabel
-      ? {
-          kind: normalizeChannelKind(row.channelKind),
-          label: row.channelLabel ?? channelLabelFromKind(row.channelKind),
-        }
-      : undefined,
-    assignee: normalizeParticipant(row.assignee),
-    creator: normalizeParticipant(row.creator),
-    agentId: row.agentId ?? undefined,
-    runtimeId: row.runtimeId ?? undefined,
-    conversationId: row.conversationId ?? undefined,
-    lastSeenAt: row.lastSeenAt ?? undefined,
+    lanes,
+    summary: {
+      ...summary,
+      total: tasks.length,
+    },
+    visibleItems,
   };
 }
 
-function conversationsFromWorkItems(workItems: RuntimeWorkItem[]): RuntimeConversation[] {
-  const conversations = new Map<string, RuntimeConversation>();
-  for (const workItem of workItems) {
-    if (!workItem.conversationId || conversations.has(workItem.conversationId)) continue;
-    conversations.set(workItem.conversationId, {
-      id: workItem.conversationId,
-      source: workItem.source,
-      externalId: workItem.conversationId.split(":").at(-1) || workItem.conversationId,
-      status: workItem.status === "in_progress" ? "active" : "closed",
-      channel: workItem.channel,
-      title: workItem.channel?.label,
-      workItemId: workItem.id,
-      agentId: workItem.agentId,
-      runtimeId: workItem.runtimeId,
-      participants: [workItem.creator, workItem.assignee].filter(
-        (participant): participant is RuntimeWorkParticipant => Boolean(participant),
-      ),
-      lastActivityAt: workItem.lastSeenAt ?? workItem.updatedAt,
-      lastSeenAt: workItem.lastSeenAt,
-    });
-  }
-  return Array.from(conversations.values());
+/** List user-facing channel kinds actually present in Task context. */
+export function listRuntimeTaskChannelOptions(tasks: Task[]): RuntimeTaskChannelOption[] {
+  return Array.from(
+    new Set(tasks.map((task) => task.channel?.kind).filter((kind): kind is RuntimeTaskChannelKind => Boolean(kind))),
+  )
+    .sort()
+    .map((kind) => ({ value: kind, label: channelKindLabels[kind] }));
 }
 
-function isRuntimeWorkItemsQueryResponse(value: unknown): value is RuntimeWorkItemsQueryResponse {
+function isRuntimeTasksQueryResponse(value: unknown): value is RuntimeTasksQueryResponse {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<RuntimeWorkItemsQueryResponse>;
+  const candidate = value as Partial<RuntimeTasksQueryResponse>;
   return Array.isArray(candidate.items);
 }
 
-function normalizeRuntimeSource(value: string): RuntimeSource {
-  if (
-    value === "openclaw" ||
-    value === "multica" ||
-    value === "slock" ||
-    value === "codex" ||
-    value === "claude_code" ||
-    value === "manual"
-  ) {
-    return value;
-  }
-  return "unknown";
-}
-
-function normalizeWorkItemStatus(value: string): RuntimeWorkItemStatus {
-  if (
-    value === "todo" ||
-    value === "in_progress" ||
-    value === "in_review" ||
-    value === "done" ||
-    value === "blocked" ||
-    value === "cancelled" ||
-    value === "unknown"
-  ) {
-    return value;
-  }
-  return "unknown";
-}
-
-function normalizeWorkStage(value: string): RuntimeWorkStageId | undefined {
-  return WORK_STAGE_IDS.includes(value as RuntimeWorkStageId) ? value as RuntimeWorkStageId : undefined;
-}
-
-function normalizeChannelKind(value: string | null): ChannelKind {
-  if (
-    value === "dingtalk" ||
-    value === "telegram" ||
-    value === "slack" ||
-    value === "slock" ||
-    value === "multica" ||
-    value === "openclaw" ||
-    value === "other"
-  ) {
-    return value;
-  }
-  return "other";
-}
-
-function channelLabelFromKind(value: string | null): string {
-  if (value === "dingtalk") return "DingTalk";
-  if (value === "telegram") return "Telegram";
-  if (value === "slack") return "Slack";
-  return "默认渠道";
-}
-
-function normalizeParticipant(value: unknown): RuntimeWorkParticipant | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as Partial<RuntimeWorkParticipant>;
-  if (typeof candidate.kind !== "string" || typeof candidate.label !== "string") return undefined;
-  const kind = candidate.kind === "human" ||
-    candidate.kind === "agent" ||
-    candidate.kind === "runtime" ||
-    candidate.kind === "system"
-    ? candidate.kind
-    : "unknown";
+function taskBoardItem(task: Task): RuntimeTaskBoardItem {
   return {
-    kind,
-    label: candidate.label,
-    objectId: typeof candidate.objectId === "string" ? candidate.objectId : undefined,
-    externalId: typeof candidate.externalId === "string" ? candidate.externalId : undefined,
+    ...task,
+    assigneeLabel: task.assignee?.name ?? task.agentId,
+    channelKindLabel: task.channel?.kind ? channelKindLabels[task.channel.kind] : undefined,
+    channelLabel: task.conversation?.title ?? task.channel?.name,
+    creatorLabel: task.creator?.name ?? "未知",
+    requestExcerpt: task.description ?? task.conversation?.title ?? task.title,
+    statusLabel: taskStatusLabels[task.status],
   };
 }
 
-function latestWorkItemTimestamp(workItems: RuntimeWorkItem[]): string | undefined {
-  return workItems
-    .map((item) => item.lastSeenAt ?? item.updatedAt ?? item.createdAt)
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1);
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase();
 }
 
-function inferDeviceId(workItems: RuntimeWorkItem[]): string {
-  const firstId = workItems[0]?.id;
-  if (!firstId) return "backend";
-  return firstId.split(":")[0] || "backend";
+function matchesStatus(task: Task, status?: RuntimeTaskStatusFilter): boolean {
+  return !status || status === "all" || task.status === status;
+}
+
+function matchesChannel(task: Task, channelKind?: RuntimeTaskChannelKind | "all"): boolean {
+  return !channelKind || channelKind === "all" || task.channel?.kind === channelKind;
+}
+
+function matchesSearch(task: Task, query: string): boolean {
+  if (!query) return true;
+  return [
+    task.id,
+    task.agentId,
+    task.title,
+    task.description,
+    task.status,
+    task.channel?.kind,
+    task.channel?.name,
+    task.conversation?.title,
+    task.creator?.name,
+    task.assignee?.name,
+    task.error,
+  ].some((value) => value?.toLowerCase().includes(query));
+}
+
+function matchesTimeRange(task: Task, timeRange?: RuntimeTaskTimeRangeFilter): boolean {
+  if (!timeRange?.start && !timeRange?.end) return true;
+  const timestamp = Date.parse(task.lastSeenAt ?? task.updatedAt ?? task.createdAt ?? "");
+  if (!Number.isFinite(timestamp)) return false;
+  const start = timeRange.start ? Date.parse(timeRange.start) : Number.NEGATIVE_INFINITY;
+  const end = timeRange.end ? Date.parse(timeRange.end) : Number.POSITIVE_INFINITY;
+  return timestamp >= start && timestamp <= end;
 }
 
 function isoTimestampFromFilter(value: string | undefined): string | undefined {

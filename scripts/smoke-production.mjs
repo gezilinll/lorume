@@ -40,8 +40,8 @@ const authenticatedChecks = [
     validate: (body) => Array.isArray(body?.devices) && Array.isArray(body?.runtimes) && Array.isArray(body?.agents),
   },
   {
-    name: "work items",
-    path: "/api/runtime-work-items?limit=1",
+    name: "runtime tasks",
+    path: "/api/runtime-tasks?limit=1",
     type: "json",
     validate: (body) => Array.isArray(body?.items) && typeof body?.total === "number",
   },

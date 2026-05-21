@@ -4,7 +4,7 @@
 
 **Goal:** Build the minimum backend/device-agent capability needed to uninstall/reinstall Lorume on `gezilinll-claw`, clear backend state, and validate only Device-level collection data from a one-line install command.
 
-**Architecture:** Keep Lorume device cleanup product-driven: the agent may execute Lorume stop/uninstall/install commands on the real device, but must not manually remove leftover files or services to make the device look clean. Device inventory becomes a narrow machine fact model: no `device.name`, no `device.status`, and no `device.connectionMode`; Runtime and Agent may still be collected and ingested, but are not part of this validation scope.
+**Architecture:** Keep Lorume device cleanup product-driven: the agent may execute Lorume stop/uninstall/install commands on the real device, but must not manually remove leftover files or services to make the device look clean. Device state becomes a narrow machine fact model: no `device.name`, no `device.status`, and no `device.connectionMode`; Runtime and Agent may still be collected and ingested, but are not part of this validation scope.
 
 **Tech Stack:** Node.js CLI scripts, Bash installer/uninstaller, TypeScript runtime models, Postgres migrations/repositories, Vitest unit/API tests, Playwright backend E2E, real-device SSH validation against `ssh gezilinll-claw`.
 
@@ -33,7 +33,7 @@ Read-only probe already confirmed:
 
 ## Device Data Contract
 
-Device inventory must contain only these machine/device facts plus collector metadata:
+Device state must contain only these machine/device facts plus collector metadata:
 
 | Field | Required | Source |
 |---|---:|---|
@@ -41,7 +41,7 @@ Device inventory must contain only these machine/device facts plus collector met
 | `device.hostname` | yes | `os.hostname()` |
 | `device.os` | yes | `os.platform()` |
 | `device.architecture` | yes | `os.arch()` |
-| `device.lastSeenAt` | yes | inventory snapshot observation time |
+| `device.lastSeenAt` | yes | device-state snapshot observation time |
 | `device.user.username` | yes when readable | `os.userInfo().username` |
 | `device.network.localIps` | yes when present | non-internal OS network interfaces |
 | `device.network.publicIp` | yes when backend can infer | trusted forwarded header or request remote address |
@@ -66,22 +66,22 @@ Remove these from Device schema, API payloads, fixtures, and UI usage:
 |---|---|
 | `docs/product/runtime-device-registration-spec.md` | Source of truth for narrowed Device contract, uninstall behavior, observer rule, real-device validation acceptance. |
 | `docs/product/runtime-fleet-page-spec.md` | Runtime Fleet wording after removing Device `name/status/connectionMode`. |
-| `docs/product/cli-device-capability-spec.md` | CLI command contract for `device.identify`, `collect inventory`, `collector stop`, and `collector uninstall`. |
-| `src/runtime/runtime-normalize.ts` | Remove `RuntimeDevice.name/status/connectionMode`; keep runtime/agent status independent. |
+| `docs/product/cli-device-capability-spec.md` | CLI command contract for `device.identify`, `collect device-state`, `collector stop`, and `collector uninstall`. |
+| `src/runtime/runtime-model.ts` | Remove `RuntimeDevice.name/status/connectionMode`; keep runtime/agent status independent. |
 | `scripts/lorume-runtime-adapters.mjs` | Emit narrowed Device fields and stop rolling runtime state into device facts. |
 | `scripts/lorume-device-collector.mjs` | Emit/control narrowed device identity; keep `deviceName` out of snapshot and heartbeat payload unless control channel still temporarily accepts it. |
 | `scripts/install-device-collector.sh` | Add stop/uninstall behavior and install metadata needed for clean removal. |
 | `scripts/lorume.mjs` | Add CLI commands for stop/uninstall, remove `device.name/status/connectionMode` from `device identify`. |
 | `db/migrations/` | Add migration dropping `devices.name`, `devices.status`, and `devices.connection_mode`. |
-| `src/server/runtime-inventory-store.ts` | Relax validation so Device no longer requires `name/status/connectionMode`. |
+| `src/server/runtime-device-state-store.ts` | Relax validation so Device no longer requires `name/status/connectionMode`. |
 | `src/server/postgres-store.ts` | Upsert/query narrowed Device columns, enrich `publicIp`, order by stable remaining fields. |
 | `src/server/runtime-http-api.ts` | Enrich Device public IP during ingestion without trusting arbitrary client-supplied public IP more than proxy/remote evidence. |
-| `src/runtime/runtime-inventory-query.ts` | Derive Device display label/status without removed fields. |
+| `src/runtime/runtime-fleet-query.ts` | Derive Device display label/status without removed fields. |
 | `src/runtime/RuntimeFleetPage.tsx` | Remove Device name/connection-mode display assumptions. Use id/hostname and derived status. |
 | `fixtures/runtime/collector-snapshot.sample.json` | Update fixture to narrowed Device object. |
 | `src/runtime/device-collector-script.test.ts` | Installer/uninstaller and collector script coverage. |
 | `src/cli/lorume-cli.test.ts` | CLI Device contract and new stop/uninstall command tests. |
-| `src/runtime/runtime-normalize.test.ts` | Device model and status-independence tests. |
+| `src/runtime/runtime-model.ts` | Device model and status-independence tests. |
 | `src/server/runtime-http-api*.test.ts` | API validation and public IP enrichment tests. |
 | `src/server/postgres-store.test.ts` | DB read/write tests after schema change. |
 | `e2e/runtime-backend-api.spec.ts` | Backend E2E for real collector process with narrowed Device assertion. |
@@ -143,8 +143,8 @@ Expected: passes after the docs and guard agree.
 ## Task 2: Remove Device `name/status/connectionMode` From The Type Model
 
 **Files:**
-- Modify: `src/runtime/runtime-normalize.ts`
-- Modify: `src/runtime/runtime-normalize.test.ts`
+- Modify: `src/runtime/runtime-model.ts`
+- Modify: `src/runtime/runtime-model.ts`
 - Modify: `fixtures/runtime/collector-snapshot.sample.json`
 
 - [ ] **Step 1: Write failing type/model tests**
@@ -153,7 +153,7 @@ Add tests that assert the fields are absent and runtime status cannot affect Dev
 
 ```ts
 it("keeps device facts narrow and independent from runtime health", () => {
-  const snapshot = createRuntimeInventorySnapshot({
+  const snapshot = createDeviceStateSnapshot({
     observedAt: "2026-05-20T00:00:00.000Z",
     collector: { version: "0.1.0", status: "online", installPath: "/tmp/lorume" },
     device: {
@@ -199,14 +199,14 @@ it("keeps device facts narrow and independent from runtime health", () => {
 Run:
 
 ```bash
-npx vitest run src/runtime/runtime-normalize.test.ts
+npx vitest run src/runtime/runtime-model.ts
 ```
 
 Expected: fails because `RuntimeDevice` still requires/emits removed fields.
 
 - [ ] **Step 3: Update `RuntimeDevice`**
 
-Change `src/runtime/runtime-normalize.ts` so `RuntimeDevice` has only the narrowed fields:
+Change `src/runtime/runtime-model.ts` so `RuntimeDevice` has only the narrowed fields:
 
 ```ts
 export interface RuntimeDevice {
@@ -220,7 +220,7 @@ export interface RuntimeDevice {
 }
 ```
 
-Remove `rollupDeviceStatus()` and stop assigning `device.status` in `createRuntimeInventorySnapshot()`.
+Remove `rollupDeviceStatus()` and stop assigning `device.status` in `createDeviceStateSnapshot()`.
 
 - [ ] **Step 4: Update fixtures**
 
@@ -231,7 +231,7 @@ Remove `name`, `status`, and `connectionMode` from `fixtures/runtime/collector-s
 Run:
 
 ```bash
-npx vitest run src/runtime/runtime-normalize.test.ts
+npx vitest run src/runtime/runtime-model.ts
 npm run check:runtime
 ```
 
@@ -344,7 +344,7 @@ Expected: passes with narrowed device payloads.
 
 **Files:**
 - Create: `db/migrations/0010_narrow_device_facts.sql`
-- Modify: `src/server/runtime-inventory-store.ts`
+- Modify: `src/server/runtime-device-state-store.ts`
 - Modify: `src/server/postgres-store.ts`
 - Modify: `src/server/postgres-store.test.ts`
 - Modify: `src/server/runtime-http-api-postgres.test.ts`
@@ -367,7 +367,7 @@ expect(fleet.devices[0]).not.toHaveProperty("status");
 expect(fleet.devices[0]).not.toHaveProperty("connectionMode");
 ```
 
-In `src/server/runtime-inventory-store.ts` tests, make invalid snapshots fail only when `id/hostname/os` are missing, not when removed fields are missing.
+In `src/server/runtime-device-state-store.ts` tests, make invalid snapshots fail only when `id/hostname/os` are missing, not when removed fields are missing.
 
 - [ ] **Step 2: Run backend tests and confirm failure**
 
@@ -405,7 +405,7 @@ SELECT raw, observed_at FROM devices ORDER BY hostname, id
 
 - [ ] **Step 5: Update validation**
 
-Change `src/server/runtime-inventory-store.ts` snapshot validation:
+Change `src/server/runtime-device-state-store.ts` snapshot validation:
 
 ```ts
 if (!isRecord(value.device) || typeof value.device.id !== "string") return false;
@@ -438,7 +438,7 @@ Expected: passes with narrowed schema and API payloads.
 Add a test that posts a snapshot with `x-forwarded-for` and verifies the stored Device raw has `publicIp`:
 
 ```ts
-const response = await fetch(`${baseUrl}/api/device-snapshots`, {
+const response = await fetch(`${baseUrl}/api/device-state-snapshots`, {
   method: "POST",
   headers: {
     "content-type": "application/json",
@@ -506,8 +506,8 @@ Expected: passes and persists public IP in Device raw.
 ## Task 6: Update Runtime Fleet Query/UI For Removed Device Fields
 
 **Files:**
-- Modify: `src/runtime/runtime-inventory-query.ts`
-- Modify: `src/runtime/runtime-inventory-query.test.ts`
+- Modify: `src/runtime/runtime-fleet-query.ts`
+- Modify: `src/runtime/runtime-fleet-query.test.ts`
 - Modify: `src/runtime/RuntimeFleetPage.tsx`
 - Modify: `src/App.test.tsx`
 - Modify: `e2e/runtime-fleet.spec.ts`
@@ -531,7 +531,7 @@ expect(JSON.stringify(detail)).not.toContain("connectionMode");
 
 ```ts
 export function deriveDeviceFleetStatus(
-  _snapshot: RuntimeInventorySnapshot,
+  _snapshot: DeviceStateSnapshot,
   device: RuntimeDevice,
   collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
 ): RuntimeFleetObjectStatus {
@@ -560,7 +560,7 @@ Remove display of connection mode. Do not add a replacement label unless the use
 Run:
 
 ```bash
-npx vitest run src/runtime/runtime-inventory-query.test.ts src/App.test.tsx
+npx vitest run src/runtime/runtime-fleet-query.test.ts src/App.test.tsx
 npm run check:quick
 npm run check:e2e
 ```
@@ -736,10 +736,8 @@ Before clearing, record counts:
 SELECT 'devices' AS table_name, count(*) FROM devices
 UNION ALL SELECT 'runtimes', count(*) FROM runtimes
 UNION ALL SELECT 'agents', count(*) FROM agents
-UNION ALL SELECT 'collector_ingestions', count(*) FROM collector_ingestions
-UNION ALL SELECT 'work_items', count(*) FROM work_items
-UNION ALL SELECT 'work_conversations', count(*) FROM work_conversations
-UNION ALL SELECT 'work_executions', count(*) FROM work_executions;
+UNION ALL SELECT 'tasks', count(*) FROM tasks
+UNION ALL SELECT 'collector_ingestions', count(*) FROM collector_ingestions;
 ```
 
 Clear validation data using a single transaction scoped to runtime/device tables. Preserve auth users/orgs unless the validation explicitly needs a clean organization.
@@ -809,8 +807,8 @@ Ignore Runtime/Agent rows for this validation except to note whether they appear
 
 | Requirement | Unit | API/Integration | E2E | Real Device |
 |---|---|---|---|---|
-| Device fields exclude `name/status/connectionMode` | `runtime-normalize`, CLI, collector tests | Postgres/API tests | backend collector E2E | API/DB read after install |
-| Device status independent from Runtime/Agent | `runtime-normalize`, query tests | API payload tests | Runtime Fleet E2E | Device accepted even if Runtime/Agent ignored |
+| Device fields exclude `name/status/connectionMode` | `runtime-model`, CLI, collector tests | Postgres/API tests | backend collector E2E | API/DB read after install |
+| Device status independent from Runtime/Agent | `runtime-model`, query tests | API payload tests | Runtime Fleet E2E | Device accepted even if Runtime/Agent ignored |
 | `network.localIps` retained | CLI/collector tests | Postgres/API tests | backend collector E2E | includes `10.1.67.125` when available |
 | `network.publicIp` backend-enriched | HTTP API tests | Postgres tests | backend E2E optional | API/DB shows inferred IP |
 | Stop/uninstall idempotent | CLI + installer tests | not needed | not needed | run twice on `gezilinll-claw` |

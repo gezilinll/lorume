@@ -1,37 +1,44 @@
 import { describe, expect, it } from "vitest";
 import {
-  createWorkItemsQueryUrl,
-  runtimeWorkItemsQueryPageFromResponse,
+  createRuntimeTaskBoard,
+  createTasksQueryUrl,
+  listRuntimeTaskChannelOptions,
+  runtimeTasksQueryPageFromResponse,
 } from "./runtime-work-query-api";
-import { createRuntimeWorkBoard } from "./runtime-work-state-query";
 
-describe("Runtime work item query API helpers", () => {
-  it("adds cursor to backend query URLs", () => {
-    const url = createWorkItemsQueryUrl("http://lorume.local", { source: "slock" }, { cursor: "cursor-1" });
+describe("Runtime task query API helpers", () => {
+  it("creates backend query URLs for Task rows", () => {
+    const url = createTasksQueryUrl("http://lorume.local", {
+      channelKind: "dingtalk",
+      search: "handoff",
+      status: "in_progress",
+      timeRange: { start: "2026-05-21T10:00:00", end: "2026-05-21T11:00:00" },
+    }, { cursor: "cursor-1" });
 
-    expect(url.pathname).toBe("/api/runtime-work-items");
-    expect(url.searchParams.get("source")).toBe("slock");
+    expect(url.pathname).toBe("/api/runtime-tasks");
+    expect(url.searchParams.get("channelKind")).toBe("dingtalk");
     expect(url.searchParams.get("cursor")).toBe("cursor-1");
+    expect(url.searchParams.get("search")).toBe("handoff");
+    expect(url.searchParams.get("status")).toBe("in_progress");
+    expect(url.searchParams.get("startAt")).toBe("2026-05-21T02:00:00.000Z");
+    expect(url.searchParams.get("endAt")).toBe("2026-05-21T03:00:00.000Z");
   });
 
-  it("preserves total and next cursor while converting rows to a snapshot", () => {
-    const page = runtimeWorkItemsQueryPageFromResponse({
+  it("parses Task query pages without runtimeId, lastRun, conversations, or executions", () => {
+    const page = runtimeTasksQueryPageFromResponse({
       items: [{
-        id: "work-1",
-        externalId: "external-1",
-        source: "slock",
-        status: "in_progress",
-        stage: "processing",
+        id: "agent-1:task:work-1",
+        agentId: "agent-1",
+        runtimeId: "must-not-leak",
+        lastRun: { status: "running" },
         title: "Inspect task handoff",
         description: "Check the handoff context",
-        runtimeId: "runtime-1",
-        agentId: "agent-1",
-        conversationId: "conversation-1",
-        channelKind: "other",
-        channelLabel: "#AjisGTD",
-        creator: { kind: "human", label: "PMO" },
-        assignee: { kind: "agent", label: "tester" },
-        lastSeenAt: "2026-05-10T10:00:00.000Z",
+        status: "in_progress",
+        channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-1" },
+        conversation: { title: "DingTalk 群聊", externalId: "conversation-1" },
+        creator: { name: "PMO" },
+        assignee: { name: "main" },
+        lastSeenAt: "2026-05-21T10:00:00.000Z",
       }],
       nextCursor: "cursor-2",
       total: 2,
@@ -40,40 +47,56 @@ describe("Runtime work item query API helpers", () => {
     expect(page).toMatchObject({
       nextCursor: "cursor-2",
       total: 2,
-      snapshot: {
-        workItems: [expect.objectContaining({ id: "work-1", title: "Inspect task handoff" })],
-      },
+      tasks: [expect.objectContaining({
+        agentId: "agent-1",
+        id: "agent-1:task:work-1",
+        title: "Inspect task handoff",
+      })],
     });
+    expect(page?.tasks[0]).not.toHaveProperty("runtimeId");
+    expect(page?.tasks[0]).not.toHaveProperty("lastRun");
+    expect(page).not.toHaveProperty("conversations");
+    expect(page).not.toHaveProperty("executions");
   });
 
-  it("preserves the backend materialized Lorume stage for board lanes", () => {
-    const page = runtimeWorkItemsQueryPageFromResponse({
-      items: [{
-        id: "work-attention",
-        externalId: "external-attention",
-        source: "multica",
-        status: "done",
-        stage: "attention",
-        title: "Needs follow-up despite being done upstream",
-        description: null,
-        runtimeId: "runtime-1",
-        agentId: "agent-1",
-        conversationId: null,
-        channelKind: "other",
-        channelLabel: "#AjisFarm",
-        creator: { kind: "human", label: "PMO" },
-        assignee: { kind: "agent", label: "reviewer" },
-        lastSeenAt: "2026-05-10T10:00:00.000Z",
-      }],
-      total: 1,
+  it("groups Task rows by Task.status in UI/BFF code", () => {
+    const page = runtimeTasksQueryPageFromResponse({
+      items: [
+        { id: "task-1", agentId: "agent-1", title: "Queued", status: "todo" },
+        { id: "task-2", agentId: "agent-1", title: "Running", status: "in_progress" },
+        { id: "task-3", agentId: "agent-1", title: "Failed", status: "failed", error: "timeout" },
+      ],
+      total: 3,
     });
 
     if (!page) throw new Error("query page should be parsed");
-    const board = createRuntimeWorkBoard(page.snapshot, { stage: "attention" });
+    const board = createRuntimeTaskBoard(page.tasks, { status: "failed" });
 
-    expect(board.summary.byStage.attention).toBe(1);
-    expect(board.lanes.find((lane) => lane.stage === "attention")?.items).toEqual([
-      expect.objectContaining({ id: "work-attention", stage: "attention" }),
+    expect(board.summary).toMatchObject({
+      failed: 1,
+      in_progress: 1,
+      todo: 1,
+      total: 3,
+    });
+    expect(board.visibleItems).toEqual([expect.objectContaining({ id: "task-3", status: "failed" })]);
+    expect(board.lanes.find((lane) => lane.status === "failed")?.items).toEqual([
+      expect.objectContaining({ id: "task-3" }),
+    ]);
+  });
+
+  it("lists user-facing channel filters from Task context only", () => {
+    const page = runtimeTasksQueryPageFromResponse({
+      items: [
+        { id: "task-1", agentId: "agent-1", title: "One", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
+        { id: "task-2", agentId: "agent-1", title: "Two", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
+        { id: "task-3", agentId: "agent-1", title: "Three", status: "todo", channel: { kind: "slack", name: "#ops" } },
+      ],
+      total: 3,
+    });
+
+    expect(listRuntimeTaskChannelOptions(page?.tasks ?? [])).toEqual([
+      { label: "DingTalk", value: "dingtalk" },
+      { label: "Slack", value: "slack" },
     ]);
   });
 });

@@ -1,12 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fleetFixture from "../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import { App } from "./App";
-import fixtureSnapshot from "../fixtures/runtime/collector-snapshot.sample.json";
-import type { RuntimeInventorySnapshot, RuntimeWorkStateSnapshot } from "./runtime";
+import type { RuntimeFleetSnapshot } from "./runtime/runtime-fleet-query";
+import type { CollectionStatus, Task } from "./runtime/runtime-model";
 
 const originalFetch = globalThis.fetch;
 const originalPath = window.location.pathname;
+const fleetSnapshot = fleetFixture as RuntimeFleetSnapshot;
+const defaultAgentId = fleetSnapshot.agents[0].id;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -15,90 +18,77 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function runtimeFleetQueryResponse(snapshot: RuntimeInventorySnapshot) {
+function requestUrl(input: Parameters<typeof fetch>[0] | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+function runtimeFleetQueryResponse(snapshot: RuntimeFleetSnapshot) {
   return {
     observedAt: snapshot.observedAt,
-    devices: [snapshot.device],
+    devices: snapshot.devices,
     runtimes: snapshot.runtimes,
     agents: snapshot.agents,
+    tasks: snapshot.tasks,
     summary: {
       agentCount: snapshot.agents.length,
-      deviceCount: 1,
+      deviceCount: snapshot.devices.length,
       runtimeCount: snapshot.runtimes.length,
+      taskCount: snapshot.tasks.length,
     },
   };
 }
 
-function workStateQueryResponse(snapshot: RuntimeWorkStateSnapshot) {
+function taskQueryResponse(tasks: unknown[], nextCursor?: string, total = tasks.length) {
   return {
-    items: snapshot.workItems.map((item) => ({
-      agentId: item.agentId ?? null,
-      assignee: item.assignee,
-      channelKind: item.channel?.kind ?? null,
-      channelLabel: item.channel?.label ?? null,
-      conversationId: item.conversationId ?? null,
-      creator: item.creator,
-      description: item.description ?? null,
-      externalId: item.externalId,
-      id: item.id,
-      lastSeenAt: item.lastSeenAt ?? null,
-      runtimeId: item.runtimeId ?? null,
-      source: item.source,
-      stage: stageFromWorkItemStatus(item.status),
-      status: item.status,
-      title: item.title,
-    })),
-    total: snapshot.workItems.length,
+    items: tasks,
+    total,
+    ...(nextCursor ? { nextCursor } : {}),
   };
 }
 
-function emptyWorkStateQueryResponse() {
-  return { items: [], total: 0 };
-}
-
-function collectionHealthResponse(snapshot: RuntimeInventorySnapshot) {
+function collectionHealthResponse(snapshot: RuntimeFleetSnapshot) {
   return {
-    deviceId: snapshot.device.id,
-    status: "warning",
-    summary: "工作态采集有警告",
-    lastObservedAt: "2026-05-10T10:00:00.000Z",
-    lastReceivedAt: "2026-05-10T10:00:01.000Z",
     checks: [
       {
-        id: "inventory",
-        label: "设备资产",
-        status: "healthy",
-        lastObservedAt: "2026-05-10T09:59:00.000Z",
-        lastReceivedAt: "2026-05-10T09:59:01.000Z",
-        counts: { agents: snapshot.agents.length, channelBindings: 2, devices: 1, runtimes: snapshot.runtimes.length },
-        warnings: [],
+        counts: {
+          agents: snapshot.agents.length,
+          devices: snapshot.devices.length,
+          runtimes: snapshot.runtimes.length,
+          tasks: snapshot.tasks.length,
+        },
         error: null,
+        id: "device_state",
+        label: "设备状态",
+        lastObservedAt: snapshot.observedAt,
+        lastReceivedAt: snapshot.observedAt,
         message: "采集正常",
-      },
-      {
-        id: "work_state",
-        label: "工作态",
-        status: "warning",
-        lastObservedAt: "2026-05-10T10:00:00.000Z",
-        lastReceivedAt: "2026-05-10T10:00:01.000Z",
-        counts: { conversations: 4, executions: 2, workItems: 8 },
-        warnings: ["Slock task board probe warning"],
-        error: null,
-        message: "采集成功，但有 1 条警告",
+        status: "healthy",
+        warnings: [],
       },
     ],
+    deviceId: snapshot.devices[0].id,
+    lastObservedAt: snapshot.observedAt,
+    lastReceivedAt: snapshot.observedAt,
+    status: "healthy",
+    summary: "采集正常",
   };
 }
 
-function deviceDiagnosticsResponse(snapshot: RuntimeInventorySnapshot, status = "online", label = "在线") {
+function deviceDiagnosticsResponse(
+  snapshot: RuntimeFleetSnapshot,
+  status = "online",
+  label = "在线",
+) {
   return {
-    deviceId: snapshot.device.id,
-    status,
+    deviceId: snapshot.devices[0].id,
     label,
-    reason: "heartbeat_and_inventory_fresh",
+    lastHeartbeatAt: snapshot.observedAt,
+    lastDeviceStateSuccessAt: snapshot.observedAt,
     message: "设备在线且采集正常",
-    lastHeartbeatAt: "2026-05-10T10:00:00.000Z",
-    lastInventorySuccessAt: "2026-05-10T09:59:01.000Z",
+    reason: "heartbeat_and_device_state_fresh",
+    status,
   };
 }
 
@@ -109,12 +99,40 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function stageFromWorkItemStatus(status: RuntimeWorkStateSnapshot["workItems"][number]["status"]): string {
-  if (status === "todo") return "pending";
-  if (status === "in_progress") return "processing";
-  if (status === "in_review") return "review";
-  if (status === "done" || status === "cancelled") return "closed";
-  return "attention";
+function task(overrides: Partial<Task> & Pick<Task, "id" | "title">): Task {
+  return {
+    agentId: defaultAgentId,
+    status: "todo",
+    ...overrides,
+  };
+}
+
+function fleetWithStatus(runtimeStatus: CollectionStatus, agentStatus: CollectionStatus): RuntimeFleetSnapshot {
+  return {
+    ...fleetSnapshot,
+    agents: fleetSnapshot.agents.map((agent) => ({
+      ...agent,
+      collectionStatus: agentStatus,
+    })),
+    runtimes: fleetSnapshot.runtimes.map((runtime) => ({
+      ...runtime,
+      collectionStatus: runtimeStatus,
+    })),
+  };
+}
+
+function installRuntimeFleetFetch(snapshot = fleetSnapshot) {
+  globalThis.fetch = vi.fn(async (input) => {
+    const url = requestUrl(input);
+    if (url.includes("/api/runtime-fleet")) return jsonResponse(runtimeFleetQueryResponse(snapshot));
+    if (url.includes(`/api/devices/${snapshot.devices[0].id}/collection-health`)) {
+      return jsonResponse(collectionHealthResponse(snapshot));
+    }
+    if (url.includes(`/api/devices/${snapshot.devices[0].id}/diagnostics`)) {
+      return jsonResponse(deviceDiagnosticsResponse(snapshot));
+    }
+    return jsonResponse({ error: "unexpected request" }, 500);
+  }) as unknown as typeof fetch;
 }
 
 describe("Console shell", () => {
@@ -151,24 +169,12 @@ describe("Console shell", () => {
 
   it("uses URL routes for implemented console pages and hides unavailable nav entries", async () => {
     const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return jsonResponse(runtimeFleetQueryResponse(backendSnapshot));
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return jsonResponse(emptyWorkStateQueryResponse());
-      }
-      if (url.includes("/api/devices/fixture-mac/collection-health")) {
-        return jsonResponse(collectionHealthResponse(backendSnapshot));
-      }
-      if (url.includes("/api/operations")) {
-        return jsonResponse({ operations: [] });
-      }
-      if (url.includes("/api/notifications")) {
-        return jsonResponse({ threads: [] });
-      }
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-fleet")) return jsonResponse(runtimeFleetQueryResponse(fleetSnapshot));
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse([]));
+      if (url.includes("/api/devices/fixture-mac/collection-health")) return jsonResponse(collectionHealthResponse(fleetSnapshot));
+      if (url.includes("/api/devices/fixture-mac/diagnostics")) return jsonResponse(deviceDiagnosticsResponse(fleetSnapshot));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     window.history.pushState({}, "", "/runtime");
@@ -228,27 +234,22 @@ describe("Console shell", () => {
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
   });
 
-  it("opens Runs work board with task context and no adapter debug text", async () => {
+  it("opens Runs task board with task context and no adapter debug text", async () => {
     const user = userEvent.setup();
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify({ error: "backend_unavailable" }), {
-          status: 503,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse({ error: "backend_unavailable" }, 503);
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(screen.getByRole("heading", { name: "工作看板" })).toBeInTheDocument();
-    for (const lane of ["待处理", "处理中", "待验收", "已关闭", "需关注"]) {
+    for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
-    expect(await screen.findByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeInTheDocument();
+    expect(await screen.findByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
     const channelSelect = screen.getByLabelText("渠道") as HTMLSelectElement;
     expect(channelSelect.value).toBe("all");
     expect(within(channelSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
@@ -256,175 +257,101 @@ describe("Console shell", () => {
       "DingTalk",
     ]);
 
-    await user.selectOptions(screen.getByLabelText("来源 Runtime"), "slock");
-    await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "@fixture-human");
+    await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
 
-    const slockCard = screen.getByRole("button", { name: /Example in progress card/ });
-    expect(within(slockCard).queryByText("处理中")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Example in progress card").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/@fixture-human/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/@example-agent/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/#example-board/).length).toBeGreaterThan(0);
+    const taskCard = screen.getByRole("button", { name: /Review DingTalk request/ });
+    expect(within(taskCard).getByText("待处理")).toBeInTheDocument();
+    expect(screen.getAllByText(/PMO/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/main/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/DingTalk 群聊/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/OpenClaw execution/)).not.toBeInTheDocument();
     expect(screen.queryByText("直接证据")).not.toBeInTheDocument();
-    expect(screen.queryByText(/OpenClaw has no/)).not.toBeInTheDocument();
     expect(screen.queryByText("能力缺口")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("来源 Runtime")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Example in progress card/ }));
+    await user.click(taskCard);
 
-    const detail = screen.getByRole("complementary", { name: "工作项详情" });
-    expect(within(detail).getByRole("heading", { name: "Example in progress card" })).toBeInTheDocument();
-    expect(within(detail).getByText("来源 Runtime: Slock")).toBeInTheDocument();
-    expect(within(detail).getByText("Channel: 默认渠道")).toBeInTheDocument();
-    expect(within(detail).getByText("发起人: @fixture-human")).toBeInTheDocument();
-    expect(within(detail).getByText("承接 Agent: @example-agent")).toBeInTheDocument();
-    expect(within(detail).getByText("会话/群组: #example-board")).toBeInTheDocument();
-    expect(within(detail).queryByText("执行状态: 不支持采集")).not.toBeInTheDocument();
+    const detail = screen.getByRole("complementary", { name: "任务详情" });
+    expect(within(detail).getByRole("heading", { name: "Review DingTalk request" })).toBeInTheDocument();
+    expect(within(detail).getByText("Channel: DingTalk")).toBeInTheDocument();
+    expect(within(detail).getByText("发起人: PMO")).toBeInTheDocument();
+    expect(within(detail).getByText("承接 Agent: main")).toBeInTheDocument();
+    expect(within(detail).getByText("会话/群组: DingTalk 群聊")).toBeInTheDocument();
+    expect(within(detail).getByText("任务状态: 待处理")).toBeInTheDocument();
+    expect(within(detail).queryByText(/来源 Runtime:/)).not.toBeInTheDocument();
+    expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
   });
 
-  it("keeps Slock task-board items readable when no execution record is linked", async () => {
+  it("keeps task details readable when no execution record exists", async () => {
     const user = userEvent.setup();
-    const backendSnapshot: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [
-        {
-          id: "fixture-slock-no-execution",
-          source: "slock",
-          externalId: "fixture-slock-no-execution",
-          title: "Task without execution record",
-          status: "in_progress",
-          channel: { kind: "slock", label: "#example-board" },
-          assignee: { kind: "agent", label: "@example-agent" },
-          creator: { kind: "human", label: "@fixture-human" },
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
+    const tasks = [
+      task({
+        assignee: { name: "main" },
+        channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+        creator: { name: "PMO" },
+        id: "task-no-execution",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
+        status: "in_progress",
+        title: "Task without execution record",
+      }),
+    ];
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(tasks));
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: /Task without execution record/ }));
 
-    const detail = screen.getByRole("complementary", { name: "工作项详情" });
-    expect(within(detail).getByText("工作项状态: 处理中")).toBeInTheDocument();
+    const detail = screen.getByRole("complementary", { name: "任务详情" });
+    expect(within(detail).getByText("任务状态: 进行中")).toBeInTheDocument();
     expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
-    expect(within(detail).queryByText("执行状态: 不支持采集")).not.toBeInTheDocument();
   });
 
   it("keeps long Runs detail titles constrained while preserving the full title", async () => {
     const user = userEvent.setup();
     const longTitle = "使用Aetheris CLI帮我查询数据1、数据连接是：http://s-fat.dancf.com/4hzk 2、查询日期为多个周期内的数据并返回报告";
-    const backendSnapshot: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [
-        {
-          id: "fixture-long-title",
-          source: "slock",
-          externalId: "fixture-long-title",
-          title: longTitle,
-          status: "in_review",
-          assignee: { kind: "agent", label: "ZyangSenefactor" },
-          creator: { kind: "human", label: "zhaoyang" },
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) {
+        return jsonResponse(taskQueryResponse([
+          task({
+            assignee: { name: "main" },
+            creator: { name: "zhaoyang" },
+            id: "fixture-long-title",
+            lastSeenAt: "2026-05-21T08:00:00.000Z",
+            status: "review",
+            title: longTitle,
+          }),
+        ]));
       }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: new RegExp(longTitle.slice(0, 12)) }));
 
-    const detail = screen.getByRole("complementary", { name: "工作项详情" });
+    const detail = screen.getByRole("complementary", { name: "任务详情" });
     const title = within(detail).getByRole("heading", { name: longTitle });
     expect(title).toHaveClass("detailTitle");
     expect(title).toHaveAttribute("title", longTitle);
   });
 
-  it("does not turn OpenClaw executions or Slock listening gaps into Runs cards", async () => {
+  it("does not turn adapter diagnostics into Runs cards", async () => {
     const user = userEvent.setup();
-    const backendSnapshot: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [],
-      conversations: [{
-        id: "fixture-device:openclaw:gateway:conversation:session-1",
-        source: "openclaw",
-        externalId: "session-1",
-        status: "active",
-        runtimeId: "fixture-device:openclaw:gateway",
-        agentId: "fixture-device:openclaw:gateway:agent:main",
-        lastSeenAt: "2026-05-09T08:00:00.000Z",
-      }],
-      executions: [{
-        id: "fixture-device:openclaw:gateway:execution:run-1",
-        source: "openclaw",
-        externalId: "run-1",
-        runtimeId: "fixture-device:openclaw:gateway",
-        agentId: "fixture-device:openclaw:gateway:agent:main",
-        status: "succeeded",
-        lastSeenAt: "2026-05-09T08:00:00.000Z",
-      }],
-      capabilities: [
-        {
-          source: "openclaw",
-          collectedAt: "2026-05-09T08:00:00.000Z",
-          workItems: { support: "unsupported", strategies: ["cli"], evidence: [], limitations: [] },
-          conversations: { support: "partial", strategies: ["cli"], evidence: [], limitations: [] },
-          executions: { support: "supported", strategies: ["cli"], evidence: [], limitations: [] },
-        },
-        {
-          source: "slock",
-          collectedAt: "2026-05-09T08:00:00.000Z",
-          workItems: { support: "unknown", strategies: ["local_state"], evidence: [], limitations: [] },
-          conversations: { support: "unknown", strategies: ["local_state"], evidence: [], limitations: [] },
-          executions: { support: "unknown", strategies: ["local_state"], evidence: [], limitations: [] },
-        },
-      ],
-    };
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse([]));
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeInTheDocument();
+    expect(await screen.findByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("来源 Runtime"), "slock");
     expect(screen.queryByText("Slock 监听未就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenClaw 执行监听已接入")).not.toBeInTheDocument();
     expect(screen.queryByText(/OpenClaw execution/)).not.toBeInTheDocument();
@@ -434,123 +361,238 @@ describe("Console shell", () => {
 
   it("loads additional Runs pages from the backend cursor", async () => {
     const user = userEvent.setup();
-    const firstPage: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [{
-        id: "work-page-1",
-        source: "slock",
-        externalId: "work-page-1",
-        title: "First backend card",
+    const firstPage = [
+      task({
+        assignee: { name: "main" },
+        creator: { name: "PMO" },
+        id: "task-page-1",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "in_progress",
-        creator: { kind: "human", label: "PMO" },
-        assignee: { kind: "agent", label: "tester" },
-        lastSeenAt: "2026-05-09T08:00:00.000Z",
-      }],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
-    const secondPage: RuntimeWorkStateSnapshot = {
-      ...firstPage,
-      workItems: [{
-        ...firstPage.workItems[0],
-        id: "work-page-2",
-        externalId: "work-page-2",
-        title: "Second backend card",
-        lastSeenAt: "2026-05-09T07:59:00.000Z",
-      }],
-    };
+        title: "First backend task",
+      }),
+    ];
+    const secondPage = [
+      task({
+        assignee: { name: "main" },
+        creator: { name: "PMO" },
+        id: "task-page-2",
+        lastSeenAt: "2026-05-21T07:59:00.000Z",
+        status: "todo",
+        title: "Second backend task",
+      }),
+    ];
     const requests: string[] = [];
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
+      const url = requestUrl(input);
       requests.push(url);
-      if (url.includes("/api/runtime-work-items") && !url.includes("cursor=cursor-1")) {
-        return new Response(JSON.stringify({ ...workStateQueryResponse(firstPage), nextCursor: "cursor-1", total: 2 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      if (url.includes("/api/runtime-tasks") && !url.includes("cursor=cursor-1")) {
+        return jsonResponse(taskQueryResponse(firstPage, "cursor-1", 2));
       }
-      if (url.includes("/api/runtime-work-items") && url.includes("cursor=cursor-1")) {
-        return new Response(JSON.stringify({ ...workStateQueryResponse(secondPage), total: 2 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      if (url.includes("/api/runtime-tasks") && url.includes("cursor=cursor-1")) {
+        return jsonResponse(taskQueryResponse(secondPage, undefined, 2));
       }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
-    expect(await screen.findByRole("button", { name: /First backend card/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /First backend task/ })).toBeInTheDocument();
     expect(screen.getByText("已显示 1 / 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加载更多" }).closest(".boardResultMeta")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "加载更多" }));
 
-    expect(await screen.findByRole("button", { name: /Second backend card/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Second backend task/ })).toBeInTheDocument();
     expect(screen.getByText("已显示 2 / 2")).toBeInTheDocument();
     expect(requests.some((url) => url.includes("cursor=cursor-1"))).toBe(true);
   });
 
   it("hides stale Runs pagination when filters change before the next query returns", async () => {
     const user = userEvent.setup();
-    const initialPage: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [
-        {
-          id: "initial-openclaw-card",
-          source: "openclaw",
-          externalId: "initial-openclaw-card",
-          title: "Initial OpenClaw card",
-          status: "todo",
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-        {
-          id: "initial-slock-card",
-          source: "slock",
-          externalId: "initial-slock-card",
-          title: "Initial Slock card",
-          status: "todo",
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
+    const initialTasks = [
+      task({
+        id: "initial-todo-task",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
+        status: "todo",
+        title: "Initial todo task",
+      }),
+      task({
+        id: "initial-running-task",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
+        status: "in_progress",
+        title: "Initial running task",
+      }),
+    ];
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items") && url.includes("source=openclaw")) {
-        return new Response(JSON.stringify({
-          items: [workStateQueryResponse(initialPage).items[0]],
-          total: 1,
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks") && url.includes("status=in_progress")) {
+        return jsonResponse(taskQueryResponse([initialTasks[1]], undefined, 1));
       }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify({ ...workStateQueryResponse(initialPage), nextCursor: "stale-cursor", total: 3 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      if (url.includes("/api/runtime-tasks")) {
+        return jsonResponse(taskQueryResponse(initialTasks, "stale-cursor", 3));
       }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: "加载更多" })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("来源 Runtime"), "openclaw");
+    await user.selectOptions(screen.getByLabelText("状态"), "in_progress");
 
-    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    });
     expect(screen.getByText("已显示 1 / 1")).toBeInTheDocument();
   });
 
-  it("opens Runtime Fleet and renders the fixture runtime inventory", async () => {
+  it("loads Runs from the backend task query API when available", async () => {
+    const user = userEvent.setup();
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) {
+        return jsonResponse(taskQueryResponse([
+          task({
+            assignee: { name: "main" },
+            channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+            creator: { name: "PMO" },
+            description: "PMO asked OpenClaw to inspect queue handoff.",
+            id: "task-query-1",
+            lastSeenAt: "2026-05-21T10:00:00.000Z",
+            status: "in_progress",
+            title: "AGTD-001 Fix queue handoff",
+          }),
+        ]));
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
+    expect(screen.getAllByText(/PMO asked OpenClaw/).length).toBeGreaterThan(0);
+  });
+
+  it("keeps current Runs filters when automatic refresh reloads backend query data", async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    const allTasks = [
+      task({
+        id: "fixture-todo-task",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
+        status: "todo",
+        title: "Unfiltered todo task",
+      }),
+      task({
+        id: "fixture-running-task",
+        lastSeenAt: "2026-05-21T08:00:00.000Z",
+        status: "in_progress",
+        title: "Filtered running task",
+      }),
+    ];
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      requests.push(url);
+      if (url.includes("/api/runtime-tasks") && url.includes("status=in_progress")) {
+        return jsonResponse(taskQueryResponse([allTasks[1]]));
+      }
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(allTasks));
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Runs" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: /Unfiltered todo task/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("状态"), { target: { value: "in_progress" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("button", { name: /Unfiltered todo task/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Filtered running task/ })).toBeInTheDocument();
+
+    requests.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+      await Promise.resolve();
+    });
+
+    expect(requests.at(-1)).toContain("status=in_progress");
+  });
+
+  it("does not fall back to legacy work-state endpoints when Runs task query fails", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse({ error: "backend_unavailable" }, 503);
+      return jsonResponse({ error: "legacy endpoint should not be requested" }, 500);
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchMock).mock.calls.some((call) => requestUrl(call[0]).includes("/api/runtime-tasks"))).toBe(true);
+    });
+    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
+      requestUrl(call[0]).includes("/api/runtime-work-state/latest"),
+    )).toBe(false);
+    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
+      requestUrl(call[0]).includes("/api/runtime-work-items"),
+    )).toBe(false);
+  });
+
+  it("filters Runs cards by manual time range without quick-range state", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      task({
+        id: "fixture-old-task",
+        lastSeenAt: "2026-05-20T10:00:00.000Z",
+        status: "done",
+        title: "Old task",
+      }),
+      task({
+        id: "fixture-new-task",
+        lastSeenAt: "2026-05-21T12:00:00.000Z",
+        status: "done",
+        title: "New task",
+      }),
+    ];
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(tasks));
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+    expect(await screen.findByRole("button", { name: /Old task/ })).toBeInTheDocument();
+    const lanes = screen.getByLabelText("任务泳道");
+    expect(within(lanes).getAllByText("Old task").length).toBeGreaterThan(0);
+    expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("开始时间")).toBeInTheDocument();
+    expect(screen.getByLabelText("结束时间")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /选择时间范围/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "清除时间" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-05-21T00:00:00" } });
+    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-05-21T23:59:59" } });
+
+    await waitFor(() => {
+      expect(within(lanes).queryByText("Old task")).not.toBeInTheDocument();
+    });
+    expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
+  });
+
+  it("opens Runtime Fleet and renders the OpenClaw-first fixture data", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -559,7 +601,7 @@ describe("Console shell", () => {
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
     expect(within(screen.getByLabelText("设备")).getByText("fixture-mac")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Runtime 列表" })).getByText("OpenClaw Gateway")).toBeInTheDocument();
-    expect(within(screen.getByRole("table", { name: "Agent 列表" })).getByText("tester")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Agent 列表" })).getByText("main")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "所属设备" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "归属 Runtime" })).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader", { name: "最近同步" }).length).toBeGreaterThanOrEqual(2);
@@ -567,36 +609,13 @@ describe("Console shell", () => {
     expect(within(screen.getByLabelText("Runtime")).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "全部",
       "OpenClaw",
-      "Slock",
     ]);
     expect(screen.queryByLabelText("可用性")).not.toBeInTheDocument();
   });
 
   it("loads Runtime Fleet from the backend query API when available", async () => {
     const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/devices/fixture-mac/collection-health")) {
-        return new Response(JSON.stringify(collectionHealthResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
+    installRuntimeFleetFetch();
 
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
@@ -611,20 +630,13 @@ describe("Console shell", () => {
 
   it("renders Device status from diagnostics without using Runtime or Agent state", async () => {
     const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
+    const snapshot = fleetWithStatus("error", "error");
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return jsonResponse(runtimeFleetQueryResponse(backendSnapshot));
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return jsonResponse(emptyWorkStateQueryResponse());
-      }
-      if (url.includes("/api/devices/fixture-mac/collection-health")) {
-        return jsonResponse(collectionHealthResponse(backendSnapshot));
-      }
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-fleet")) return jsonResponse(runtimeFleetQueryResponse(snapshot));
+      if (url.includes("/api/devices/fixture-mac/collection-health")) return jsonResponse(collectionHealthResponse(snapshot));
       if (url.includes("/api/devices/fixture-mac/diagnostics")) {
-        return jsonResponse(deviceDiagnosticsResponse(backendSnapshot, "online", "在线"));
+        return jsonResponse(deviceDiagnosticsResponse(snapshot, "online", "在线"));
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
@@ -640,429 +652,30 @@ describe("Console shell", () => {
     expect(within(screen.getByLabelText("运行资产详情")).getByText("状态: 在线")).toBeInTheDocument();
   });
 
-  it("loads every backend work-item page before deriving Runtime Fleet operating status", async () => {
+  it("shows Runtime and Agent collection status without deriving working or idle from tasks", async () => {
     const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
-    const slockRuntime = backendSnapshot.runtimes.find((runtime) => runtime.kind === "slock");
-    if (!slockRuntime) throw new Error("missing Slock runtime fixture");
-    const secondPage: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: backendSnapshot.device.id,
-      workItems: [{
-        id: "second-page-slock-processing",
-        source: "slock",
-        externalId: "second-page-slock-processing",
-        title: "Slock work only visible on page two",
-        status: "in_progress",
-        runtimeId: slockRuntime.id,
-        agentId: "fixture-mac:slock:slock-daemon:agent:tester",
-        lastSeenAt: "2026-05-09T08:00:00.000Z",
-      }],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
-    const requests: string[] = [];
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      requests.push(url);
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items") && !url.includes("cursor=work-page-2")) {
-        return new Response(JSON.stringify({ items: [], total: 501, nextCursor: "work-page-2" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items") && url.includes("cursor=work-page-2")) {
-        return new Response(JSON.stringify({ ...workStateQueryResponse(secondPage), total: 501 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
+    const snapshot = fleetWithStatus("offline", "error");
+    installRuntimeFleetFetch(snapshot);
 
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     const runtimeTable = await screen.findByRole("table", { name: "Runtime 列表" });
-    expect(within(runtimeTable).getByRole("row", { name: /Slock daemon.*工作中/ })).toBeInTheDocument();
-    expect(requests.some((url) => url.includes("cursor=work-page-2"))).toBe(true);
-  });
+    const runtimeRow = within(runtimeTable).getByRole("row", { name: /OpenClaw Gateway/ });
+    expect(within(runtimeRow).getByText("离线")).toBeInTheDocument();
+    expect(within(runtimeRow).queryByText("工作中")).not.toBeInTheDocument();
 
-  it("does not fall back to the legacy latest inventory API when Runtime Fleet query fails", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify({ error: "backend_unavailable" }), { status: 503 });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify({ items: [], total: 0 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "legacy endpoint should not be requested" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    globalThis.fetch = fetchMock;
-
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(fetchMock).mock.calls.some((call) => call[0].toString().includes("/api/runtime-fleet"))).toBe(true);
-    });
-    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
-      call[0].toString().includes("/api/runtime-inventory/latest"),
-    )).toBe(false);
-  });
-
-  it("loads Runs from the backend work-item query API when available", async () => {
-    const user = userEvent.setup();
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify({
-          items: [{
-            agentId: "fixture-mac:slock:slock-daemon:agent:tester",
-            assignee: { kind: "agent", label: "tester" },
-            channelKind: "other",
-            channelLabel: "#AjisGTD",
-            conversationId: "fixture-mac:slock:slock-daemon:conversation:thread-1",
-            creator: { kind: "human", label: "PMO" },
-            description: "PMO asked the Slock agent to inspect queue handoff.",
-            externalId: "task-1",
-            id: "fixture-mac:slock:slock-daemon:work-item:task-1",
-            lastSeenAt: "2026-05-10T10:00:00.000Z",
-            runtimeId: "fixture-mac:slock:slock-daemon",
-            source: "slock",
-            stage: "processing",
-            status: "in_progress",
-            title: "AGTD-001 Fix queue handoff",
-          }],
-          total: 1,
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Runs" }));
-
-    expect(await screen.findByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
-  });
-
-  it("keeps current Runs filters when automatic refresh reloads backend query data", async () => {
-    vi.useFakeTimers();
-    const requests: string[] = [];
-    const allWorkItems: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [
-        {
-          id: "fixture-openclaw-card",
-          source: "openclaw",
-          externalId: "fixture-openclaw-card",
-          title: "OpenClaw unfiltered card",
-          status: "todo",
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-        {
-          id: "fixture-slock-card",
-          source: "slock",
-          externalId: "fixture-slock-card",
-          title: "Slock filtered card",
-          status: "in_progress",
-          lastSeenAt: "2026-05-09T08:00:00.000Z",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      requests.push(url);
-      if (url.includes("/api/runtime-work-items") && url.includes("source=slock")) {
-        return new Response(JSON.stringify(workStateQueryResponse({
-          ...allWorkItems,
-          workItems: [allWorkItems.workItems[1]],
-        })), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(allWorkItems)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Runs" }));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByRole("button", { name: /OpenClaw unfiltered card/ })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("来源 Runtime"), { target: { value: "slock" } });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-      await Promise.resolve();
-    });
-    expect(screen.queryByRole("button", { name: /OpenClaw unfiltered card/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Slock filtered card/ })).toBeInTheDocument();
-
-    requests.length = 0;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-      await Promise.resolve();
-    });
-
-    expect(requests.at(-1)).toContain("source=slock");
-  });
-
-  it("does not fall back to the legacy latest work-state API when Runs query fails", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify({ error: "backend_unavailable" }), { status: 503 });
-      }
-      return new Response(JSON.stringify({ error: "legacy endpoint should not be requested" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    globalThis.fetch = fetchMock;
-
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Runs" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(fetchMock).mock.calls.some((call) => call[0].toString().includes("/api/runtime-work-items"))).toBe(true);
-    });
-    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
-      call[0].toString().includes("/api/runtime-work-state/latest"),
-    )).toBe(false);
-  });
-
-  it("filters Runs cards by manual time range and exposes quick ranges", async () => {
-    const user = userEvent.setup();
-    const backendSnapshot: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [
-        {
-          id: "fixture-old-card",
-          source: "openclaw",
-          externalId: "fixture-old-card",
-          title: "Old card",
-          status: "done",
-          lastSeenAt: "2026-05-08T10:00:00.000Z",
-        },
-        {
-          id: "fixture-new-card",
-          source: "openclaw",
-          externalId: "fixture-new-card",
-          title: "New card",
-          status: "done",
-          lastSeenAt: "2026-05-09T12:00:00.000Z",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByRole("button", { name: /Old card/ })).toBeInTheDocument();
-    const lanes = screen.getByLabelText("工作态泳道");
-    expect(within(lanes).getAllByText("Old card").length).toBeGreaterThan(0);
-    expect(within(lanes).getAllByText("New card").length).toBeGreaterThan(0);
-    expect(screen.queryByLabelText("开始时间")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("结束时间")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "清除时间" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /选择时间范围/ }));
-    expect(screen.getByRole("button", { name: "今天" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "清除时间" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "日历中选择" }));
-    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-05-09T00:00:00" } });
-    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-05-09T23:59:59" } });
-    await user.click(screen.getByRole("button", { name: "立即查询" }));
-
-    expect(within(lanes).queryByText("Old card")).not.toBeInTheDocument();
-    expect(within(lanes).getAllByText("New card").length).toBeGreaterThan(0);
-
-    await user.click(screen.getByRole("button", { name: /选择时间范围/ }));
-    await user.click(screen.getByRole("button", { name: "清除时间" }));
-    expect(within(lanes).getAllByText("Old card").length).toBeGreaterThan(0);
-    expect(within(lanes).getAllByText("New card").length).toBeGreaterThan(0);
-  });
-
-  it("shows Runtime operating status from the latest Agent work state", async () => {
-    const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
-    const workState: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: backendSnapshot.device.id,
-      workItems: [
-        {
-          id: "fixture-slock-task-1",
-          source: "slock",
-          externalId: "fixture-slock-task-1",
-          title: "Example in progress card",
-          status: "in_progress",
-          runtimeId: "fixture-mac:slock:slock-daemon",
-          agentId: "fixture-mac:slock:slock-daemon:agent:tester",
-        },
-      ],
-      conversations: [],
-      executions: [],
-      capabilities: [],
-    };
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(workState)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-
-    const runtimeTable = await screen.findByRole("table", { name: "Runtime 列表" });
-    expect(within(runtimeTable).getByRole("columnheader", { name: "状态" })).toBeInTheDocument();
-    const slockRuntimeRow = within(runtimeTable).getByRole("row", { name: /Slock daemon/ });
-    expect(within(slockRuntimeRow).getByText("工作中")).toBeInTheDocument();
-
-    await user.click(slockRuntimeRow);
-    const detail = screen.getByRole("complementary", { name: "运行资产详情" });
-    expect(within(detail).getByText("状态: 工作中")).toBeInTheDocument();
-    expect(within(detail).queryByText(/可用性/)).not.toBeInTheDocument();
-  });
-
-  it("shows Slock Agent status and workload statistics from task-board work state", async () => {
-    const user = userEvent.setup();
-    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
-    const workState: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: backendSnapshot.device.id,
-      workItems: [
-        {
-          id: "fixture-slock-task-running",
-          source: "slock",
-          externalId: "fixture-slock-task-running",
-          title: "Running Slock board card",
-          status: "in_progress",
-          runtimeId: "fixture-mac:slock:slock-daemon",
-          agentId: "fixture-mac:slock:slock-daemon:agent:workspace-owner",
-          assignee: { kind: "agent", label: "tester" },
-          conversationId: "fixture-mac:slock:slock-daemon:conversation:thread-running",
-        },
-        {
-          id: "fixture-slock-task-queued",
-          source: "slock",
-          externalId: "fixture-slock-task-queued",
-          title: "Queued Slock board card",
-          status: "todo",
-          runtimeId: "fixture-mac:slock:slock-daemon",
-          agentId: "fixture-mac:slock:slock-daemon:agent:workspace-owner",
-          assignee: { kind: "agent", label: "tester" },
-          conversationId: "fixture-mac:slock:slock-daemon:conversation:thread-queued",
-        },
-      ],
-      conversations: [
-        {
-          id: "fixture-mac:slock:slock-daemon:conversation:thread-running",
-          source: "slock",
-          externalId: "thread-running",
-          status: "open",
-          runtimeId: "fixture-mac:slock:slock-daemon",
-          agentId: "fixture-mac:slock:slock-daemon:agent:workspace-owner",
-          workItemId: "fixture-slock-task-running",
-        },
-        {
-          id: "fixture-mac:slock:slock-daemon:conversation:thread-queued",
-          source: "slock",
-          externalId: "thread-queued",
-          status: "closed",
-          runtimeId: "fixture-mac:slock:slock-daemon",
-          agentId: "fixture-mac:slock:slock-daemon:agent:workspace-owner",
-          workItemId: "fixture-slock-task-queued",
-        },
-      ],
-      executions: [],
-      capabilities: [],
-    };
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(workStateQueryResponse(workState)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
+    await user.click(runtimeRow);
+    const runtimeDetail = screen.getByRole("complementary", { name: "运行资产详情" });
+    expect(within(runtimeDetail).getByText("状态: 离线")).toBeInTheDocument();
+    expect(within(runtimeDetail).getByText("全部任务: 2")).toBeInTheDocument();
+    expect(within(runtimeDetail).getByText("待处理: 1")).toBeInTheDocument();
+    expect(within(runtimeDetail).getByText("进行中: 1")).toBeInTheDocument();
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
-    const testerRow = within(agentTable).getByRole("row", { name: /tester/ });
-    expect(within(testerRow).getByText("工作中")).toBeInTheDocument();
-
-    await user.click(testerRow);
-
-    const detail = screen.getByRole("complementary", { name: "运行资产详情" });
-    expect(within(detail).getByRole("heading", { name: "tester" })).toBeInTheDocument();
-    expect(within(detail).getByText("状态: 工作中")).toBeInTheDocument();
-    expect(within(detail).getByText("活跃任务: 1")).toBeInTheDocument();
-    expect(within(detail).getByText("队列深度: 1")).toBeInTheDocument();
-    expect(within(detail).getByText("活跃会话: 1")).toBeInTheDocument();
-    expect(within(detail).getByText("历史会话: 2")).toBeInTheDocument();
+    const agentRow = within(agentTable).getByRole("row", { name: /main/ });
+    expect(within(agentRow).getByText("异常")).toBeInTheDocument();
+    expect(within(agentRow).queryByText("工作中")).not.toBeInTheDocument();
   });
 
   it("filters Runtime Fleet agents by search and opens agent details", async () => {
@@ -1071,62 +684,48 @@ describe("Console shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
     expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("搜索设备、Runtime、Agent 或渠道"), "tester");
+    await user.type(screen.getByPlaceholderText("搜索设备、Runtime、Agent 或任务"), "main");
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
-    expect(within(agentTable).getByText("tester")).toBeInTheDocument();
-    expect(within(agentTable).queryByText("main")).not.toBeInTheDocument();
+    expect(within(agentTable).getByText("main")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("row", { name: /tester/ }));
+    await user.click(screen.getByRole("row", { name: /main/ }));
 
     const detail = screen.getByRole("complementary", { name: "运行资产详情" });
-    expect(within(detail).getByRole("heading", { name: "tester" })).toBeInTheDocument();
+    expect(within(detail).getByRole("heading", { name: "main" })).toBeInTheDocument();
     expect(within(detail).getByText("归属关系")).toBeInTheDocument();
-    expect(within(detail).getByText("所属 Runtime: Slock daemon")).toBeInTheDocument();
+    expect(within(detail).getByText("所属 Runtime: OpenClaw Gateway")).toBeInTheDocument();
     expect(within(detail).getByText("所属设备: fixture-mac")).toBeInTheDocument();
-    expect(within(detail).getByText("关联渠道")).toBeInTheDocument();
-    expect(within(detail).getByText("Slock")).toBeInTheDocument();
-    expect(within(detail).queryByText("slock: tester")).not.toBeInTheDocument();
-    expect(within(detail).queryByText("事实")).not.toBeInTheDocument();
-    expect(within(detail).queryByText("可用渠道")).not.toBeInTheDocument();
+    expect(within(detail).getByText("任务统计")).toBeInTheDocument();
+    expect(within(detail).getByText("全部任务: 2")).toBeInTheDocument();
+    expect(within(detail).queryByText("关联渠道")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("origin")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("sourceRefs")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("load")).not.toBeInTheDocument();
   });
 
-  it("renders Runtime Fleet agents with multiple same-kind channel bindings without duplicate key warnings", async () => {
+  it("strips legacy Agent channel fields from Runtime Fleet without duplicate key warnings", async () => {
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const backendSnapshot: RuntimeInventorySnapshot = {
-      ...(fixtureSnapshot as RuntimeInventorySnapshot),
-      agents: (fixtureSnapshot as RuntimeInventorySnapshot).agents.map((agent) => {
-        if (agent.id !== "fixture-mac:openclaw:gateway-18789:agent:main") return agent;
-        return {
-          ...agent,
-          channelBindings: [
-            { kind: "dingtalk", label: "DingTalk default", externalId: "default", status: "enabled" },
-            { kind: "dingtalk", label: "DingTalk backup", externalId: "backup", status: "enabled" },
-          ],
-        };
-      }),
+    const backendSnapshot = {
+      ...fleetSnapshot,
+      agents: fleetSnapshot.agents.map((agent) => ({
+        ...agent,
+        channelBindings: [
+          { externalId: "default", kind: "dingtalk", label: "DingTalk default", status: "enabled" },
+          { externalId: "backup", kind: "dingtalk", label: "DingTalk backup", status: "enabled" },
+        ],
+        load: { activeTasks: 1 },
+        origin: { source: "legacy" },
+        sourceRefs: [{ kind: "legacy", value: "legacy-ref" }],
+      })),
     };
-    globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
-      if (url.includes("/api/runtime-fleet")) {
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(backendSnapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
-    }) as unknown as typeof fetch;
+    installRuntimeFleetFetch(backendSnapshot as RuntimeFleetSnapshot);
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    expect(await screen.findByText("DingTalk backup")).toBeInTheDocument();
+    await screen.findByText("main");
+    expect(screen.queryByText("DingTalk backup")).not.toBeInTheDocument();
 
     const duplicateKeyWarning = consoleError.mock.calls.some((call) =>
       call.some((argument) => String(argument).includes("Encountered two children with the same key")),
@@ -1134,33 +733,46 @@ describe("Console shell", () => {
     expect(duplicateKeyWarning).toBe(false);
   });
 
+  it("does not fall back to the legacy latest inventory API when Runtime Fleet query fails", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-fleet")) return jsonResponse({ error: "backend_unavailable" }, 503);
+      return jsonResponse({ error: "legacy endpoint should not be requested" }, 500);
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchMock).mock.calls.some((call) => requestUrl(call[0]).includes("/api/runtime-fleet"))).toBe(true);
+    });
+    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
+      requestUrl(call[0]).includes("/api/runtime-inventory/latest"),
+    )).toBe(false);
+  });
+
   it("automatically refreshes Runtime Fleet query data while mounted", async () => {
     vi.useFakeTimers();
     let latestRequests = 0;
     globalThis.fetch = vi.fn(async (input) => {
-      const url = input.toString();
+      const url = requestUrl(input);
       if (url.includes("/api/runtime-fleet")) {
         latestRequests += 1;
-        const snapshot: RuntimeInventorySnapshot = {
-          ...(fixtureSnapshot as RuntimeInventorySnapshot),
-          device: {
-            ...(fixtureSnapshot as RuntimeInventorySnapshot).device,
-            lastSeenAt: `2026-05-08T08:00:0${latestRequests}.000Z`,
-          },
-          observedAt: `2026-05-08T08:00:0${latestRequests}.000Z`,
+        const snapshot: RuntimeFleetSnapshot = {
+          ...fleetSnapshot,
+          devices: fleetSnapshot.devices.map((device) => ({
+            ...device,
+            lastSeenAt: `2026-05-21T08:00:0${latestRequests}.000Z`,
+          })),
+          observedAt: `2026-05-21T08:00:0${latestRequests}.000Z`,
         };
-        return new Response(JSON.stringify(runtimeFleetQueryResponse(snapshot)), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return jsonResponse(runtimeFleetQueryResponse(snapshot));
       }
-      if (url.includes("/api/runtime-work-items")) {
-        return new Response(JSON.stringify(emptyWorkStateQueryResponse()), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      if (url.includes("/api/devices/fixture-mac/collection-health")) return jsonResponse(collectionHealthResponse(fleetSnapshot));
+      if (url.includes("/api/devices/fixture-mac/diagnostics")) return jsonResponse(deviceDiagnosticsResponse(fleetSnapshot));
+      return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
     render(<App />);
 
@@ -1180,5 +792,4 @@ describe("Console shell", () => {
     expect(latestRequests).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/上次刷新/)).toBeInTheDocument();
   });
-
 });

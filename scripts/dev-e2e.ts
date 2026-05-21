@@ -31,9 +31,8 @@ const backend = createLorumeBackendServer({
     },
   },
   host: "127.0.0.1",
-  inventorySnapshotPath: path.join(e2eSnapshotRoot, "runtime-inventory", "latest.json"),
+  deviceStateSnapshotPath: path.join(e2eSnapshotRoot, "runtime-device-state", "latest.json"),
   port: backendPort,
-  workStateSnapshotPath: path.join(e2eSnapshotRoot, "runtime-work-state", "latest.json"),
 });
 await backend.listen();
 process.stdout.write(`Lorume E2E backend listening on ${backend.url}\n`);
@@ -121,10 +120,6 @@ async function resetDatabase(connectionString: string): Promise<void> {
         organizations,
         users,
         collector_ingestions,
-        channel_bindings,
-        work_executions,
-        work_items,
-        work_conversations,
         agents,
         runtimes,
         devices

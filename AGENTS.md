@@ -4,17 +4,17 @@ Root guide for coding agents working in this repository. This file is operationa
 
 ## Project State
 
-Lorume is currently in product definition and early engineering setup. The repository is becoming the control plane for operating an Agent Network. It now has a Runtime Fleet page with read-only Agent Skill probing, a read-only Runs / Work Board page, top-right Operations and Notifications utility drawers, organization settings for invitations, collector-backed runtime collection that is converging on a `Device / Runtime / Agent / Task` model, organization-based auth/access, a tokenized Glacier Premium Precision UI system, and a standalone backend with Postgres-backed query APIs, production-like Docker / Nginx deployment files, an initial ECS deployment at `lorume.com`, plus an outbound WebSocket device control channel. It does not yet have centralized Skill management, Agent migration, multi-device orchestration, or runtime execution control.
+Lorume is currently in product definition and early engineering setup. The repository is becoming the control plane for operating an Agent Network. It now has a Runtime Fleet page with read-only Agent Skill probing, a read-only Runs / Work Board page, top-right Operations and Notifications utility drawers, organization settings for invitations, collector-backed runtime collection using the current `Device / Runtime / Agent / Task` model, organization-based auth/access, a tokenized Glacier Premium Precision UI system, and a standalone backend with Postgres-backed query APIs, production-like Docker / Nginx deployment files, an initial ECS deployment at `lorume.com`, plus an outbound WebSocket device control channel for connection health. It does not yet have centralized Skill management, Agent migration, multi-device orchestration, or runtime execution control.
 
 Current source of truth:
 
 - `README.md`: public project overview and operating model.
 - `docs/product/ui-design.md`: product object model, information architecture, pages, flows, and implementation priorities.
 - `docs/product/design/README.md`: design system source of truth for visual language, tokens, typography, color, layout, components, icons, interaction, content, responsive behavior, page patterns, and UI review harness.
-- `docs/product/runtime-device-registration-spec.md`: TinySpec for current device registration, collector, runtime adapters, and runtime inventory snapshots.
+- `docs/product/runtime-device-registration-spec.md`: TinySpec for current device registration, collector, runtime adapters, and `device_state` snapshots.
 - `docs/product/runtime-fleet-page-spec.md`: TinySpec for the first Runtime Fleet management page.
-- `docs/product/runtime-work-state-probe.md`: platform probe matrix for work items, conversations, and runtime executions.
-- `docs/product/runtime-listening-acceptance-spec.md`: TinySpec for whether OpenClaw, Multica, and Slock listening is sufficient for Runs and future task management.
+- `docs/product/runtime-task-probe.md`: TinySpec for OpenClaw-first Task probing and adapter-to-Task mapping.
+- `docs/product/runtime-task-acceptance-spec.md`: TinySpec for Runs / Work Board Task acceptance.
 - `docs/product/backend-service-spec.md`: TinySpec for the local-first formal backend service, Postgres persistence, collector ingestion, and backend query APIs.
 - `docs/product/cli-device-capability-spec.md`: current rules for the deterministic local `lorume` CLI device capability atoms.
 - `docs/product/agent-skill-probing-spec.md`: current rules for read-only target-local Agent Skill probing metadata, statuses, APIs, and UI boundaries.
@@ -31,22 +31,18 @@ Current source of truth:
 - `src/HomePage.tsx`: public homepage entry for the current Lorume value proposition and implemented capabilities.
 - `src/catalog/catalog-object.ts`: initial TypeScript source of truth for Catalog Object shape.
 - `src/catalog/catalog-seed.ts`: first reviewable Catalog Object seed data for future object directory work.
-- `src/runtime/runtime-normalize.ts`: TypeScript source of truth for runtime inventory normalization.
-- `src/runtime/runtime-work-state.ts`: TypeScript source of truth for work item, conversation, execution, and observation capability models.
-- `src/runtime/runtime-work-state-adapters.ts`: adapter normalization for OpenClaw, Multica, and Slock work-state inputs.
-- `src/runtime/runtime-work-state-query.ts`: frontend-facing query model for the read-only Runs / Work Board page.
+- `src/runtime/runtime-model.ts`: TypeScript source of truth for the current `Device / Runtime / Agent / Task` model and `device_state` normalization.
 - `src/runtime/runtime-work-query-api.ts`: frontend API adapter for backend Runs query responses and cursor pagination.
 - `src/runtime/runtime-data-source.ts`: source-of-truth helper for whether fixture fallback is allowed in a given build mode.
-- `src/runtime/runtime-listening-acceptance.ts`: TypeScript source of truth for source-specific listening readiness and Runs lane policy.
 - `src/runtime/runtime-collection-health.ts`: TypeScript source of truth for product-level collection diagnostics derived from collector ingestion records and folded into Runtime Fleet object status.
 - `src/errors/error-catalog.ts`: shared source of truth for normalized error codes and user-readable messages.
 - `src/logging/structured-logger.ts`: shared backend structured logger with secret redaction rules.
 - `src/runtime/agent-skill-probe.ts`: TypeScript source of truth for read-only Agent Skill probe metadata normalization and local file-entry parsing.
-- `src/runtime/runtime-inventory-query.ts`: query and detail model for the Runtime Fleet page.
-- `src/server/runtime-inventory-store.ts`: internal snapshot and command state store used for collector validation and the device control channel.
-- `src/server/postgres-store.ts`: Postgres-backed repository for normalized inventory and work-state ingestion.
-- `src/server/runtime-control-channel.ts`: in-memory device control channel for connection, heartbeat, and refresh command lifecycle.
-- `src/server/runtime-http-api.ts`: backend HTTP API for collector ingestion, Runtime Fleet / Runs query endpoints, refresh commands, Agent Skill probe request/snapshot endpoints, and ingestion diagnostics.
+- `src/runtime/runtime-fleet-query.ts`: query and detail model for the Runtime Fleet page.
+- `src/server/runtime-device-state-store.ts`: internal device_state fallback snapshot store plus device connection and Skill probe state for local tests/dev backend.
+- `src/server/postgres-store.ts`: Postgres-backed repository for normalized `device_state` ingestion and Device / Runtime / Agent / Task queries.
+- `src/server/runtime-control-channel.ts`: in-memory device control channel for connection and heartbeat lifecycle.
+- `src/server/runtime-http-api.ts`: backend HTTP API for collector ingestion, Runtime Fleet / Runs query endpoints, Agent Skill probe snapshot endpoints, and ingestion diagnostics.
 - `src/backend/backend-server.ts`: standalone local-first backend service that composes auth, Operation / Notification, Runtime / Runs HTTP APIs, in-process Operation runner, and the device WebSocket control channel outside Vite.
 - `src/backend/device-installer-http-api.ts`: public secret-free installer and device package download API used by one-line device registration commands.
 - `src/ui/PixelLogo.tsx` and `public/favicon.svg`: shared brand mark source for app chrome and browser tab metadata.
@@ -56,7 +52,7 @@ Current source of truth:
 - `scripts/check-deploy-config.mjs`: production-like deploy config smoke check.
 - `scripts/smoke-production.mjs`: deployed environment smoke check for public health, readiness, installer assets, and optional authenticated Runtime / Runs read paths.
 - `scripts/lorume.mjs`: deterministic local CLI for device identity, snapshot-backed runtime listing, authorized connector status, and safe explicit file copy.
-- `scripts/lorume-runtime-adapters.mjs`: CLI-owned runtime adapter module used by `lorume collect device-state` and legacy `collect inventory` / `collect work-state` compatibility commands.
+- `scripts/lorume-runtime-adapters.mjs`: CLI-owned runtime adapter module used by `lorume collect device-state`.
 - `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml`: production-like local deployment shape before ECS.
 - `scripts/lorume-device-collector.mjs`: device-side collector / Device Agent script.
 - `scripts/install-device-collector.sh`: local-path collector installer used directly in development and indirectly by the remote installer wrapper.
@@ -114,17 +110,14 @@ Current spec and harness mapping:
 | Surface | Spec / Intent | Harness |
 |---|---|---|
 | Catalog Object model | `src/catalog/catalog-object.ts` | `src/catalog/catalog-query.test.ts`, `npm run check:quick` |
-| Runtime device registration | `docs/product/runtime-device-registration-spec.md`, `src/runtime/runtime-normalize.ts`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs`, `scripts/lorume-device-collector.mjs`, `scripts/install-device-collector.sh` | `src/runtime/runtime-normalize.test.ts`, `src/runtime/device-collector-script.test.ts`, `src/cli/lorume-cli.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:backend:e2e` |
-| Runtime work state model | `src/runtime/runtime-work-state.ts`, `docs/product/runtime-work-state-probe.md` | `src/runtime/runtime-work-state.test.ts`, `npm run check:runtime` |
-| Runtime work state adapters and board query | `src/runtime/runtime-work-state-adapters.ts`, `src/runtime/runtime-work-state-query.ts`, `docs/product/runtime-work-state-probe.md` | `src/runtime/runtime-work-state-adapters.test.ts`, `src/runtime/runtime-work-state-query.test.ts`, `npm run check:runtime` |
-| Runtime work state collector | `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs`, `scripts/lorume-device-collector.mjs`, `docs/product/runtime-work-state-probe.md` | `src/runtime/device-collector-script.test.ts`, `src/cli/lorume-cli.test.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend` |
+| Runtime device registration and `device_state` collector | `docs/product/runtime-device-registration-spec.md`, `docs/product/runtime-task-probe.md`, `src/runtime/runtime-model.ts`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs`, `scripts/lorume-device-collector.mjs`, `scripts/install-device-collector.sh` | `src/runtime/device-collector-script.test.ts`, `src/cli/lorume-cli.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:backend:e2e` |
 | CLI device capability atoms | `docs/product/cli-device-capability-spec.md`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs` | `src/cli/lorume-cli.test.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:quick` |
 | Agent Skill probing | `docs/product/agent-skill-probing-spec.md`, `src/runtime/agent-skill-probe.ts`, `src/server/runtime-http-api.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/agent-skill-probe.test.ts`, `src/server/runtime-http-api-skill-probe.test.ts`, `src/runtime/RuntimeFleetPage.skill-probe.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:runtime`, `npm run check:backend`, `npm run check:quick`, `npm run check:e2e` |
-| Runtime listening acceptance | `docs/product/runtime-listening-acceptance-spec.md`, `src/runtime/runtime-listening-acceptance.ts`, `docs/product/runtime-work-state-probe.md` | `src/runtime/runtime-listening-acceptance.test.ts`, `src/runtime/runtime-work-state-adapters.test.ts`, `npm run check:runtime` |
-| Runs / Work Board page | `src/runtime/RuntimeWorkBoardPage.tsx`, `src/runtime/runtime-work-query-api.ts`, `src/runtime/runtime-data-source.ts`, `docs/product/runtime-work-state-probe.md` | `src/App.test.tsx`, `src/runtime/runtime-work-query-api.test.ts`, `src/runtime/runtime-data-source.test.ts`, `e2e/runtime-work-board.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
-| Runtime Fleet page | `docs/product/runtime-fleet-page-spec.md`, `src/runtime/runtime-inventory-query.ts`, `src/runtime/runtime-collection-health.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/runtime-inventory-query.test.ts`, `src/runtime/runtime-collection-health.test.ts`, `src/App.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
+| Runtime Task acceptance | `docs/product/runtime-task-acceptance-spec.md`, `docs/product/runtime-task-probe.md`, `src/runtime/runtime-work-query-api.ts` | `src/runtime/runtime-work-query-api.test.ts`, `e2e/runtime-work-board.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
+| Runs / Work Board page | `src/runtime/RuntimeWorkBoardPage.tsx`, `src/runtime/runtime-work-query-api.ts`, `src/runtime/runtime-data-source.ts`, `docs/product/runtime-task-acceptance-spec.md` | `src/App.test.tsx`, `src/runtime/runtime-work-query-api.test.ts`, `src/runtime/runtime-data-source.test.ts`, `e2e/runtime-work-board.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
+| Runtime Fleet page | `docs/product/runtime-fleet-page-spec.md`, `src/runtime/runtime-fleet-query.ts`, `src/runtime/runtime-collection-health.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/runtime-fleet-query.test.ts`, `src/runtime/runtime-collection-health.test.ts`, `src/App.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
 | Normalized errors and structured logs | `src/errors/error-catalog.ts`, `src/logging/structured-logger.ts`, `docs/product/backend-service-spec.md`, `docs/product/runtime-device-registration-spec.md` | `src/errors/error-catalog.test.ts`, `src/logging/structured-logger.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `npm run check:backend`, `npm run check:runtime`, `npm run check:quick` |
-| Runtime snapshot and control backend | `docs/product/runtime-device-registration-spec.md`, `src/runtime/runtime-collection-health.ts`, `src/server/runtime-inventory-store.ts`, `src/server/runtime-control-channel.ts`, `src/server/runtime-http-api.ts`, `src/backend/backend-server.ts` | `src/runtime/runtime-collection-health.test.ts`, `src/server/runtime-inventory-store.test.ts`, `src/server/runtime-control-channel.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:backend`, `npm run check:backend:e2e` |
+| Runtime snapshot and control backend | `docs/product/runtime-device-registration-spec.md`, `src/runtime/runtime-collection-health.ts`, `src/server/runtime-device-state-store.ts`, `src/server/runtime-control-channel.ts`, `src/server/runtime-http-api.ts`, `src/backend/backend-server.ts` | `src/runtime/runtime-collection-health.test.ts`, `src/server/runtime-device-state-store.test.ts`, `src/server/runtime-control-channel.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:backend`, `npm run check:backend:e2e` |
 | Backend service formalization | `docs/product/backend-service-spec.md`, `src/backend/backend-server.ts`, `src/server/postgres-store.ts`, `db/migrations/`, `scripts/db-migrate.mjs`, `scripts/dev-e2e.ts`, `scripts/dev-backend-e2e.ts`, `scripts/smoke-production.mjs`, `vite.backend.config.ts`, `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml` | `src/backend/backend-server.test.ts`, `src/backend/dev-e2e-config.test.ts`, `src/server/db-migrate.test.ts`, `src/server/postgres-store.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `e2e/runtime-backend-api.spec.ts`, `scripts/check-deploy-config.mjs`, `npm run check:backend:standalone`, `npm run check:db`, `npm run check:backend`, `npm run check:backend:e2e`, `npm run check:deploy`, `npm run smoke:production` |
 | Auth and access | `docs/product/auth-and-access-spec.md`, `src/auth/`, `db/migrations/` | `src/auth/auth-crypto.test.ts`, `src/auth/auth-store.test.ts`, `src/auth/auth-http-api.test.ts`, `src/server/runtime-http-api.test.ts`, `npm run check:backend`, `npm run check:db`, `npm run check:quick` |
 | Operation and Job Runner persistence/API | `docs/product/operation-job-runner-spec.md`, `db/migrations/0005_operations_notifications.sql`, `db/migrations/0009_agent_skill_probing.sql`, `src/operations/operation-store.ts`, `src/operations/operation-http-api.ts`, `src/operations/job-runner.ts` | `src/operations/operation-store.test.ts`, `src/operations/operation-http-api.test.ts`, `src/operations/job-runner.test.ts`, `src/backend/backend-server.test.ts`, `src/server/db-migrate.test.ts`, `npm run check:backend`, `npm run check:db` |
@@ -159,7 +152,7 @@ Keep the test layout simple and tied to what each harness can prove:
 
 ## Agent-Ready Growth
 
-Lorume should become agent-ready by growing only the infrastructure the project actually needs. The current layer is **Runtime Fleet + Agent Skill Probing + Runs Work-State + Operations / Notifications + Production-Like Backend Harness Ready** for the first frontend/runtime surfaces: root guide, TinySpecs, TypeScript object models, standalone backend, Postgres-backed query APIs, backend bundle and Docker/Nginx config checks, outbound device control channel, collector snapshot harnesses, unit/component tests, browser layout harness, and one full verification entry point.
+Lorume should become agent-ready by growing only the infrastructure the project actually needs. The current layer is **Runtime Fleet + Agent Skill Probing + Runs Task Board + Operations / Notifications + Production-Like Backend Harness Ready** for the first frontend/runtime surfaces: root guide, TinySpecs, TypeScript object models, standalone backend, Postgres-backed query APIs, backend bundle and Docker/Nginx config checks, outbound device control channel, collector snapshot harnesses, unit/component tests, browser layout harness, and one full verification entry point.
 
 Extend this guide and `./scripts/verify.sh` only when a real project surface appears:
 
@@ -202,7 +195,7 @@ Current harness scripts:
 | `npm run check:backend:e2e` | Playwright API-only backend harness using isolated Postgres, authenticated user APIs, installer assets, device-token collector ingestion, real collector-process upload, backend query APIs, and heartbeat-only device WebSocket. | Backend auth/API contracts, device registration token flow, installer command assets, collector ingestion/query wiring, or device WebSocket connection-health changes. |
 | `npm run check:db` | Starts local Postgres, runs migration/repository integration tests against temporary databases, and drops them. | Database schema, migration runner, Postgres repository, Docker Compose, or Postgres dependency changes. |
 | `npm run check:backend` | Focused local backend store, control channel, HTTP API, Agent Skill probe API, and collector POST / WebSocket harness. | Runtime snapshot API, backend API handler, Agent Skill probe snapshot paths, collector posting, device WebSocket heartbeat lifecycle, or backend persistence changes. |
-| `npm run check:runtime` | Focused Runtime / Device Registration and work-state unit/script harness. | Runtime inventory model, work-state model, collector, installer, fixture, probe adapter, or query changes. |
+| `npm run check:runtime` | Focused Runtime / Device Registration and `device_state` unit/script harness. | Device / Runtime / Agent / Task model, collector, installer, fixture, OpenClaw adapter, or query changes. |
 | `npm run check:quick` | TypeScript typecheck plus Vitest unit/component tests. | Catalog model, Runtime Fleet query logic, React behavior, labels, or seed data changes. |
 | `npm run check:build` | Production TypeScript/Vite build. | Frontend, dependency, Vite, TypeScript, or package changes. |
 | `npm run build:backend` | Bundle the standalone backend to `dist/backend/backend-server.mjs`. | Backend entrypoint, server imports, or production-like runtime changes. |

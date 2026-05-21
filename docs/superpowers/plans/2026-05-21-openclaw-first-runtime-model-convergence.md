@@ -178,7 +178,7 @@ Runtime and Agent activity such as "working" or "idle" must be derived from Task
 
 ### Adapter Allowlist
 
-Add a single adapter gate used by both inventory and task collection.
+Add a single adapter gate used by current `device_state` collection.
 
 | Setting | Behavior |
 |---|---|
@@ -222,18 +222,18 @@ If OpenClaw has multiple raw evidence ids for the same task, adapter code must s
 |---|---|
 | `docs/product/runtime-device-registration-spec.md` | Define the four-object device-state model, OpenClaw-first adapter scope, and no backend-triggered collection. |
 | `docs/product/runtime-fleet-page-spec.md` | Define Runtime Fleet display around collection status and derived task counts. |
-| `docs/product/runtime-work-state-probe.md` | Mark old `work-state` semantics as legacy and introduce `Task` as the only product work object. |
+| `docs/product/runtime-task-probe.md` | Define current OpenClaw-first Task probing and make `Task` the only product work object. |
 | `docs/product/cli-device-capability-spec.md` | Define `lorume collect device-state --json` and OpenClaw-only default adapter behavior. |
 | `AGENTS.md` | Update agent rules so future work preserves the four-object model and OpenClaw-first migration boundary. |
-| `src/runtime/runtime-normalize.ts` | Replace broad runtime/agent inventory types with four-object model types or re-export from focused model files. |
-| `src/runtime/runtime-inventory-query.ts` | Build Runtime Fleet view from `Device`, `Runtime`, `Agent`, and derived Task counts. |
-| `src/runtime/runtime-work-state.ts` | Collapse old work item/conversation/execution model into `Task` and keep only compatibility conversion for existing callers during migration. |
+| `src/runtime/runtime-model.ts` | Replace broad runtime/agent state types with four-object model types or re-export from focused model files. |
+| `src/runtime/runtime-fleet-query.ts` | Build Runtime Fleet view from `Device`, `Runtime`, `Agent`, and derived Task counts. |
+| `src/runtime/runtime-work-query-api.ts` | Parse backend Task query responses into the current Runs view model. |
 | `src/runtime/runtime-work-query-api.ts` | Parse backend Task query responses into `Task` view data. |
 | `src/runtime/RuntimeFleetPage.tsx` | Remove status labels based on working/idle assets; use collection status and task counts. |
 | `src/runtime/RuntimeWorkBoardPage.tsx` | Render Task arrays grouped by `Task.status` in BFF/UI, not collector-provided lanes. |
 | `scripts/lorume-runtime-adapters.mjs` | Add adapter allowlist, remove Claude collection, and output OpenClaw `Runtime`, `Agent`, and `Task` in the new shape. |
 | `scripts/lorume-device-collector.mjs` | Call the new unified CLI collection path and POST the unified snapshot. |
-| `scripts/lorume.mjs` | Add `lorume collect device-state --json`; keep old `collect inventory` and `collect work-state` as explicit compatibility wrappers until all callers move. |
+| `scripts/lorume.mjs` | Support `lorume collect device-state --json`; old `collect inventory` and `collect work-state` return `unsupported_command`. |
 | `src/server/runtime-http-api.ts` | Accept unified snapshots through an authenticated device write endpoint and serve four-object read models. |
 | `src/server/postgres-store.ts` | Persist devices, runtimes, agents, and tasks without first-class conversation/execution tables in the new write path. |
 | `db/migrations/` | Add schema changes for collection status and tasks; stop relying on runtime capabilities/sourceRefs/origin/load fields in query paths. |
@@ -288,8 +288,8 @@ If OpenClaw has multiple raw evidence ids for the same task, adapter code must s
 Focused commands:
 
 ```sh
-npx vitest run src/runtime/runtime-normalize.test.ts
-npx vitest run src/runtime/runtime-inventory-query.test.ts
+npx vitest run src/runtime/runtime-model.ts
+npx vitest run src/runtime/runtime-fleet-query.test.ts
 npx vitest run src/runtime/runtime-work-query-api.test.ts
 ```
 
@@ -333,10 +333,10 @@ Focused commands:
 
 ```sh
 npx vitest run src/runtime/device-collector-script.test.ts
-npx vitest run src/runtime/runtime-work-state-adapters.test.ts
+npx vitest run src/runtime/runtime-work-query-api.test.ts
 ```
 
-If `runtime-work-state-adapters.test.ts` is retired in this phase, replace it with a new focused OpenClaw task adapter test file and remove the retired test from package scripts in the same change.
+Old work-state adapter tests are retired in this phase; focused coverage lives in CLI, collector, backend API, and Task query tests.
 
 ### Phase 5: Backend Ingestion And Persistence
 
@@ -346,8 +346,8 @@ If `runtime-work-state-adapters.test.ts` is retired in this phase, replace it wi
   - `runtimes`;
   - `agents`;
   - `tasks`.
-- [ ] Stop writing new data to first-class `work_conversations` and `work_executions` for the OpenClaw-first path.
-- [ ] Keep old tables only as legacy storage until a later cleanup migration if dropping them would add deployment risk.
+- [ ] Persist Task rows in the current `tasks` table.
+- [ ] Remove old work-state tables and columns through migration; do not keep compatibility storage.
 - [ ] Make `collectionStatus` server-derived or repository-derived, not blindly trusted from a collector payload when request/ingestion evidence disagrees.
 - [ ] Ensure task upsert uses stable `Task.id` and replaces missing tasks for a device/agent according to full snapshot semantics.
 - [ ] Update failed ingestion recording to distinguish:
@@ -425,7 +425,7 @@ npm run check:backend:e2e
 
 | Layer | Purpose | Examples |
 |---|---|---|
-| Unit/type tests | Prove target model shape, status mapping, ID rules, and field removals. | `runtime-normalize.test.ts`, OpenClaw task status mapper tests. |
+| Unit/type tests | Prove target model shape, status mapping, ID rules, and field removals. | `runtime-model.ts`, OpenClaw task status mapper tests. |
 | Script/adapter tests | Prove collector and CLI call the correct adapter and produce correct four-object snapshots. | `device-collector-script.test.ts`, `lorume-cli.test.ts`. |
 | Backend API tests | Prove device-token auth, ingestion validation, and read APIs. | `runtime-http-api.test.ts`, `runtime-http-api-postgres.test.ts`. |
 | DB integration tests | Prove migrations, upserts, full snapshot replacement, and joins. | `postgres-store.test.ts`, `db-migrate.test.ts`, `npm run check:db`. |

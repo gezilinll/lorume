@@ -25,10 +25,6 @@ export async function resetE2eDatabase(): Promise<void> {
         organizations,
         users,
         collector_ingestions,
-        channel_bindings,
-        work_executions,
-        work_items,
-        work_conversations,
         agents,
         runtimes,
         devices

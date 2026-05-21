@@ -41,7 +41,7 @@ Purpose: Create the first organization when a signed-in user has no organization
 
 Rules:
 
-- Explain that organization scope owns Device, Runtime, Agent, Skill, and work state.
+- Explain that organization scope owns Device, Runtime, Agent, Skill, and Task state.
 - Keep the form short: organization name and slug.
 - After creation, return to the intended Console page.
 

@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } fr
 import { hostname, arch, platform, userInfo, networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectInventorySnapshot, collectWorkStateSnapshot } from "./lorume-runtime-adapters.mjs";
+import { collectDeviceStateSnapshot, collectInventorySnapshot, collectWorkStateSnapshot } from "./lorume-runtime-adapters.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,6 +52,10 @@ async function main() {
   }
   if (group === "collect" && command === "inventory") {
     writeJson(await collectInventory(flags));
+    return;
+  }
+  if (group === "collect" && command === "device-state") {
+    writeJson(await collectDeviceState(flags));
     return;
   }
   if (group === "collect" && command === "work-state") {
@@ -124,6 +128,21 @@ async function collectInventory(flags) {
   return {
     ...collectInventorySnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags)),
     command: "collect.inventory",
+  };
+}
+
+async function collectDeviceState(flags) {
+  const snapshotPath = stringFlag(flags, "snapshot");
+  if (snapshotPath) {
+    const snapshot = applyInventoryDeviceOverrides(readRuntimeInventorySnapshot(snapshotPath), flags);
+    return {
+      ...snapshot,
+      command: "collect.device-state",
+    };
+  }
+  return {
+    ...collectDeviceStateSnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags)),
+    command: "collect.device-state",
   };
 }
 

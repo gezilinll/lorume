@@ -36,6 +36,20 @@ function makeAgentId(runtimeId, externalId) {
   return `${runtimeId}:agent:${sanitizeId(externalId)}`;
 }
 
+function makeProductRuntimeId(deviceId, kind) {
+  return `${sanitizeId(deviceId)}:runtime:${sanitizeId(kind)}`;
+}
+
+function enabledRuntimeAdapters(config = {}) {
+  const raw = process.env.LORUME_ENABLED_RUNTIME_ADAPTERS || config.enabledRuntimeAdapters || "openclaw";
+  const values = Array.isArray(raw) ? raw : String(raw).split(",");
+  return new Set(values.map((value) => sanitizeId(value)).filter(Boolean));
+}
+
+function adapterEnabled(config, adapter) {
+  return enabledRuntimeAdapters(config).has(adapter);
+}
+
 function commandExists(command) {
   return findExecutable(command) !== null;
 }
@@ -196,6 +210,30 @@ function createAgent({ runtimeId, source, externalId, name, origin, status, chan
   };
 }
 
+function createProductRuntime({ deviceId, kind, name, version, collectionStatus, lastSeenAt, diagnostics }) {
+  return {
+    id: makeProductRuntimeId(deviceId, kind),
+    deviceId,
+    kind,
+    name,
+    ...(version ? { version } : {}),
+    collectionStatus,
+    lastSeenAt,
+    ...(diagnostics ? { diagnostics } : {}),
+  };
+}
+
+function createProductAgent({ runtimeId, externalId, name, collectionStatus, lastSeenAt, diagnostics }) {
+  return {
+    id: makeAgentId(runtimeId, externalId),
+    runtimeId,
+    name,
+    collectionStatus,
+    lastSeenAt,
+    ...(diagnostics ? { diagnostics } : {}),
+  };
+}
+
 function readOpenClawConfig() {
   const configPath = path.join(homeDir(), ".openclaw", "openclaw.json");
   if (!existsSync(configPath)) return null;
@@ -305,6 +343,51 @@ function collectOpenClaw(deviceId, observedAt) {
   });
 
   return { runtimes: [runtime], agents };
+}
+
+function collectOpenClawDeviceState(deviceId, observedAt) {
+  const config = readOpenClawConfig();
+  const health = runJson("openclaw", ["health", "--json", "--timeout", "5000"]);
+  const status = runJson("openclaw", ["status", "--json", "--timeout", "5000"]);
+  if (!health && !status && !config) return { runtimes: [], agents: [], tasks: [], warnings: [] };
+
+  const gateway = status?.gateway;
+  const collectionStatus = health?.ok === false || gateway?.reachable === false ? "error" : "online";
+  const runtime = createProductRuntime({
+    deviceId,
+    kind: "openclaw",
+    name: "OpenClaw Gateway",
+    version: gateway?.self?.version || undefined,
+    collectionStatus,
+    lastSeenAt: observedAt,
+    diagnostics: {
+      paths: compactPaths([
+        { label: "Config", path: path.join(homeDir(), ".openclaw", "openclaw.json") },
+        { label: "Agents", path: path.join(homeDir(), ".openclaw", "agents") },
+      ]),
+      ...(health?.ok === false ? { lastError: "openclaw health returned ok=false" } : {}),
+    },
+  });
+
+  const openclawAgents = health?.agents || status?.agents?.agents || [];
+  const agentIds = Array.from(new Set([
+    ...openclawAgents.map((agent) => agent.agentId || agent.id || "main"),
+    ...listOpenClawConfigAgentIds(config),
+  ])).filter(Boolean);
+  const agents = agentIds.map((agentId) =>
+    createProductAgent({
+      runtimeId: runtime.id,
+      externalId: agentId,
+      name: agentId,
+      collectionStatus: collectionStatus === "error" ? "error" : "online",
+      lastSeenAt: observedAt,
+      diagnostics: {
+        paths: compactPaths([{ label: "Agent", path: path.join(homeDir(), ".openclaw", "agents", agentId) }]),
+      },
+    }),
+  );
+
+  return { runtimes: [runtime], agents, tasks: [], warnings: [] };
 }
 
 function collectMultica(deviceId, observedAt) {
@@ -1985,11 +2068,10 @@ export function collectInventorySnapshot(config = {}, args = {}) {
     installPath: config.installDir,
   };
   const collected = mergeParts([
-    collectOpenClaw(device.id, observedAt),
-    collectMultica(device.id, observedAt),
-    collectSlock(device.id, observedAt),
-    collectCliRuntime(device.id, observedAt, "codex", "codex", "Codex CLI"),
-    collectCliRuntime(device.id, observedAt, "claude", "claude_code", "Claude Code"),
+    ...(adapterEnabled(mergedConfig, "openclaw") ? [collectOpenClaw(device.id, observedAt)] : []),
+    ...(adapterEnabled(mergedConfig, "multica") ? [collectMultica(device.id, observedAt)] : []),
+    ...(adapterEnabled(mergedConfig, "slock") ? [collectSlock(device.id, observedAt)] : []),
+    ...(adapterEnabled(mergedConfig, "codex") ? [collectCliRuntime(device.id, observedAt, "codex", "codex", "Codex CLI")] : []),
   ]);
   return {
     observedAt,
@@ -1998,6 +2080,42 @@ export function collectInventorySnapshot(config = {}, args = {}) {
     runtimes: collected.runtimes,
     agents: collected.agents,
     reports: [],
+  };
+}
+
+export function collectDeviceStateSnapshot(config = {}, args = {}) {
+  const mergedConfig = {
+    ...config,
+    ...(args.serverUrl ? { serverUrl: args.serverUrl } : {}),
+    ...(args.deviceId ? { deviceId: args.deviceId } : {}),
+  };
+
+  if (args.fixturePath) {
+    return applyDeviceOverrides(readJsonFile(args.fixturePath), {
+      deviceId: mergedConfig.deviceId,
+    });
+  }
+
+  const observedAt = isoNow();
+  const baseDevice = createDevice(mergedConfig, observedAt);
+  const collected = adapterEnabled(mergedConfig, "openclaw")
+    ? collectOpenClawDeviceState(baseDevice.id, observedAt)
+    : { runtimes: [], agents: [], tasks: [], warnings: [] };
+
+  return {
+    observedAt,
+    device: {
+      ...baseDevice,
+      collectionStatus: "online",
+      collector: {
+        version: COLLECTOR_VERSION,
+        ...(config.installDir ? { installPath: config.installDir } : {}),
+      },
+    },
+    runtimes: collected.runtimes,
+    agents: collected.agents,
+    tasks: collected.tasks,
+    ...(collected.warnings.length ? { diagnostics: { warnings: collected.warnings } } : {}),
   };
 }
 
@@ -2017,12 +2135,14 @@ export async function collectWorkStateSnapshot(config = {}, args = {}) {
   } else {
     device = createDevice(mergedConfig, observedAt);
   }
-  const slock = await collectSlockWorkState(device.id, observedAt, mergedConfig);
-  const collected = mergeWorkStateParts([
-    collectOpenClawWorkState(device.id, observedAt),
-    collectMulticaWorkState(device.id, observedAt),
-    slock,
-  ]);
+  const workStateParts = [
+    ...(adapterEnabled(mergedConfig, "openclaw") ? [collectOpenClawWorkState(device.id, observedAt)] : []),
+    ...(adapterEnabled(mergedConfig, "multica") ? [collectMulticaWorkState(device.id, observedAt)] : []),
+  ];
+  if (adapterEnabled(mergedConfig, "slock")) {
+    workStateParts.push(await collectSlockWorkState(device.id, observedAt, mergedConfig));
+  }
+  const collected = mergeWorkStateParts(workStateParts);
 
   return {
     observedAt,

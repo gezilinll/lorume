@@ -294,7 +294,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -463,7 +468,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -472,15 +482,9 @@ console.log(JSON.stringify({
     expect(snapshot.workItems).toEqual([]);
     expect(snapshot.conversations).toEqual([]);
     expect(snapshot.executions).toEqual([]);
-    expect(snapshot.capabilities.map((capability: { source: string }) => capability.source)).toEqual([
-      "openclaw",
-      "multica",
-      "slock",
-    ]);
+    expect(snapshot.capabilities.map((capability: { source: string }) => capability.source)).toEqual(["openclaw"]);
     expect(snapshot.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining("OpenClaw work-state probe unavailable"),
-      expect.stringContaining("Multica work-state probe unavailable"),
-      expect.stringContaining("Slock work-state probe unavailable"),
     ]));
   });
 
@@ -546,7 +550,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: `${fakeBin}:/usr/bin:/bin` },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -1240,7 +1249,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -1301,7 +1315,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: `${fakeBin}:/usr/bin:/bin` },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "multica",
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -1342,7 +1361,12 @@ console.log(JSON.stringify({
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -1385,7 +1409,12 @@ process.exit(1);
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: `${fakeBin}:/usr/bin:/bin` },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+      },
     });
 
     const snapshot = JSON.parse(output);
@@ -1419,7 +1448,12 @@ process.exit(1);
         configPath,
         "--print-only",
       ], {
-        env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: fakeHome,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          PATH: "/usr/bin:/bin",
+        },
       });
 
       const snapshot = JSON.parse(output);
@@ -1471,6 +1505,7 @@ process.exit(1);
         env: {
           ...process.env,
           LORUME_COLLECTOR_HOME: fakeHome,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
           SLOCK_DEFAULT_SERVER_URL: baseUrl,
           PATH: "/usr/bin:/bin",
         },
@@ -1547,7 +1582,12 @@ process.exit(1);
         configPath,
         "--print-only",
       ], {
-        env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: fakeHome,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          PATH: "/usr/bin:/bin",
+        },
       });
 
       const snapshot = JSON.parse(output);
@@ -1622,7 +1662,12 @@ process.exit(1);
         configPath,
         "--print-only",
       ], {
-        env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: fakeHome,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          PATH: "/usr/bin:/bin",
+        },
       });
 
       const snapshot = JSON.parse(output);
@@ -1704,7 +1749,12 @@ process.exit(1);
       "100000",
     ], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     try {
@@ -1750,7 +1800,12 @@ process.exit(1);
       "100000",
     ], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     try {
@@ -1856,7 +1911,12 @@ process.exit(1);
       "--print-only",
     ], {
       encoding: "utf8",
-      env: { ...process.env, LORUME_COLLECTOR_HOME: fakeHome, PATH: "/usr/bin:/bin" },
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: fakeHome,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        PATH: "/usr/bin:/bin",
+      },
     });
 
     const snapshot = JSON.parse(output);

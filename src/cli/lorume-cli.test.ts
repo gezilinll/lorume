@@ -70,6 +70,7 @@ describe("lorume CLI", () => {
     ], {
       env: {
         LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "codex",
         PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
       },
     });
@@ -83,6 +84,98 @@ describe("lorume CLI", () => {
       status: "online",
       version: "codex 1.2.3",
     }));
+  });
+
+  it("collects OpenClaw-only device state without invoking disabled adapters", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-"));
+    const binDir = path.join(root, "bin");
+    const disabledCallsPath = path.join(root, "disabled-adapter-called");
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "openclaw"), `#!/bin/sh
+if [ "$1" = "health" ]; then
+  printf '{"ok":true,"agents":[{"agentId":"main"}],"channels":{"dingtalk":{"enabled":true}}}\\n'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  printf '{"gateway":{"reachable":true,"url":"local","self":{"version":"openclaw 1.0.0"}},"agents":{"agents":[{"agentId":"main","sessions":{"count":2}}]}}\\n'
+  exit 0
+fi
+printf '{}\\n'
+`);
+    for (const command of ["multica", "slock", "codex", "claude"]) {
+      writeExecutable(path.join(binDir, command), `#!/bin/sh
+printf '${command}\\n' >> ${JSON.stringify(disabledCallsPath)}
+exit 91
+`);
+    }
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.command).toBe("collect.device-state");
+    expect(output.runtimes.map((runtime: { kind: string }) => runtime.kind)).toEqual(["openclaw"]);
+    expect(output.agents.map((agent: { name: string }) => agent.name)).toEqual(["main"]);
+    expect(output.tasks).toEqual([]);
+    expect(output.runtimes[0]).not.toHaveProperty("capabilities");
+    expect(output.runtimes[0]).not.toHaveProperty("endpoint");
+    expect(output.runtimes[0]).not.toHaveProperty("sourceRefs");
+    expect(output.agents[0]).not.toHaveProperty("origin");
+    expect(output.agents[0]).not.toHaveProperty("sourceRefs");
+    expect(output.agents[0]).not.toHaveProperty("load");
+    expect(existsSync(disabledCallsPath)).toBe(false);
+  });
+
+  it("keeps legacy inventory collection OpenClaw-only by default", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-inventory-openclaw-"));
+    const binDir = path.join(root, "bin");
+    const disabledCallsPath = path.join(root, "disabled-adapter-called");
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "openclaw"), `#!/bin/sh
+if [ "$1" = "health" ]; then
+  printf '{"ok":true,"agents":[{"agentId":"main"}]}\\n'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  printf '{"gateway":{"reachable":true,"url":"local","self":{"version":"openclaw 1.0.0"}},"agents":{"agents":[{"agentId":"main"}]}}\\n'
+  exit 0
+fi
+printf '{}\\n'
+`);
+    for (const command of ["multica", "slock", "codex", "claude"]) {
+      writeExecutable(path.join(binDir, command), `#!/bin/sh
+printf '${command}\\n' >> ${JSON.stringify(disabledCallsPath)}
+exit 91
+`);
+    }
+
+    const output = runCli([
+      "collect",
+      "inventory",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        PATH: binDir,
+      },
+    });
+
+    expect(output.command).toBe("collect.inventory");
+    expect(output.runtimes.map((runtime: { kind: string }) => runtime.kind)).toEqual(["openclaw"]);
+    expect(output.agents.map((agent: { name: string }) => agent.name)).toEqual(["main"]);
+    expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
   it("collects work-state through the Lorume CLI contract", () => {

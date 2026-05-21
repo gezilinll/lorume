@@ -1,6 +1,6 @@
 # Runtime Task Acceptance Spec
 
-版本：TinySpec v1.0
+版本：TinySpec v1.1
 
 本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs / Work Board 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
 
@@ -29,9 +29,10 @@ Runs / Work Board 必须让用户看清：
 
 ## 必须满足
 
-- 每个 Task 必须有 `id`、`agentId`、`title`、`status`。
+- 每个 Task 必须有 `id`、`agentId`、`taskType`、`title`、`status`。
 - Task 不能携带 `runtimeId`；Runtime / Device 通过 Agent 关系查询。
 - Task 状态只用 `Task.status` 表达，不拆成 status / executionStatus 两套。
+- Adapter 负责把平台原始状态映射为 `Task.status`，但必须在 Task raw/evidence 中保留平台原始状态。
 - Runtime 和 Agent 只展示 `collectionStatus`，不保存工作忙闲。
 - Runs Channel 筛选只能使用 Task 中实际出现的用户触达渠道，不能把 OpenClaw、Slock、Multica、Codex 这类 Runtime kind 当作渠道。
 - 不能把裸 execution、adapter capability gap、监听缺口或诊断项伪造成任务卡。
@@ -41,10 +42,15 @@ Runs / Work Board 必须让用户看清：
 
 OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task：
 
+- `conversation` Tasks 来自 OpenClaw session JSONL、trajectory JSONL、sessions index 和 DingTalk state。
+- `scheduled` Tasks 来自 OpenClaw cron session JSONL 和 trajectory JSONL。
+- `openclaw tasks list` 不得在 P0 创建产品 Task；它只能作为 diagnostics/raw 对照。
 - 有明确 task id / message id / trajectory id 时生成稳定 `Task.id`。
 - 能识别发起人时写入 `creator.name`。
 - 能识别群聊或私聊时写入可读 `conversation.title`。
-- 能识别 OpenClaw agent 时写入 `agentId`。
+- 能识别 OpenClaw agent 时写入 `agentId`，且该 `agentId` 必须引用本次采集到的 Agent。
+- Tool calls 存为 Task 内嵌 evidence，不新增 first-class ToolCall / Execution / Run 实体。
+- Adapter 映射 raw OpenClaw status 到 Lorume `Task.status`，并保留 raw status 到 `raw.openclaw.status`。
 - 无法归属 Agent、缺少标题摘要或只有内部运行证据时跳过，并写 diagnostic warning。
 
 OpenClaw DingTalk 兜底：

@@ -83,4 +83,22 @@ describe("runtime four-object model", () => {
     expect(normalizeTaskStatus("canceled")).toBe("cancelled");
     expect(normalizeTaskStatus("not-a-known-status")).toBe("unknown");
   });
+
+  it("drops runtime source names from task channel context", () => {
+    const snapshot = createDeviceStateSnapshot({
+      observedAt: "2026-05-21T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{
+        id: "agent-1:task:local-1",
+        agentId: "agent-1",
+        title: "Local runtime work",
+        status: "done",
+        channel: { kind: "openclaw", name: "OpenClaw" },
+        conversation: { title: "OpenClaw" },
+      }],
+    });
+
+    expect(snapshot.tasks[0]).not.toHaveProperty("channel");
+    expect(snapshot.tasks[0]).not.toHaveProperty("conversation");
+  });
 });

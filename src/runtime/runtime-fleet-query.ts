@@ -26,9 +26,6 @@ export const channelKindLabels: Record<NonNullable<Task["channel"]>["kind"], str
   dingtalk: "DingTalk",
   telegram: "Telegram",
   slack: "Slack",
-  slock: "Slock",
-  multica: "Multica",
-  openclaw: "OpenClaw",
   other: "Other",
 };
 

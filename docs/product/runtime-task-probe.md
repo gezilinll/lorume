@@ -28,7 +28,7 @@ export interface Task {
   status: TaskStatus;
   source?: { externalId?: string };
   channel?: {
-    kind: "dingtalk" | "telegram" | "slack" | "slock" | "multica" | "openclaw" | "other";
+    kind: "dingtalk" | "telegram" | "slack" | "other";
     name?: string;
     externalId?: string;
   };
@@ -85,6 +85,7 @@ OpenClaw adapter 输出当前 `DeviceStateSnapshot` 内的 `runtimes`、`agents`
 
 - DingTalk 群聊缺少可读群名时，显示 `DingTalk 群聊`。
 - DingTalk 私聊缺少可读人名时，显示 `DingTalk 私聊`。
+- OpenClaw、Slock、Multica、Codex 是 Runtime 来源，不是用户触点渠道；没有用户触点证据的任务省略 `channel` 和 `conversation`。
 - 不展示 `cid...`、手机号、open conversation id 或其他不可读外部 id 作为会话名。
 - 没有标题或摘要的外部对象不能伪造成任务卡；保留在 diagnostics 或日志中。
 - 未关联 Agent 的 OpenClaw execution、内部 heartbeat、恢复任务、approval followup 等系统事件不进入 Runs。

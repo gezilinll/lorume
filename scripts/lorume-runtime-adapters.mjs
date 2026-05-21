@@ -293,29 +293,30 @@ function collectOpenClawProductTasks({ rawTasks, knownAgentIds, runtimeId, obser
     const origin = extractOpenClawOrigin(rawTask);
     const sessionKey = rawTask.requesterSessionKey || rawTask.requester_session_key || rawTask.childSessionKey || rawTask.child_session_key || rawTask.sessionKey || rawTask.session_key;
     const legacyChannel = openClawChannelFromOrigin(origin, dingtalkState.targetsByConversationId) ||
-      openClawChannelFromDingTalkSession(sessionKey, dingtalkState.targetsByConversationId) ||
-      { kind: "openclaw", label: "OpenClaw" };
-    const channel = openClawProductChannel(legacyChannel);
+      openClawChannelFromDingTalkSession(sessionKey, dingtalkState.targetsByConversationId);
+    const channel = legacyChannel ? openClawProductChannel(legacyChannel) : undefined;
     const lastActivityAt = toIsoTimestamp(rawTask.lastEventAt || rawTask.last_event_at || rawTask.endedAt || rawTask.ended_at || rawTask.completedAt || rawTask.completed_at || rawTask.startedAt || rawTask.started_at);
     const titleSource = rawTask.task || rawTask.label || rawTask.title || taskExternalId;
+    const status = normalizeOpenClawProductTaskStatus(rawTask.status);
+    const error = openClawTaskError(rawTask);
 
     tasks.push({
       id: makeProductTaskId(agentId, taskExternalId),
       agentId,
       title: messageTitle(titleSource),
       ...(typeof rawTask.task === "string" ? { description: rawTask.task.slice(0, 500) } : {}),
-      status: normalizeOpenClawProductTaskStatus(rawTask.status),
+      status,
       source: { externalId: String(taskExternalId) },
-      channel,
-      conversation: {
+      ...(channel ? { channel } : {}),
+      ...(channel ? { conversation: {
         title: channel.name || channel.kind,
         ...(openClawProductConversationExternalId(origin, sessionKey) ? { externalId: openClawProductConversationExternalId(origin, sessionKey) } : {}),
         ...(lastActivityAt ? { lastActivityAt } : {}),
-      },
+      } } : {}),
       ...(openClawProductCreator(origin) ? { creator: openClawProductCreator(origin) } : {}),
       ...(toIsoTimestamp(rawTask.createdAt || rawTask.created_at) ? { createdAt: toIsoTimestamp(rawTask.createdAt || rawTask.created_at) } : {}),
       ...(lastActivityAt ? { updatedAt: lastActivityAt, lastSeenAt: lastActivityAt } : { lastSeenAt: observedAt }),
-      ...(rawTask.error || rawTask.lastError || rawTask.last_error ? { error: String(rawTask.error || rawTask.lastError || rawTask.last_error).slice(0, 240) } : {}),
+      ...(status === "failed" && error ? { error } : {}),
     });
   }
 
@@ -352,13 +353,15 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
     const channel = openClawProductChannel(legacyChannel);
     const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
     const prompt = cleanOpenClawPromptText(run.prompt);
+    const status = normalizeOpenClawTrajectoryProductTaskStatus(run);
+    const error = openClawTrajectoryError(run);
 
     tasks.push({
       id: makeProductTaskId(agentId, runId),
       agentId,
       title: messageTitle(prompt),
       description: prompt,
-      status: normalizeOpenClawTrajectoryProductTaskStatus(run),
+      status,
       source: { externalId: runId },
       channel,
       conversation: {
@@ -369,7 +372,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
       ...(openClawProductCreatorFromTrajectoryRun(run) ? { creator: openClawProductCreatorFromTrajectoryRun(run) } : {}),
       ...(run.startedAt ? { createdAt: run.startedAt } : {}),
       ...(lastActivityAt ? { updatedAt: lastActivityAt, lastSeenAt: lastActivityAt } : { lastSeenAt: observedAt }),
-      ...(run.error ? { error: String(run.error).slice(0, 240) } : {}),
+      ...(status === "failed" && error ? { error } : {}),
     });
   }
 
@@ -418,6 +421,15 @@ function normalizeOpenClawExecutionProductTaskStatus(executionStatus) {
   if (executionStatus === "failed") return "failed";
   if (executionStatus === "cancelled") return "cancelled";
   return "unknown";
+}
+
+function openClawTaskError(task) {
+  const value = task.error || task.lastError || task.last_error;
+  return value ? String(value).slice(0, 240) : "";
+}
+
+function openClawTrajectoryError(run) {
+  return run.error ? String(run.error).slice(0, 240) : "";
 }
 
 function openClawProductChannel(channel) {

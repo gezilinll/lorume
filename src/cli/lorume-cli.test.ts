@@ -172,6 +172,107 @@ exit 91
     expect(output.tasks[0]).not.toHaveProperty("sourceRefs");
   });
 
+  it("does not use OpenClaw runtime source as a Task channel", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-runtime-channel-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: {
+        tasks: [{
+          taskId: "task-local-1",
+          status: "running",
+          agentId: "main",
+          task: "Run a local OpenClaw check",
+          createdAt: "2026-05-21T03:00:00.000Z",
+          lastEventAt: "2026-05-21T03:01:00.000Z",
+        }],
+      },
+    });
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      id: "test-device:runtime:openclaw:agent:main:task:task-local-1",
+      agentId: "test-device:runtime:openclaw:agent:main",
+      title: "Run a local OpenClaw check",
+      status: "in_progress",
+      source: { externalId: "task-local-1" },
+    });
+    expect(output.tasks[0]).not.toHaveProperty("channel");
+    expect(output.tasks[0]).not.toHaveProperty("conversation");
+  });
+
+  it("only exposes OpenClaw task errors for failed tasks", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-error-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: {
+        tasks: [
+          {
+            taskId: "task-done-with-stale-error",
+            status: "succeeded",
+            agentId: "main",
+            task: "已经完成但保留了历史错误字段",
+            requesterSessionKey: "agent:main:dingtalk:group:group-live",
+            lastError: "previous attempt failed",
+          },
+          {
+            taskId: "task-failed-with-error",
+            status: "failed",
+            agentId: "main",
+            task: "失败任务需要保留错误原因",
+            requesterSessionKey: "agent:main:dingtalk:group:group-live",
+            lastError: "tool failed",
+          },
+        ],
+      },
+    });
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    const doneTask = output.tasks.find((task: { id: string }) => task.id.endsWith(":task:task-done-with-stale-error"));
+    const failedTask = output.tasks.find((task: { id: string }) => task.id.endsWith(":task:task-failed-with-error"));
+    expect(doneTask).toMatchObject({ status: "done" });
+    expect(doneTask).not.toHaveProperty("error");
+    expect(failedTask).toMatchObject({ status: "failed", error: "tool failed" });
+  });
+
   it("skips OpenClaw tasks when agent ownership is ambiguous", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-ambiguous-task-"));
     const binDir = path.join(root, "bin");

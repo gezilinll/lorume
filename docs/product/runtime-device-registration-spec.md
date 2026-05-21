@@ -138,7 +138,7 @@ export interface Task {
   status: TaskStatus;
   source?: { externalId?: string };
   channel?: {
-    kind: "dingtalk" | "telegram" | "slack" | "slock" | "multica" | "openclaw" | "other";
+    kind: "dingtalk" | "telegram" | "slack" | "other";
     name?: string;
     externalId?: string;
   };
@@ -157,6 +157,7 @@ export interface Task {
 ```
 
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
+Runtime 名称不能写入 `Task.channel`；如果任务没有 DingTalk、Telegram、Slack 或其他用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
 
 ## 状态规则
 

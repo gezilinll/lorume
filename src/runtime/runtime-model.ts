@@ -76,7 +76,7 @@ export interface Task {
     externalId?: string;
   };
   channel?: {
-    kind: "dingtalk" | "telegram" | "slack" | "slock" | "multica" | "openclaw" | "other";
+    kind: "dingtalk" | "telegram" | "slack" | "other";
     name?: string;
     externalId?: string;
   };
@@ -195,6 +195,8 @@ function cleanAgent(value: LooseRecord): Agent {
 }
 
 function cleanTask(value: LooseRecord): Task {
+  const channel = cleanTaskChannel(value.channel);
+  const conversation = channel ? cleanTaskConversation(value.conversation) : undefined;
   return {
     id: value.id,
     agentId: value.agentId,
@@ -202,14 +204,35 @@ function cleanTask(value: LooseRecord): Task {
     ...(value.description ? { description: value.description } : {}),
     status: normalizeTaskStatus(String(value.status ?? "")),
     ...(value.source ? { source: { externalId: value.source.externalId } } : {}),
-    ...(value.channel ? { channel: value.channel } : {}),
-    ...(value.conversation ? { conversation: value.conversation } : {}),
+    ...(channel ? { channel } : {}),
+    ...(conversation ? { conversation } : {}),
     ...(value.assignee ? { assignee: { name: value.assignee.name } } : {}),
     ...(value.creator ? { creator: { name: value.creator.name } } : {}),
     ...(value.error ? { error: value.error } : {}),
     ...(value.createdAt ? { createdAt: value.createdAt } : {}),
     ...(value.updatedAt ? { updatedAt: value.updatedAt } : {}),
     ...(value.lastSeenAt ? { lastSeenAt: value.lastSeenAt } : {}),
+  };
+}
+
+function cleanTaskChannel(value: LooseRecord | undefined): Task["channel"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  if (value.kind !== "dingtalk" && value.kind !== "telegram" && value.kind !== "slack" && value.kind !== "other") {
+    return undefined;
+  }
+  return {
+    kind: value.kind,
+    ...(value.name ? { name: value.name } : {}),
+    ...(value.externalId ? { externalId: value.externalId } : {}),
+  };
+}
+
+function cleanTaskConversation(value: LooseRecord | undefined): Task["conversation"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return {
+    ...(value.title ? { title: value.title } : {}),
+    ...(value.externalId ? { externalId: value.externalId } : {}),
+    ...(value.lastActivityAt ? { lastActivityAt: value.lastActivityAt } : {}),
   };
 }
 

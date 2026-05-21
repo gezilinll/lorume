@@ -317,7 +317,9 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
     },
     async readRuntimeFleet() {
       const [deviceResult, runtimeResult, agentResult] = await Promise.all([
-        pool.query<{ raw: RuntimeDevice; observed_at: Date | null }>("SELECT raw, observed_at FROM devices ORDER BY hostname, id"),
+        pool.query<{ collector: RuntimeDevice["collector"]; raw: RuntimeDevice; observed_at: Date | null }>(
+          "SELECT collector, raw, observed_at FROM devices ORDER BY hostname, id",
+        ),
         pool.query<{ raw: LorumeRuntime }>("SELECT raw FROM runtimes ORDER BY name"),
         pool.query<{ raw: ManagedRuntimeAgent }>("SELECT raw FROM agents ORDER BY name"),
       ]);
@@ -326,7 +328,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         .filter((value): value is string => Boolean(value))
         .sort()
         .at(-1) ?? null;
-      const devices = deviceResult.rows.map((row) => row.raw);
+      const devices = deviceResult.rows.map((row) => ({ ...row.raw, collector: row.collector }));
       const runtimes = runtimeResult.rows.map((row) => row.raw);
       const agents = agentResult.rows.map((row) => row.raw);
 

@@ -74,7 +74,15 @@ describeDb("runtime HTTP API with Postgres store", () => {
         expect(workStateResponse.status).toBe(201);
         await expect(fleetResponse.json()).resolves.toMatchObject({
           summary: { agentCount: 2, deviceCount: 1, runtimeCount: 2 },
-          devices: [expect.objectContaining({ id: "fixture-mac" })],
+          devices: [
+            expect.objectContaining({
+              collector: expect.objectContaining({
+                status: "online",
+                version: "0.1.0",
+              }),
+              id: "fixture-mac",
+            }),
+          ],
         });
         await expect(workItemsResponse.json()).resolves.toMatchObject({
           items: [expect.objectContaining({

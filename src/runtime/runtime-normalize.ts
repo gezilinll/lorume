@@ -77,6 +77,8 @@ export interface RuntimeDevice {
   user?: RuntimeDeviceUser;
   /** Optional network metadata reported by the CLI. */
   network?: RuntimeDeviceNetwork;
+  /** Optional collector metadata reported with the latest inventory snapshot. */
+  collector?: RuntimeCollectorInfo;
 }
 
 /** Optional local path owned by a runtime or Agent. */

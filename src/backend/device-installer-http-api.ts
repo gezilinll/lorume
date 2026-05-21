@@ -1,25 +1,10 @@
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-
-const installerFiles: Record<string, { contentType: string; path: string }> = {
-  "install-device-collector.sh": {
-    contentType: "text/x-shellscript; charset=utf-8",
-    path: "scripts/install-device-collector.sh",
-  },
-  "lorume-device-collector.mjs": {
-    contentType: "text/javascript; charset=utf-8",
-    path: "scripts/lorume-device-collector.mjs",
-  },
-  "lorume-runtime-adapters.mjs": {
-    contentType: "text/javascript; charset=utf-8",
-    path: "scripts/lorume-runtime-adapters.mjs",
-  },
-  "lorume.mjs": {
-    contentType: "text/javascript; charset=utf-8",
-    path: "scripts/lorume.mjs",
-  },
-};
+import {
+  deviceInstallerPackageManifest,
+  findDeviceInstallerPackageFile,
+} from "./device-installer-manifest";
 
 /** Public, secret-free installer assets used by one-line device registration commands. */
 export function createDeviceInstallerHttpApiHandler() {
@@ -46,14 +31,14 @@ export function createDeviceInstallerHttpApiHandler() {
     }
 
     const fileName = decodeURIComponent(fileMatch[1] ?? "");
-    const file = installerFiles[fileName];
+    const file = findDeviceInstallerPackageFile(fileName);
     if (!file) {
       sendText(response, 404, "text/plain; charset=utf-8", "not found");
       return;
     }
 
     try {
-      const body = await readFile(path.join(process.cwd(), file.path), "utf8");
+      const body = await readFile(path.join(process.cwd(), file.sourcePath), "utf8");
       sendText(response, 200, file.contentType, body);
     } catch {
       sendText(response, 404, "text/plain; charset=utf-8", "not found");
@@ -62,6 +47,10 @@ export function createDeviceInstallerHttpApiHandler() {
 }
 
 function remoteInstallerScript(): string {
+  const downloads = deviceInstallerPackageManifest
+    .map((file) => `download "${file.fileName}"`)
+    .join("\n");
+
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -94,10 +83,7 @@ download() {
   curl -fsSL "$BASE_URL/api/device-collector/files/$name" -o "$output"
 }
 
-download "install-device-collector.sh"
-download "lorume-device-collector.mjs"
-download "lorume-runtime-adapters.mjs"
-download "lorume.mjs"
+${downloads}
 
 chmod 0755 "$TMP_DIR/scripts/install-device-collector.sh"
 bash "$TMP_DIR/scripts/install-device-collector.sh" --source-dir "$TMP_DIR" "$@"

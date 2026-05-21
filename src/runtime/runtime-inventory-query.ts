@@ -22,6 +22,7 @@ import {
   type RuntimeWorkStateSnapshot,
 } from "./runtime-work-state";
 import type { DeviceCollectionHealth } from "./runtime-collection-health";
+import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
 
 /** Runtime kind labels used by the Runtime Fleet page. */
 export const runtimeKindLabels: Record<RuntimeKind, string> = {
@@ -68,6 +69,8 @@ export const runtimeFleetObjectStatusLabels: Record<RuntimeFleetObjectStatus, st
   offline: "离线",
   exception: "异常",
 };
+
+type DeviceHealthById = ReadonlyMap<string, Pick<DeviceHealthStatusResult, "label" | "status">>;
 
 /** Agent status labels after source-specific states are normalized. */
 export const managedAgentStatusLabels: Record<ManagedAgentStatus, string> = {
@@ -399,6 +402,7 @@ export function getRuntimeFleetDetail(
   id: string,
   workState?: RuntimeWorkStateSnapshot | null,
   collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
+  deviceHealthByDeviceId?: DeviceHealthById,
 ): RuntimeFleetDetail | null {
   const devices = runtimeFleetDevices(snapshot);
 
@@ -406,14 +410,18 @@ export function getRuntimeFleetDetail(
     const device = devices.find((candidate) => candidate.id === id);
     if (!device) return null;
     const runtimes = snapshot.runtimes.filter((runtime) => runtime.deviceId === device.id);
-    const status = deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
+    const deviceHealth = deviceHealthByDeviceId?.get(device.id);
+    const status = deviceHealth
+      ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
+      : deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
+    const statusLabel = deviceHealth?.label ?? runtimeFleetObjectStatusLabels[status];
     return {
       kind: "device",
       id: device.id,
       title: deviceDisplayLabel(device),
       subtitle: `最近同步 ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
       status,
-      statusLabel: runtimeFleetObjectStatusLabels[status],
+      statusLabel,
       sections: [
         {
           title: "基础信息",
@@ -435,7 +443,7 @@ export function getRuntimeFleetDetail(
         {
           title: "运行资产",
           items: [
-            `状态: ${runtimeFleetObjectStatusLabels[status]}`,
+            `状态: ${statusLabel}`,
             `Collector: ${snapshot.collector.version}`,
             `Runtime 数量: ${runtimes.length}`,
             `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
@@ -544,6 +552,13 @@ function normalizeSearch(value: string): string {
 
 function runtimeFleetDevices(snapshot: RuntimeInventorySnapshot): RuntimeDevice[] {
   return Array.isArray(snapshot.devices) ? snapshot.devices : [snapshot.device];
+}
+
+export function runtimeFleetStatusFromDeviceHealth(status: DeviceHealthStatus): RuntimeFleetObjectStatus {
+  if (status === "online") return "working";
+  if (status === "offline") return "offline";
+  if (status === "abnormal") return "exception";
+  return "idle";
 }
 
 function deviceForRuntime(snapshot: RuntimeInventorySnapshot, runtime: LorumeRuntime): RuntimeDevice | undefined {

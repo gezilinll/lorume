@@ -9,7 +9,7 @@
 - 提供一个本地 `lorume` CLI 入口，用于暴露设备侧确定性能力。
 - 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
 - 允许读取本机设备事实。
-- 允许 live-first 采集 Runtime / Agent inventory、work-state 和 Agent Skill metadata。
+- 允许 live-first 采集 Device / Runtime / Agent / Task device-state 和 Agent Skill metadata。
 - 允许从 collector-compatible runtime inventory snapshot 列出已知 Runtime 和 Agent，用于测试、迁移和离线诊断。
 - 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
@@ -46,31 +46,32 @@
 
 测试和安装脚本可以通过 `--device-id` 覆盖稳定设备身份。Device 不返回额外显示名、存储状态或连接模式字段。
 
-### `lorume collect inventory --json [--snapshot <path>]`
+### `lorume collect device-state --json [--snapshot <path>]`
 
-返回 `RuntimeInventorySnapshot`：
+返回 `DeviceStateSnapshot`：
 
+- `observedAt`
 - `device`
 - `runtimes`
 - `agents`
-- `observedAt`
-- `collector`
-- `reports`
+- `tasks`
+- `diagnostics`
 
-默认 live-first 采集本机已授权、已安装或已配置的 Runtime / Agent。`--snapshot` 只用于测试、离线诊断和兼容期迁移；读取 snapshot 时仍需输出同一 JSON shape。
+OpenClaw-first 阶段默认只启用 OpenClaw adapter。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
 
-Runtime 和 Agent 可附带 `paths`：
+```sh
+LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
+```
 
-- `kind`: `workspace`、`install`、`config`、`data` 或 `unknown`
-- `path`: 本机路径
-- `source`: 哪个 CLI adapter 提供
-- `confidence`: `direct` 或 `derived`
+`DeviceStateSnapshot` 是全量 snapshot。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
-不能为了 UI 完整而伪造目录。adapter 拿不到目录时省略 `paths`。
+### `lorume collect inventory --json [--snapshot <path>]`
+
+兼容旧命令。新实现优先调用 `lorume collect device-state --json`，并在兼容期转换为旧调用方能读取的形状。新增产品能力不得依赖旧 inventory shape。
 
 ### `lorume collect work-state --json`
 
-返回 `RuntimeWorkStateSnapshot`。CLI 内部 adapter 必须把平台原始状态转换成 Lorume-owned `RuntimeWorkItem`、`RuntimeConversation`、`RuntimeExecution` 和 capability model。collector 不能读取平台原始字段再做状态推断。
+兼容旧命令。新产品模型不再把 work-state 暴露为 `workItems/conversations/executions/capabilities` 四组一等数组；OpenClaw adapter 必须把平台原始任务、消息和运行证据转换为 `Task[]`。collector 不能读取平台原始字段再做状态推断。
 
 ### `lorume collector stop --json --install-dir <path>`
 
@@ -86,16 +87,14 @@ Runtime 和 Agent 可附带 `paths`：
 
 ### `lorume runtime list --json --snapshot <path>`
 
-读取 collector-compatible `RuntimeInventorySnapshot`，返回：
+读取 collector-compatible snapshot，返回：
 
 - `device`
 - `runtimes`
 - `agents`
 - `observedAt`
 
-该命令不解释平台原始字段，只消费已归一化 snapshot。
-
-该命令是兼容别名。新实现优先使用 `lorume collect inventory --json --snapshot <path>`。
+该命令不解释平台原始字段，只消费已归一化 snapshot。新实现优先使用 `lorume collect device-state --json --snapshot <path>`。
 
 ### `lorume connector status --json --context <path> --target <id>`
 

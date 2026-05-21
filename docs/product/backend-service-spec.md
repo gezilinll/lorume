@@ -193,7 +193,7 @@ ECS 部署形态：
 - error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
 - structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。
 - deploy config harness：backend bundle、Dockerfile、Nginx、production-like compose 必须和当前服务入口一致。
-- production smoke harness：`npm run smoke:production` 是非写入型部署读检查，可以检查 `/healthz`、`/readyz`、已鉴权读 API 和 collection-health / diagnostics 读路径；不得创建 device token、运行 installer、POST collector snapshot 或写入生产数据。
+- production smoke harness：`npm run smoke:production` 默认只检查公开部署入口，例如 `/healthz`、`/readyz` 和 collector installer 公开资源；只有显式提供 `LORUME_SMOKE_COOKIE` 或 `LORUME_SMOKE_BEARER_TOKEN` 时，才检查已鉴权 Runtime Fleet、Runs、collection-health 和 diagnostics 读路径。它不得创建 device token、运行 installer、POST collector snapshot 或写入生产数据。
 - backend API-only E2E harness：本地 isolated Postgres 加本地 backend 验证 device token 创建、installer assets、真实 collector 进程上传、Device diagnostics、query APIs 和 heartbeat-only WebSocket。
 - Playwright harness：Runtime Fleet 和 Runs 页面继续通过，且不依赖手动 dev 数据。
 - `./scripts/verify.sh` 必须包含新增 backend 检查。

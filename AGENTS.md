@@ -54,7 +54,7 @@ Current source of truth:
 - `db/migrations/`: Postgres schema migrations for the formal backend service.
 - `scripts/db-migrate.mjs`: local Postgres migration runner.
 - `scripts/check-deploy-config.mjs`: production-like deploy config smoke check.
-- `scripts/smoke-production.mjs`: deployed environment smoke check for health, readiness, Runtime Fleet, Runs, and collection health.
+- `scripts/smoke-production.mjs`: deployed environment smoke check for public health, readiness, installer assets, and optional authenticated Runtime / Runs read paths.
 - `scripts/lorume.mjs`: deterministic local CLI for device identity, snapshot-backed runtime listing, authorized connector status, and safe explicit file copy.
 - `scripts/lorume-runtime-adapters.mjs`: CLI-owned runtime and work-state adapter module used by `lorume collect inventory` and `lorume collect work-state`.
 - `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml`: production-like local deployment shape before ECS.
@@ -203,7 +203,7 @@ Current harness scripts:
 | `npm run build:backend` | Bundle the standalone backend to `dist/backend/backend-server.mjs`. | Backend entrypoint, server imports, or production-like runtime changes. |
 | `npm run start:backend` | Run the bundled backend artifact. | Manual smoke of production-like backend output after `npm run build:backend`. |
 | `npm run check:deploy` | Build backend bundle and verify Docker / Nginx / production-like compose config. | Deployment-shape, backend bundle, Dockerfile, compose, or Nginx changes. |
-| `npm run smoke:production` | Check the deployed environment health, readiness, Runtime Fleet, Runs, and device collection-health read paths. | After ECS deploy, DNS/Nginx changes, backend query changes, or collector registration changes. |
+| `npm run smoke:production` | Check deployed public health/readiness and installer resources; add `LORUME_SMOKE_COOKIE` or `LORUME_SMOKE_BEARER_TOKEN` to also check authenticated Runtime Fleet, Runs, collection-health, and diagnostics read paths. | After ECS deploy, DNS/Nginx changes, backend query changes, or collector registration changes. |
 | `npm run check:e2e` | Playwright browser harness using isolated Postgres, standalone backend, Vite proxy, and agent-mode auth for Console surfaces. | Runtime Fleet/Runs interaction paths, layout, toolbar, responsive behavior, navigation shell, backend query wiring, or visual regression risk. |
 | `npm run verify` | Full harness, same as `./scripts/verify.sh`. | Before handoff, commit, or review. |
 

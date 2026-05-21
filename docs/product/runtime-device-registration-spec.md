@@ -254,6 +254,8 @@ OpenClaw-first 阶段默认 allowlist 为 `openclaw`。被禁用的 adapter 不�
 
 远程安装入口不包含密钥。它只从同一个 Lorume backend 下载白名单设备包文件到临时目录，再调用 `scripts/install-device-collector.sh --source-dir <temp-dir>` 完成本机安装、配置写入和 launchd / systemd 服务注册。
 
+安装目录必须包含后续生命周期命令需要的完整设备包文件：`install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs`、`lorume.mjs` 和 `config.json`。已安装的 `lorume.mjs collector stop/uninstall` 必须能通过同目录的 `install-device-collector.sh` 完成停止或卸载，不能依赖仓库源码目录仍然存在。
+
 真实设备验收时，agent 可以运行 Lorume stop、uninstall、install 命令，也可以读取日志、服务状态和文件状态。agent 不能手动删除残留的 Lorume 文件、launchd plist、systemd unit 或进程状态来掩盖卸载缺陷；如果 uninstall 后仍有残留，必须停止真实设备流程，在项目中修复卸载能力并重新验证。
 
 ## 验收
@@ -263,5 +265,6 @@ OpenClaw-first 阶段默认 allowlist 为 `openclaw`。被禁用的 adapter 不�
 - 后端能接收 `POST /api/device-state-snapshots`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。
+- Installer harness 必须验证安装目录文件完整性，并验证已安装 CLI 能执行 `collector uninstall`。
 - 自动化测试只使用本地 isolated backend/Postgres，不写真实生产后端。
 - 真实设备验收采用观察者方式：发现产品能力残留或采集缺口时修代码和测试，不手动清理掩盖问题。

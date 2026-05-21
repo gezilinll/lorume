@@ -168,6 +168,11 @@ if [[ ! -f "$SOURCE_RUNTIME_ADAPTERS" ]]; then
   echo "Lorume runtime adapter module not found: $SOURCE_RUNTIME_ADAPTERS" >&2
   exit 1
 fi
+SOURCE_INSTALLER="$SOURCE_DIR/scripts/install-device-collector.sh"
+if [[ ! -f "$SOURCE_INSTALLER" ]]; then
+  echo "Lorume installer script not found: $SOURCE_INSTALLER" >&2
+  exit 1
+fi
 
 find_node() {
   if command -v node >/dev/null 2>&1; then
@@ -208,6 +213,7 @@ if [[ -z "$NODE_BIN" ]]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
+install -m 0755 "$SOURCE_INSTALLER" "$INSTALL_DIR/install-device-collector.sh"
 install -m 0755 "$SOURCE_COLLECTOR" "$INSTALL_DIR/lorume-device-collector.mjs"
 install -m 0755 "$SOURCE_CLI" "$INSTALL_DIR/lorume.mjs"
 install -m 0644 "$SOURCE_RUNTIME_ADAPTERS" "$INSTALL_DIR/lorume-runtime-adapters.mjs"

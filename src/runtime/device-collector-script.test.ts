@@ -123,13 +123,16 @@ console.log(JSON.stringify({
       "--no-service",
     ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
 
+    expect(existsSync(path.join(installDir, "install-device-collector.sh"))).toBe(true);
     expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
 
-    execFileSync("bash", [
-      installerScript,
+    execFileSync(process.execPath, [
+      path.join(installDir, "lorume.mjs"),
+      "collector",
+      "uninstall",
+      "--json",
       "--install-dir",
       installDir,
-      "--uninstall",
     ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
 
     expect(existsSync(installDir)).toBe(false);

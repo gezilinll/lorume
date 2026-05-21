@@ -30,7 +30,7 @@ describe("device collector scripts", () => {
     expect(snapshot.agents.map((agent: { name: string }) => agent.name)).toContain("tester");
   });
 
-  it("collects inventory by invoking the Lorume CLI contract", () => {
+  it("collects device state by invoking the Lorume CLI contract", () => {
     const fakeDir = mkdtempSync(path.join(tmpdir(), "lorume-cli-boundary-"));
     const fakeCli = path.join(fakeDir, "lorume.mjs");
     const callsPath = path.join(fakeDir, "calls.jsonl");
@@ -38,13 +38,12 @@ describe("device collector scripts", () => {
 import { appendFileSync } from "node:fs";
 appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.log(JSON.stringify({
-  command: "collect.inventory",
+  command: "collect.device-state",
   observedAt: "2026-05-19T00:00:00.000Z",
-  collector: { version: "test", status: "online" },
-  device: { id: "cli-device", hostname: "cli.local", os: "darwin", architecture: "arm64", lastSeenAt: "2026-05-19T00:00:00.000Z" },
+  device: { id: "cli-device", hostname: "cli.local", os: "darwin", architecture: "arm64", collectionStatus: "online", lastSeenAt: "2026-05-19T00:00:00.000Z", collector: { version: "test" } },
   runtimes: [],
   agents: [],
-  reports: []
+  tasks: []
 }));
 `);
     chmodSync(fakeCli, 0o755);
@@ -65,7 +64,7 @@ console.log(JSON.stringify({
     expect(snapshot.device).not.toHaveProperty("name");
     expect(snapshot.device).not.toHaveProperty("status");
     expect(snapshot.device).not.toHaveProperty("connectionMode");
-    expect(calls).toContainEqual(["collect", "inventory", "--json"]);
+    expect(calls).toContainEqual(["collect", "device-state", "--json"]);
   });
 
   it("collects work-state by invoking the Lorume CLI contract", () => {
@@ -354,7 +353,7 @@ console.log(JSON.stringify({
         baseUrl,
         "--device-token",
         "secret-device-token",
-      ], { env: { ...process.env, LORUME_COLLECTOR_LOG_PATH: logPath } })).rejects.toThrow("Snapshot post failed");
+      ], { env: { ...process.env, LORUME_COLLECTOR_LOG_PATH: logPath } })).rejects.toThrow("Device state snapshot post failed");
 
       const records = readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
       const record = records.find((entry) => entry.event === "collector_run_failed");
@@ -394,8 +393,8 @@ console.log(JSON.stringify({
         .map((line) => JSON.parse(line));
 
       expect(records).toEqual(expect.arrayContaining([
-        expect.objectContaining({ event: "inventory_collected", level: "info" }),
-        expect.objectContaining({ event: "inventory_upload_succeeded", level: "info" }),
+        expect.objectContaining({ event: "device_state_collected", level: "info" }),
+        expect.objectContaining({ event: "device_state_upload_succeeded", level: "info" }),
       ]));
       expect(JSON.stringify(records)).not.toContain("secret-device-token");
     } finally {
@@ -404,7 +403,7 @@ console.log(JSON.stringify({
     }
   });
 
-  it("posts inventory snapshots with the configured Lorume device token", async () => {
+  it("posts device-state snapshots with the configured Lorume device token", async () => {
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-token-config-"));
     const configPath = path.join(configDir, "config.json");
     const { server, receivedSnapshot, baseUrl } = await startSnapshotServer({
@@ -433,9 +432,9 @@ console.log(JSON.stringify({
     }
   });
 
-  it("retries transient backend failures when posting inventory snapshots", async () => {
+  it("retries transient backend failures when posting device-state snapshots", async () => {
     const { server, receivedSnapshot, baseUrl, requestCount } = await startFlakySnapshotServer(
-      "/api/device-snapshots",
+      "/api/device-state-snapshots",
     );
 
     try {
@@ -1736,7 +1735,7 @@ process.exit(1);
     }
   });
 
-  it("uploads inventory and work-state on daemon startup while the control channel stays heartbeat-only", async () => {
+  it("uploads device-state on daemon startup while the control channel stays heartbeat-only", async () => {
     const controlServer = await startControlServer();
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-control-home-"));
     const child = spawn(process.execPath, [
@@ -1771,7 +1770,7 @@ process.exit(1);
         collectorVersion: "0.1.0",
       });
       expect(result.snapshots.map((snapshot) => (snapshot.device as { id: string }).id)).toEqual(["fixture-mac"]);
-      expect(result.workStateSnapshots.map((snapshot) => snapshot.deviceId)).toEqual(["fixture-mac"]);
+      expect(result.workStateSnapshots).toEqual([]);
     } finally {
       child.kill();
       controlServer.close();
@@ -1814,14 +1813,14 @@ process.exit(1);
       expect(result.hello.deviceId).toBe("fixture-mac");
       expect(result.heartbeat.deviceId).toBe("fixture-mac");
       expect(result.snapshots.map((snapshot) => (snapshot.device as { id: string }).id)).toEqual(["fixture-mac"]);
-      expect(result.workStateSnapshots.map((snapshot) => snapshot.deviceId)).toEqual(["fixture-mac"]);
+      expect(result.workStateSnapshots).toEqual([]);
     } finally {
       child.kill();
       controlServer.close();
     }
   });
 
-  it("discovers OpenClaw channel bindings from local config without requiring gateway health", () => {
+  it("discovers OpenClaw agents from local config without exposing channel bindings", () => {
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-openclaw-home-"));
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-openclaw-config-"));
     const openclawDir = path.join(fakeHome, ".openclaw");
@@ -1846,17 +1845,19 @@ process.exit(1);
     });
 
     const snapshot = JSON.parse(output);
-    const openclawAgent = snapshot.agents.find((agent: { origin: string }) => agent.origin === "openclaw");
+    const openclawRuntime = snapshot.runtimes.find((runtime: { kind: string }) => runtime.kind === "openclaw");
+    const openclawAgent = snapshot.agents.find((agent: { runtimeId: string }) => agent.runtimeId === openclawRuntime.id);
 
-    expect(openclawAgent?.channelBindings).toContainEqual({
-      kind: "dingtalk",
-      label: "DingTalk default",
-      externalId: "default",
-      status: "enabled",
+    expect(openclawAgent).toMatchObject({
+      collectionStatus: "online",
+      id: "openclaw-config-device:runtime:openclaw:agent:main",
+      name: "main",
     });
+    expect(openclawAgent).not.toHaveProperty("channelBindings");
+    expect(openclawAgent).not.toHaveProperty("origin");
   });
 
-  it("maps OpenClaw historical sessions without treating them as active sessions", () => {
+  it("keeps OpenClaw historical sessions out of product load fields", () => {
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-openclaw-home-"));
     const fakeBin = mkdtempSync(path.join(tmpdir(), "lorume-openclaw-bin-"));
     writeFakeOpenClaw(fakeBin, {
@@ -1887,17 +1888,18 @@ process.exit(1);
 
     const snapshot = JSON.parse(output);
     const runtime = snapshot.runtimes.find((candidate: { kind: string }) => candidate.kind === "openclaw");
-    const agent = snapshot.agents.find((candidate: { origin: string }) => candidate.origin === "openclaw");
+    const agent = snapshot.agents.find((candidate: { runtimeId: string }) => candidate.runtimeId === runtime.id);
 
-    expect(runtime.health).toMatchObject({ historicalSessions: 12 });
-    expect(runtime.health).not.toHaveProperty("activeSessions");
-    expect(agent.status).toBe("idle");
-    expect(agent.load).toMatchObject({ historicalSessions: 12 });
-    expect(agent.load).not.toHaveProperty("activeSessions");
+    expect(runtime.collectionStatus).toBe("online");
+    expect(runtime).not.toHaveProperty("health");
+    expect(runtime).not.toHaveProperty("capabilities");
+    expect(agent.collectionStatus).toBe("online");
+    expect(agent).not.toHaveProperty("load");
+    expect(agent).not.toHaveProperty("origin");
     expect(agent.lastSeenAt).toBe(snapshot.observedAt);
   });
 
-  it("maps Slock workspace-only agents as unknown instead of active", () => {
+  it("does not collect Slock workspace-only agents in device-state", () => {
     const fakeHome = mkdtempSync(path.join(tmpdir(), "lorume-slock-home-"));
     const agentDir = path.join(fakeHome, ".slock", "agents", "tester");
     mkdirSync(agentDir, { recursive: true });
@@ -1920,10 +1922,10 @@ process.exit(1);
     });
 
     const snapshot = JSON.parse(output);
-    const agent = snapshot.agents.find((candidate: { origin: string }) => candidate.origin === "slock");
 
-    expect(agent.status).toBe("unknown");
-    expect(agent.lastSeenAt).toBe(snapshot.observedAt);
+    expect(snapshot.runtimes).toEqual([]);
+    expect(snapshot.agents).toEqual([]);
+    expect(snapshot.tasks).toEqual([]);
   });
 });
 
@@ -2287,7 +2289,7 @@ async function startSnapshotServer(options: {
   const receivedSnapshot = new Promise<Record<string, unknown>>((resolve) => {
     server = createServer((request, response) => {
       expect(request.method).toBe("POST");
-      expect(request.url).toBe("/api/device-snapshots");
+      expect(request.url).toBe("/api/device-state-snapshots");
       if (options.expectedAuthorization) {
         expect(request.headers.authorization).toBe(options.expectedAuthorization);
       }
@@ -2488,7 +2490,7 @@ async function startControlServer(options: {
     let resolved = false;
     const timeout = setTimeout(() => reject(new Error("collector startup upload timed out")), 5000);
     const maybeResolve = () => {
-      if (resolved || !helloMessage || !heartbeatMessage || snapshots.length === 0 || workStateSnapshots.length === 0) return;
+      if (resolved || !helloMessage || !heartbeatMessage || snapshots.length === 0) return;
       resolved = true;
       clearTimeout(timeout);
       resolve({
@@ -2503,7 +2505,7 @@ async function startControlServer(options: {
       if (
         request.method !== "POST"
         || ![
-          "/api/device-snapshots",
+          "/api/device-state-snapshots",
           "/api/runtime-work-state-snapshots",
         ].includes(request.url ?? "")
       ) {
@@ -2519,7 +2521,7 @@ async function startControlServer(options: {
       });
       request.on("end", () => {
         const snapshot = JSON.parse(body);
-        if (request.url === "/api/device-snapshots") snapshots.push(snapshot);
+        if (request.url === "/api/device-state-snapshots") snapshots.push(snapshot);
         if (request.url === "/api/runtime-work-state-snapshots") workStateSnapshots.push(snapshot);
         response.writeHead(201, { "content-type": "application/json" });
         response.end(JSON.stringify({ ok: true }));

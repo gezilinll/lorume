@@ -26,6 +26,7 @@ describeDb("Postgres runtime store", () => {
           collectorIngestions: 2,
           devices: 1,
           runtimes: 2,
+          tasks: 0,
           workConversations: 1,
           workExecutions: 1,
           workItems: 1,

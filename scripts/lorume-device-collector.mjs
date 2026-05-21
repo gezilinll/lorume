@@ -244,7 +244,7 @@ function collectSnapshot(config, args) {
 }
 
 function collectSnapshotViaLorumeCli(config, args) {
-  const cliArgs = ["collect", "inventory", "--json"];
+  const cliArgs = ["collect", "device-state", "--json"];
   if (args.configPath) cliArgs.push("--config", args.configPath);
   if (args.fixturePath) cliArgs.push("--snapshot", args.fixturePath);
   const identity = resolveCliDeviceIdentity(config, args);
@@ -257,8 +257,8 @@ function resolveDeviceToken(config, args) {
 }
 
 async function postSnapshot(serverUrl, snapshot, deviceToken = "") {
-  const url = new URL("/api/device-snapshots", serverUrl);
-  await postJsonWithRetry(url, snapshot, "Snapshot", deviceToken);
+  const url = new URL("/api/device-state-snapshots", serverUrl);
+  await postJsonWithRetry(url, snapshot, "Device state snapshot", deviceToken);
 }
 
 async function postWorkStateSnapshot(serverUrl, snapshot, deviceToken = "") {
@@ -299,24 +299,24 @@ async function runOnce(config, args) {
   const logger = createCollectorLogger(config);
   const snapshot = collectSnapshot(config, args);
   logger.info({
-    event: "inventory_collected",
+    event: "device_state_collected",
     deviceId: snapshot.device.id,
     counts: {
-      runtimes: snapshot.runtimes.length,
-      agents: snapshot.agents.length,
-      reports: snapshot.reports.length,
+      runtimes: snapshot.runtimes?.length ?? 0,
+      agents: snapshot.agents?.length ?? 0,
+      tasks: snapshot.tasks?.length ?? 0,
     },
   });
   const serverUrl = args.serverUrl || config.serverUrl || "";
   if (serverUrl && !args.printOnly) {
     await postSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
     logger.info({
-      event: "inventory_upload_succeeded",
+      event: "device_state_upload_succeeded",
       deviceId: snapshot.device.id,
       counts: {
-        runtimes: snapshot.runtimes.length,
-        agents: snapshot.agents.length,
-        reports: snapshot.reports.length,
+        runtimes: snapshot.runtimes?.length ?? 0,
+        agents: snapshot.agents?.length ?? 0,
+        tasks: snapshot.tasks?.length ?? 0,
       },
     });
   }
@@ -407,9 +407,8 @@ async function runWorkStateOnce(config, args) {
 }
 
 async function refreshSnapshots(config, args) {
-  const inventorySnapshot = await runOnce(config, args);
-  const workStateSnapshot = await runWorkStateOnce(config, args);
-  return { inventorySnapshot, workStateSnapshot };
+  const deviceStateSnapshot = await runOnce(config, args);
+  return { deviceStateSnapshot };
 }
 
 function createRefreshRunner(config, args) {

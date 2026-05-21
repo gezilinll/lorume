@@ -46,6 +46,7 @@ describeDb("database migrations", () => {
           "runtimes",
           "schema_migrations",
           "sessions",
+          "tasks",
           "users",
           "work_conversations",
           "work_executions",
@@ -58,6 +59,7 @@ describeDb("database migrations", () => {
           "0008_notification_read_state",
           "0009_agent_skill_probing",
           "0010_narrow_device_facts",
+          "0011_device_state_tasks",
         ]);
       } finally {
         await client.end();

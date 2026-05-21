@@ -11,10 +11,13 @@ import {
   type AgentSkillProbeSnapshot,
   type AgentSkillProbeStatus,
 } from "../runtime/agent-skill-probe";
+import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
 import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
+import type { CollectionHealthIngestion } from "../runtime/runtime-collection-health";
 import type { OperationRow, OperationStatus, OperationStore } from "../operations/operation-store";
 
 const maxJsonBodyChars = 10_000_000;
+type CollectorSnapshotType = "inventory" | "work_state" | "device_state";
 
 /** Dependencies for the Runtime Fleet local HTTP API. */
 export interface RuntimeHttpApiHandlerOptions {
@@ -164,6 +167,34 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
+    if (request.method === "POST" && requestUrl.pathname === "/api/device-state-snapshots") {
+      const deviceAuth = await authorizeDeviceWrite(options, request, response);
+      if (deviceAuth === null) return;
+      if (!options.postgresStore) {
+        sendJson(response, 503, { error: "postgres_store_unavailable" });
+        return;
+      }
+      let body: unknown = undefined;
+      try {
+        body = await readJsonBody(request);
+        const snapshot = normalizeDeviceStateSnapshot(enrichDeviceStateSnapshotWithRequestNetwork(body, request));
+        if (!snapshot) throw new Error("invalid device state snapshot");
+        await options.postgresStore.upsertDeviceStateSnapshot(snapshot);
+        sendJson(response, 201, {
+          ok: true,
+          deviceId: snapshot.device.id,
+          observedAt: snapshot.observedAt,
+        });
+      } catch (error) {
+        const errorResponse = createErrorResponse(error, "invalid_device_state_snapshot");
+        await recordFailedCollectorIngestion(options, "device_state", body, error);
+        await notifyFailedCollectorIngestion(options, "device_state", body, error, deviceAuth);
+        logCollectorIngestionFailure(options, "device_state", body, errorResponse);
+        sendJson(response, statusCodeForWriteError(error), errorResponse);
+      }
+      return;
+    }
+
     if (request.method === "POST" && requestUrl.pathname === "/api/device-snapshots") {
       const deviceAuth = await authorizeDeviceWrite(options, request, response);
       if (deviceAuth === null) return;
@@ -243,7 +274,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         deviceId,
         now,
         connection: options.store.readDeviceConnection(deviceId, now),
-        inventoryIngestions: await options.postgresStore.listCollectorIngestions(deviceId),
+        inventoryIngestions: toCollectionHealthIngestions(await options.postgresStore.listCollectorIngestions(deviceId)),
       }));
       return;
     }
@@ -486,6 +517,21 @@ function enrichInventorySnapshotWithRequestNetwork(value: unknown, request: Inco
   };
 }
 
+function enrichDeviceStateSnapshotWithRequestNetwork(value: unknown, request: IncomingMessage): unknown {
+  return enrichInventorySnapshotWithRequestNetwork(value, request);
+}
+
+function toCollectionHealthIngestions(
+  rows: Array<{ snapshotType: CollectorSnapshotType } & Omit<CollectionHealthIngestion, "snapshotType">>,
+): CollectionHealthIngestion[] {
+  return rows
+    .filter((row) => row.snapshotType === "inventory" || row.snapshotType === "work_state")
+    .map((row) => ({
+      ...row,
+      snapshotType: row.snapshotType as CollectionHealthIngestion["snapshotType"],
+    }));
+}
+
 function readCollectorPublicIp(request: IncomingMessage): string {
   const forwardedFor = readHeaderValue(request.headers["x-forwarded-for"]);
   const forwardedCandidate = forwardedFor.split(",").map((part) => normalizeIpAddress(part)).find(Boolean);
@@ -532,14 +578,12 @@ async function authorizeDeviceWrite(
 
 async function recordFailedCollectorIngestion(
   options: RuntimeHttpApiHandlerOptions,
-  snapshotType: "inventory" | "work_state",
+  snapshotType: CollectorSnapshotType,
   body: unknown,
   error: unknown,
 ): Promise<void> {
   if (!options.postgresStore) return;
-  const errorResponse = createErrorResponse(error, snapshotType === "inventory"
-    ? "invalid_collector_snapshot"
-    : "invalid_work_state_snapshot");
+  const errorResponse = createErrorResponse(error, fallbackErrorCodeForSnapshotType(snapshotType));
   await options.postgresStore.recordFailedCollectorIngestion({
     deviceId: extractDeviceId(snapshotType, body),
     error: `${errorResponse.error}: ${errorResponse.message}`,
@@ -550,7 +594,7 @@ async function recordFailedCollectorIngestion(
 
 function logCollectorIngestionFailure(
   options: RuntimeHttpApiHandlerOptions,
-  snapshotType: "inventory" | "work_state",
+  snapshotType: CollectorSnapshotType,
   body: unknown,
   errorResponse: { error: string; message: string },
 ): void {
@@ -564,7 +608,7 @@ function logCollectorIngestionFailure(
 
 async function notifyFailedCollectorIngestion(
   options: RuntimeHttpApiHandlerOptions,
-  snapshotType: "inventory" | "work_state",
+  snapshotType: CollectorSnapshotType,
   body: unknown,
   error: unknown,
   deviceAuth: unknown,
@@ -577,7 +621,7 @@ async function notifyFailedCollectorIngestion(
     await options.collectorNotifications.listRecipientUserIds(organizationId, deviceId).catch(() => []),
   );
   if (recipients.length === 0) return;
-  const label = snapshotType === "inventory" ? "设备资产" : "工作态";
+  const label = labelForSnapshotType(snapshotType);
   await options.collectorNotifications.createNotificationEvent({
     dedupeKey: `runtime:collector:${deviceId}:${snapshotType}:failed`,
     emailCooldownMs: 30 * 60 * 1000,
@@ -608,17 +652,29 @@ function errorSummary(error: unknown): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
-function extractDeviceId(snapshotType: "inventory" | "work_state", body: unknown): string {
+function extractDeviceId(snapshotType: CollectorSnapshotType, body: unknown): string {
   if (!body || typeof body !== "object") return "unknown";
   const candidate = body as Record<string, unknown>;
   if (snapshotType === "work_state" && typeof candidate.deviceId === "string") return candidate.deviceId;
-  if (snapshotType === "inventory") {
+  if (snapshotType === "inventory" || snapshotType === "device_state") {
     const device = candidate.device;
     if (device && typeof device === "object" && typeof (device as Record<string, unknown>).id === "string") {
       return (device as Record<string, string>).id;
     }
   }
   return "unknown";
+}
+
+function fallbackErrorCodeForSnapshotType(snapshotType: CollectorSnapshotType): string {
+  if (snapshotType === "inventory") return "invalid_collector_snapshot";
+  if (snapshotType === "device_state") return "invalid_device_state_snapshot";
+  return "invalid_work_state_snapshot";
+}
+
+function labelForSnapshotType(snapshotType: CollectorSnapshotType): string {
+  if (snapshotType === "inventory") return "设备资产";
+  if (snapshotType === "device_state") return "设备状态";
+  return "工作态";
 }
 
 function extractObservedAt(body: unknown): string | undefined {

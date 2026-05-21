@@ -130,6 +130,58 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
+  it("persists unified device-state snapshots without creating legacy execution rows", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runMigrationsScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createDeviceStateSnapshot();
+
+        const response = await postJson(`${baseUrl}/api/device-state-snapshots`, deviceStateSnapshot);
+        const counts = await postgresStore.readEntityCounts();
+        const fleetResponse = await fetch(`${baseUrl}/api/runtime-fleet`);
+        const ingestionsResponse = await fetch(`${baseUrl}/api/devices/openclaw-device/ingestions`);
+
+        expect(response.status).toBe(201);
+        await expect(response.json()).resolves.toMatchObject({
+          deviceId: "openclaw-device",
+          observedAt: "2026-05-21T03:00:00.000Z",
+          ok: true,
+        });
+        expect(counts).toMatchObject({
+          agents: 1,
+          devices: 1,
+          runtimes: 1,
+          tasks: 1,
+          workConversations: 0,
+          workExecutions: 0,
+          workItems: 0,
+        });
+        await expect(fleetResponse.json()).resolves.toMatchObject({
+          summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1 },
+          devices: [expect.objectContaining({ id: "openclaw-device", collectionStatus: "online" })],
+          runtimes: [expect.objectContaining({ id: "openclaw-device:runtime:openclaw", collectionStatus: "online" })],
+          agents: [expect.objectContaining({ id: "openclaw-device:runtime:openclaw:agent:main", collectionStatus: "online" })],
+        });
+        await expect(ingestionsResponse.json()).resolves.toMatchObject({
+          ingestions: [
+            expect.objectContaining({
+              counts: expect.objectContaining({ tasks: 1 }),
+              snapshotType: "device_state",
+              status: "succeeded",
+            }),
+          ],
+        });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("records failed collector ingestions for invalid snapshots", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -369,6 +421,58 @@ function postJson(url: string, payload: unknown): Promise<Response> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+function createDeviceStateSnapshot() {
+  return {
+    observedAt: "2026-05-21T03:00:00.000Z",
+    device: {
+      id: "openclaw-device",
+      hostname: "openclaw.local",
+      os: "darwin",
+      architecture: "arm64",
+      collectionStatus: "online",
+      lastSeenAt: "2026-05-21T03:00:00.000Z",
+      collector: { version: "0.1.0" },
+      user: { username: "tester" },
+      network: { localIps: ["192.168.1.10"] },
+    },
+    runtimes: [{
+      id: "openclaw-device:runtime:openclaw",
+      deviceId: "openclaw-device",
+      kind: "openclaw",
+      name: "OpenClaw Gateway",
+      version: "openclaw 1.0.0",
+      collectionStatus: "online",
+      lastSeenAt: "2026-05-21T03:00:00.000Z",
+    }],
+    agents: [{
+      id: "openclaw-device:runtime:openclaw:agent:main",
+      runtimeId: "openclaw-device:runtime:openclaw",
+      name: "main",
+      collectionStatus: "online",
+      lastSeenAt: "2026-05-21T03:00:00.000Z",
+    }],
+    tasks: [{
+      id: "openclaw-device:runtime:openclaw:agent:main:task:task-1",
+      agentId: "openclaw-device:runtime:openclaw:agent:main",
+      title: "检查线上告警",
+      description: "检查线上告警并回复群里",
+      status: "in_progress",
+      source: { externalId: "task-1" },
+      channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-live" },
+      conversation: {
+        title: "DingTalk 群聊",
+        externalId: "group-live",
+        lastActivityAt: "2026-05-21T03:05:00.000Z",
+      },
+      creator: { name: "张三" },
+      createdAt: "2026-05-21T03:00:00.000Z",
+      updatedAt: "2026-05-21T03:05:00.000Z",
+      lastSeenAt: "2026-05-21T03:05:00.000Z",
+    }],
+    diagnostics: { warnings: ["fixture warning"] },
+  };
 }
 
 function createWorkStateSnapshot(snapshot: RuntimeInventorySnapshot): RuntimeWorkStateSnapshot {

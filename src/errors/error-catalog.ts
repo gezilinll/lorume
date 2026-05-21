@@ -14,6 +14,7 @@ const errorMessages: Record<string, string> = {
   email_required: "请输入邮箱地址。",
   forbidden: "当前账号没有执行此操作的权限。",
   invalid_collector_snapshot: "设备采集数据无效，请检查 Lorume CLI 版本或上报结构。",
+  invalid_device_state_snapshot: "设备状态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
   invalid_device_token: "设备认证失败，请检查 Lorume CLI 的设备令牌配置。",
   invalid_json_body: "请求内容不是有效的 JSON。",
   invalid_or_expired_code: "验证码无效或已过期，请重新获取验证码。",
@@ -30,6 +31,7 @@ const errorMessages: Record<string, string> = {
 
 const technicalCodePatterns: Array<[RegExp, string]> = [
   [/invalid runtime inventory snapshot/i, "invalid_collector_snapshot"],
+  [/invalid device state snapshot/i, "invalid_device_state_snapshot"],
   [/invalid collector snapshot/i, "invalid_collector_snapshot"],
   [/invalid snapshot/i, "invalid_collector_snapshot"],
   [/invalid runtime work state snapshot/i, "invalid_work_state_snapshot"],

@@ -13,14 +13,18 @@ import type {
 } from "../runtime/runtime-normalize";
 import {
   deriveDeviceCollectionHealth,
+  type CollectionHealthIngestion,
   type DeviceCollectionHealth,
 } from "../runtime/runtime-collection-health";
 import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
+import type { Agent, DeviceStateSnapshot, Runtime, Task } from "../runtime/runtime-model";
 
 const { Pool } = pg;
+
+type CollectorSnapshotType = "inventory" | "work_state" | "device_state";
 
 /** Construction options for the Postgres-backed Lorume repository. */
 export interface PostgresStoreOptions {
@@ -33,7 +37,7 @@ export interface PostgresIngestionResult {
   /** Device that produced the snapshot. */
   deviceId: string;
   /** Snapshot type persisted by the repository. */
-  snapshotType: "inventory" | "work_state";
+  snapshotType: CollectorSnapshotType;
   /** Object counts written by this ingestion. */
   counts: Record<string, number>;
 }
@@ -47,6 +51,7 @@ export interface PostgresEntityCounts {
   workItems: number;
   workConversations: number;
   workExecutions: number;
+  tasks: number;
   agentSkillProbeSnapshots: number;
   collectorIngestions: number;
 }
@@ -54,7 +59,7 @@ export interface PostgresEntityCounts {
 /** Query row for one collector ingestion. */
 export interface PostgresCollectorIngestion {
   deviceId: string;
-  snapshotType: "inventory" | "work_state";
+  snapshotType: CollectorSnapshotType;
   status: "succeeded" | "failed";
   observedAt: string | Date | null;
   receivedAt: string | Date;
@@ -126,6 +131,8 @@ export interface PostgresStore {
   upsertInventorySnapshot: (snapshot: RuntimeInventorySnapshot) => Promise<PostgresIngestionResult>;
   /** Upsert a normalized work-state snapshot and record collector ingestion metadata. */
   upsertWorkStateSnapshot: (snapshot: RuntimeWorkStateSnapshot) => Promise<PostgresIngestionResult>;
+  /** Upsert a unified Device / Runtime / Agent / Task snapshot. */
+  upsertDeviceStateSnapshot: (snapshot: DeviceStateSnapshot) => Promise<PostgresIngestionResult>;
   /** Record a failed collector ingestion when a report cannot be persisted as a valid snapshot. */
   recordFailedCollectorIngestion: (input: PostgresFailedCollectorIngestionInput) => Promise<void>;
   /** Verify the repository can serve backend traffic. */
@@ -157,7 +164,7 @@ export interface PostgresFailedCollectorIngestionInput {
   /** Best-known device id from the invalid payload, or `unknown`. */
   deviceId: string;
   /** Snapshot endpoint that received the invalid report. */
-  snapshotType: "inventory" | "work_state";
+  snapshotType: CollectorSnapshotType;
   /** Observed timestamp from the invalid payload when available. */
   observedAt?: string;
   /** Warning strings extracted before failure. */
@@ -274,6 +281,36 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         return { deviceId: snapshot.deviceId, snapshotType: "work_state", counts };
       });
     },
+    upsertDeviceStateSnapshot(snapshot) {
+      return withTransaction(pool, async (client) => {
+        await upsertDeviceStateDevice(client, snapshot);
+        for (const runtime of snapshot.runtimes) await upsertDeviceStateRuntime(client, runtime);
+        const runtimeKindById = new Map(snapshot.runtimes.map((runtime) => [runtime.id, runtime.kind]));
+        for (const agent of snapshot.agents) {
+          await upsertDeviceStateAgent(client, agent, runtimeKindById.get(agent.runtimeId) ?? "unknown");
+        }
+        await deleteExistingTasksForDevice(client, snapshot.device.id);
+        for (const task of snapshot.tasks) await upsertTask(client, snapshot.device.id, task);
+        await deleteStaleInventoryObjects(client, snapshot);
+
+        const counts = {
+          agents: snapshot.agents.length,
+          devices: 1,
+          runtimes: snapshot.runtimes.length,
+          tasks: snapshot.tasks.length,
+        };
+        await insertCollectorIngestion(client, {
+          counts,
+          deviceId: snapshot.device.id,
+          error: null,
+          observedAt: snapshot.observedAt,
+          snapshotType: "device_state",
+          status: "succeeded",
+          warnings: snapshot.diagnostics?.warnings ?? [],
+        });
+        return { deviceId: snapshot.device.id, snapshotType: "device_state", counts };
+      });
+    },
     async recordFailedCollectorIngestion(input) {
       await insertCollectorIngestion(pool, {
         counts: {},
@@ -298,6 +335,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           agentSkillProbeSnapshots: await countTable(client, "agent_skill_probe_snapshots"),
           devices: await countTable(client, "devices"),
           runtimes: await countTable(client, "runtimes"),
+          tasks: await countTable(client, "tasks"),
           workConversations: await countTable(client, "work_conversations"),
           workExecutions: await countTable(client, "work_executions"),
           workItems: await countTable(client, "work_items"),
@@ -472,7 +510,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
     },
     listCollectorIngestions,
     async readDeviceCollectionHealth(deviceId) {
-      return deriveDeviceCollectionHealth(deviceId, await listCollectorIngestions(deviceId));
+      return deriveDeviceCollectionHealth(deviceId, toCollectionHealthIngestions(await listCollectorIngestions(deviceId)));
     },
     close() {
       return pool.end();
@@ -571,12 +609,101 @@ async function upsertAgent(client: pg.PoolClient, agent: RuntimeInventorySnapsho
   ]);
 }
 
+async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceStateSnapshot): Promise<void> {
+  await client.query(`
+    INSERT INTO devices (
+      id, hostname, os, architecture, collector, last_seen_at, observed_at, raw, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, now())
+    ON CONFLICT (id) DO UPDATE SET
+      hostname = excluded.hostname,
+      os = excluded.os,
+      architecture = excluded.architecture,
+      collector = excluded.collector,
+      last_seen_at = excluded.last_seen_at,
+      observed_at = excluded.observed_at,
+      raw = excluded.raw,
+      updated_at = now()
+  `, [
+    snapshot.device.id,
+    snapshot.device.hostname,
+    snapshot.device.os,
+    snapshot.device.architecture ?? null,
+    toJson(snapshot.device.collector ?? {}),
+    toDate(snapshot.device.lastSeenAt),
+    toDate(snapshot.observedAt),
+    toJson(snapshot.device),
+  ]);
+}
+
+async function upsertDeviceStateRuntime(client: pg.PoolClient, runtime: Runtime): Promise<void> {
+  await client.query(`
+    INSERT INTO runtimes (
+      id, device_id, kind, name, status, version, endpoint, capabilities, health, last_seen_at, source_refs, raw, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, NULL, '[]'::jsonb, $7::jsonb, $8, '[]'::jsonb, $9::jsonb, now())
+    ON CONFLICT (id) DO UPDATE SET
+      device_id = excluded.device_id,
+      kind = excluded.kind,
+      name = excluded.name,
+      status = excluded.status,
+      version = excluded.version,
+      endpoint = excluded.endpoint,
+      capabilities = excluded.capabilities,
+      health = excluded.health,
+      last_seen_at = excluded.last_seen_at,
+      source_refs = excluded.source_refs,
+      raw = excluded.raw,
+      updated_at = now()
+  `, [
+    runtime.id,
+    runtime.deviceId,
+    runtime.kind,
+    runtime.name,
+    runtime.collectionStatus,
+    runtime.version ?? null,
+    toJson(runtime.diagnostics ?? {}),
+    toDate(runtime.lastSeenAt),
+    toJson(runtime),
+  ]);
+}
+
+async function upsertDeviceStateAgent(client: pg.PoolClient, agent: Agent, origin: string): Promise<void> {
+  await client.query(`
+    INSERT INTO agents (
+      id, runtime_id, name, origin, status, load, last_seen_at, source_refs, raw, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, $6, '[]'::jsonb, $7::jsonb, now())
+    ON CONFLICT (id) DO UPDATE SET
+      runtime_id = excluded.runtime_id,
+      name = excluded.name,
+      origin = excluded.origin,
+      status = excluded.status,
+      load = excluded.load,
+      last_seen_at = excluded.last_seen_at,
+      source_refs = excluded.source_refs,
+      raw = excluded.raw,
+      updated_at = now()
+  `, [
+    agent.id,
+    agent.runtimeId,
+    agent.name,
+    origin,
+    agent.collectionStatus,
+    toDate(agent.lastSeenAt),
+    toJson(agent),
+  ]);
+}
+
 async function deleteChannelBindingsForAgents(client: pg.PoolClient, agentIds: string[]): Promise<void> {
   if (agentIds.length === 0) return;
   await client.query("DELETE FROM channel_bindings WHERE agent_id = ANY($1::text[])", [agentIds]);
 }
 
-async function deleteStaleInventoryObjects(client: pg.PoolClient, snapshot: RuntimeInventorySnapshot): Promise<void> {
+async function deleteStaleInventoryObjects(
+  client: pg.PoolClient,
+  snapshot: { device: { id: string }; runtimes: Array<{ id: string }>; agents: Array<{ id: string }> },
+): Promise<void> {
   const runtimeIds = snapshot.runtimes.map((runtime) => runtime.id);
   const agentIds = snapshot.agents.map((agent) => agent.id);
   await client.query(`
@@ -595,6 +722,10 @@ async function deleteExistingWorkStateForDevice(client: pg.PoolClient, deviceId:
   await client.query("DELETE FROM work_executions WHERE device_id = $1", [deviceId]);
   await client.query("DELETE FROM work_items WHERE device_id = $1", [deviceId]);
   await client.query("DELETE FROM work_conversations WHERE device_id = $1", [deviceId]);
+}
+
+async function deleteExistingTasksForDevice(client: pg.PoolClient, deviceId: string): Promise<void> {
+  await client.query("DELETE FROM tasks WHERE device_id = $1", [deviceId]);
 }
 
 async function readRuntimeIdsForDevice(client: pg.PoolClient, deviceId: string): Promise<Set<string>> {
@@ -765,6 +896,53 @@ async function upsertWorkItem(
   return true;
 }
 
+async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): Promise<void> {
+  await client.query(`
+    INSERT INTO tasks (
+      id, device_id, agent_id, title, description, status, source_external_id, channel, conversation,
+      creator, assignee, error, created_source_at, updated_source_at, last_seen_at, raw, updated_at
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb,
+      $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16::jsonb, now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      device_id = excluded.device_id,
+      agent_id = excluded.agent_id,
+      title = excluded.title,
+      description = excluded.description,
+      status = excluded.status,
+      source_external_id = excluded.source_external_id,
+      channel = excluded.channel,
+      conversation = excluded.conversation,
+      creator = excluded.creator,
+      assignee = excluded.assignee,
+      error = excluded.error,
+      created_source_at = excluded.created_source_at,
+      updated_source_at = excluded.updated_source_at,
+      last_seen_at = excluded.last_seen_at,
+      raw = excluded.raw,
+      updated_at = now()
+  `, [
+    task.id,
+    deviceId,
+    task.agentId,
+    task.title,
+    task.description ?? null,
+    task.status,
+    task.source?.externalId ?? null,
+    toJson(task.channel ?? {}),
+    toJson(task.conversation ?? {}),
+    toJsonOrNull(task.creator),
+    toJsonOrNull(task.assignee),
+    task.error ?? null,
+    toDate(task.createdAt),
+    toDate(task.updatedAt),
+    toDate(task.lastSeenAt),
+    toJson(task),
+  ]);
+}
+
 async function upsertWorkExecution(
   client: pg.PoolClient,
   deviceId: string,
@@ -824,11 +1002,20 @@ function knownOptionalRef(value: string | undefined, knownIds: Set<string>): str
   return knownIds.has(value) ? value : null;
 }
 
+function toCollectionHealthIngestions(rows: PostgresCollectorIngestion[]): CollectionHealthIngestion[] {
+  return rows
+    .filter((row) => row.snapshotType === "inventory" || row.snapshotType === "work_state")
+    .map((row) => ({
+      ...row,
+      snapshotType: row.snapshotType as CollectionHealthIngestion["snapshotType"],
+    }));
+}
+
 async function insertCollectorIngestion(
   client: Pick<pg.Pool | pg.PoolClient, "query">,
   input: {
     deviceId: string;
-    snapshotType: "inventory" | "work_state";
+    snapshotType: CollectorSnapshotType;
     status: "succeeded" | "failed";
     observedAt: string;
     counts: Record<string, number>;

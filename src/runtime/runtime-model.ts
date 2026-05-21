@@ -113,12 +113,35 @@ type LooseRecord = Record<string, any>;
 export function createDeviceStateSnapshot(input: LooseRecord): DeviceStateSnapshot {
   return {
     observedAt: input.observedAt,
-    device: cleanDevice(input.device),
+    device: cleanDevice(input.device || {}),
     runtimes: Array.isArray(input.runtimes) ? input.runtimes.map(cleanRuntime) : [],
     agents: Array.isArray(input.agents) ? input.agents.map(cleanAgent) : [],
     tasks: Array.isArray(input.tasks) ? input.tasks.map(cleanTask) : [],
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
   };
+}
+
+export function normalizeDeviceStateSnapshot(input: unknown): DeviceStateSnapshot | null {
+  if (!input || typeof input !== "object") return null;
+  const snapshot = createDeviceStateSnapshot(input as LooseRecord);
+  if (!isNonEmptyString(snapshot.observedAt)) return null;
+  if (!isNonEmptyString(snapshot.device.id) || !isNonEmptyString(snapshot.device.hostname) || !isNonEmptyString(snapshot.device.os)) return null;
+  if (snapshot.runtimes.some((runtime) =>
+    !isNonEmptyString(runtime.id) ||
+    !isNonEmptyString(runtime.deviceId) ||
+    !isNonEmptyString(runtime.name)
+  )) return null;
+  if (snapshot.agents.some((agent) =>
+    !isNonEmptyString(agent.id) ||
+    !isNonEmptyString(agent.runtimeId) ||
+    !isNonEmptyString(agent.name)
+  )) return null;
+  if (snapshot.tasks.some((task) =>
+    !isNonEmptyString(task.id) ||
+    !isNonEmptyString(task.agentId) ||
+    !isNonEmptyString(task.title)
+  )) return null;
+  return snapshot;
 }
 
 export function normalizeTaskStatus(value: string): TaskStatus {
@@ -213,4 +236,8 @@ function cleanCollector(value: LooseRecord): NonNullable<Device["collector"]> {
     ...(value.installPath ? { installPath: value.installPath } : {}),
     ...(value.lastError ? { lastError: value.lastError } : {}),
   };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }

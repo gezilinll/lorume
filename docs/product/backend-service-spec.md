@@ -85,7 +85,7 @@ Collector 保持主动上报：
 - 认证后的 inventory / work-state 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
 - Collector 上报 inventory / work-state 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
 - 设备 WebSocket 在线只表示控制面可达，不等于 inventory / work-state 采集成功。采集诊断必须从 `collector_ingestions` 中最近一次 inventory 与 work-state 记录独立判断，并折叠进 Runtime Fleet 对象状态。
-- 最近同步时间只表达数据新鲜度，不单独产生 `stale` / 采集过期状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口，不在 Runtime Fleet 页面制造额外状态负担。
+- 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
 - Collector 可以在后续演进为增量采集；当前 inventory 与 work-state 都按全量 snapshot 入库，由后端通过 upsert、替换和删除 stale 对象保持当前态。
 
@@ -193,6 +193,7 @@ ECS 部署形态：
 - error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
 - structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。
 - deploy config harness：backend bundle、Dockerfile、Nginx、production-like compose 必须和当前服务入口一致。
-- production smoke harness：`npm run smoke:production` 检查 `/healthz`、`/readyz`、Runtime Fleet、Work Items 和设备采集健康查询。
+- production smoke harness：`npm run smoke:production` 是非写入型部署读检查，可以检查 `/healthz`、`/readyz`、已鉴权读 API 和 collection-health / diagnostics 读路径；不得创建 device token、运行 installer、POST collector snapshot 或写入生产数据。
+- backend API-only E2E harness：本地 isolated Postgres 加本地 backend 验证 device token 创建、installer assets、真实 collector 进程上传、Device diagnostics、query APIs 和 heartbeat-only WebSocket。
 - Playwright harness：Runtime Fleet 和 Runs 页面继续通过，且不依赖手动 dev 数据。
 - `./scripts/verify.sh` 必须包含新增 backend 检查。

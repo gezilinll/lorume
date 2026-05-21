@@ -145,6 +145,17 @@ Lorume 只展示对识别设备、排查连接和理解 runtime 来源有用的�
 
 `runtime-inventory-store` 和 `runtime-work-state-store` 仍可作为内部校验、连接状态和测试辅助使用，但不暴露 latest GET API，也不是 Runtime Fleet / Runs 的正式读取路径。
 
+Installer package 文件必须用仓库相对路径声明。当前 package manifest：
+
+| Package file | Repository source |
+|---|---|
+| `install-device-collector.sh` | `scripts/install-device-collector.sh` |
+| `lorume-device-collector.mjs` | `scripts/lorume-device-collector.mjs` |
+| `lorume-runtime-adapters.mjs` | `scripts/lorume-runtime-adapters.mjs` |
+| `lorume.mjs` | `scripts/lorume.mjs` |
+
+自动化 installer 测试必须从本地 source path 和临时 install directory 运行，证明 manifest path 存在、安装结果与仓库源文件内容一致、配置不写入 legacy 字段。自动化测试不得把已部署域名或真实服务端 HTTP 返回作为本地 installer 文件正确性的证据。
+
 ## WebSocket 控制面
 
 WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lorume，避免要求内网设备暴露公网入口。
@@ -167,10 +178,19 @@ WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lor
 - Agent availability：某个 managed agent 是否可接收任务或可见。
 - Channel binding：DingTalk、Telegram、Slack 等触达渠道或外部入口绑定是否存在且启用；Runs 页面只把用户触达渠道作为 Channel 筛选项。
 
+Device 只有四个用户可见状态：
+
+- `同步中`：尚未收到成功 inventory，且没有明确错误。
+- `在线`：heartbeat 新鲜，且最近一次 inventory 成功并处于新鲜窗口内。
+- `离线`：历史上至少有一次成功 inventory，但 heartbeat 或 inventory 新鲜度过期，且没有更新的明确错误。
+- `异常`：token 被拒绝、payload 结构非法、后端入库失败、最近一次 inventory 失败，或设备连接后超过首次同步窗口仍没有成功 inventory。
+
+Device 状态必须独立于 Runtime 和 Agent 状态推导；Runtime / Agent 工作状态不得向上卷成 Device 状态。
+
 采集状态判定：
 
 - 采集成功且数据完整度符合当前 adapter 预期时，后端记录为成功；完整、局部增量或空结果都可以是符合预期的数据形态。
-- 最近同步时间只表达数据新鲜度，不单独产生“采集过期”状态。用户可以通过最近同步时间判断是否需要排查。
+- 最近同步时间表达数据新鲜度，并作为 Device 四态判定输入之一；UI 对用户只展示 `同步中`、`在线`、`离线`、`异常` 四类状态，不额外暴露 stale 等内部状态。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或后端入库失败时，必须产出规范化错误码和用户可读 message；Runtime Fleet 展示层将相关对象折叠为 `异常`。
 - 后端和 collector 日志必须使用结构化 JSON，不记录 device token、session token、邀请 token、邮箱验证码或平台 API key。
 - 当前低成本本地方案使用 collector 侧 JSONL 日志和后端结构化日志；后续接入 SLS 时复用同一 error code / message 语义。

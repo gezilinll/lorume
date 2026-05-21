@@ -103,6 +103,7 @@ test.describe("Runtime backend API", () => {
     });
 
     await expectDeviceHeartbeatAccepted(deviceToken);
+    await expectDeviceDiagnostics(request, "fixture-mac");
   });
 
   test("accepts inventory and work-state uploaded by a real collector process", async ({ request }) => {
@@ -138,6 +139,7 @@ test.describe("Runtime backend API", () => {
     try {
       await waitForCollectorDevice(request, collector, deviceId);
       await waitForCollectorHealth(request, collector, deviceId);
+      await expectDeviceDiagnostics(request, deviceId);
     } finally {
       await stopCollector(collector);
       rmSync(collectorHome, { force: true, recursive: true });
@@ -176,6 +178,19 @@ async function createLoggedInOrganizationAndDeviceToken(
   expect(tokenBody.deviceToken.tokenHash).toBeUndefined();
 
   return { deviceToken: tokenBody.deviceToken.token, organizationId };
+}
+
+async function expectDeviceDiagnostics(
+  request: APIRequestContext,
+  deviceId: string,
+): Promise<{ deviceId?: string; status?: string; label?: string }> {
+  const response = await request.get(`/api/devices/${encodeURIComponent(deviceId)}/diagnostics`);
+  expect(response.status()).toBe(200);
+  const body = await response.json() as { deviceId?: string; status?: string; label?: string };
+  expect(body.deviceId).toBe(deviceId);
+  expect(["syncing", "online", "offline", "abnormal"]).toContain(body.status);
+  expect(["同步中", "在线", "离线", "异常"]).toContain(body.label);
+  return body;
 }
 
 async function waitForCollectorDevice(

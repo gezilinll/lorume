@@ -296,9 +296,30 @@ function sleep(milliseconds) {
 }
 
 async function runOnce(config, args) {
+  const logger = createCollectorLogger(config);
   const snapshot = collectSnapshot(config, args);
+  logger.info({
+    event: "inventory_collected",
+    deviceId: snapshot.device.id,
+    counts: {
+      runtimes: snapshot.runtimes.length,
+      agents: snapshot.agents.length,
+      reports: snapshot.reports.length,
+    },
+  });
   const serverUrl = args.serverUrl || config.serverUrl || "";
-  if (serverUrl && !args.printOnly) await postSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
+  if (serverUrl && !args.printOnly) {
+    await postSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
+    logger.info({
+      event: "inventory_upload_succeeded",
+      deviceId: snapshot.device.id,
+      counts: {
+        runtimes: snapshot.runtimes.length,
+        agents: snapshot.agents.length,
+        reports: snapshot.reports.length,
+      },
+    });
+  }
   if (args.printOnly || !serverUrl) console.log(JSON.stringify(snapshot, null, 2));
   return snapshot;
 }
@@ -366,10 +387,20 @@ function stripCliCommand(value) {
 }
 
 async function runWorkStateOnce(config, args) {
+  const logger = createCollectorLogger(config);
   const snapshot = await collectWorkStateSnapshot(config, args);
   const serverUrl = args.serverUrl || config.serverUrl || "";
   if (serverUrl && !args.printOnly) {
     await postWorkStateSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
+    logger.info({
+      event: "work_state_upload_succeeded",
+      deviceId: snapshot.deviceId,
+      counts: {
+        workItems: snapshot.workItems.length,
+        conversations: snapshot.conversations.length,
+        executions: snapshot.executions.length,
+      },
+    });
   }
   if (args.printOnly || !serverUrl) console.log(JSON.stringify(snapshot, null, 2));
   return snapshot;

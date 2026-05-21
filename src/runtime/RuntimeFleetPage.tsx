@@ -11,6 +11,7 @@ import {
   listRuntimeFleetRuntimeKindOptions,
   runtimeAgentLastSeenAt,
   runtimeFleetObjectStatusLabels,
+  runtimeFleetStatusFromDeviceHealth,
   runtimeKindLabels,
   summarizeRuntimeFleet,
   type RuntimeFleetDetail,
@@ -30,6 +31,7 @@ import {
   runtimeWorkItemsQueryPageFromResponse,
 } from "./runtime-work-query-api";
 import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
+import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
 import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
@@ -83,6 +85,7 @@ export function RuntimeFleetPage() {
   );
   const [workStateSnapshot, setWorkStateSnapshot] = useState<RuntimeWorkStateSnapshot | null>(null);
   const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth[]>([]);
+  const [deviceDiagnostics, setDeviceDiagnostics] = useState<DeviceHealthStatusResult[]>([]);
   const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [query, setQuery] = useState("");
@@ -120,6 +123,22 @@ export function RuntimeFleetPage() {
     return health.filter((value): value is DeviceCollectionHealth => Boolean(value));
   }
 
+  async function fetchDeviceDiagnostics(deviceId: string): Promise<DeviceHealthStatusResult | null> {
+    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/diagnostics`);
+    if (!response.ok) return null;
+    return deviceHealthFromResponse(await response.json());
+  }
+
+  async function fetchDeviceDiagnosticsForDevices(
+    latestSnapshot: RuntimeInventorySnapshot,
+  ): Promise<DeviceHealthStatusResult[]> {
+    const devices = latestSnapshot.devices ?? [latestSnapshot.device];
+    const diagnostics = await Promise.all(
+      devices.map((device) => fetchDeviceDiagnostics(device.id).catch(() => null)),
+    );
+    return diagnostics.filter((value): value is DeviceHealthStatusResult => Boolean(value));
+  }
+
   async function fetchLatestWorkStateSnapshot(): Promise<RuntimeWorkStateSnapshot | null> {
     let cursor: string | undefined;
     let snapshot: RuntimeWorkStateSnapshot | null = null;
@@ -139,10 +158,12 @@ export function RuntimeFleetPage() {
     latestSnapshot: RuntimeInventorySnapshot,
     latestWorkState: RuntimeWorkStateSnapshot | null,
     latestCollectionHealth: DeviceCollectionHealth[],
+    latestDeviceDiagnostics: DeviceHealthStatusResult[],
   ) {
     setSnapshot(latestSnapshot);
     setWorkStateSnapshot(latestWorkState);
     setCollectionHealth(latestCollectionHealth);
+    setDeviceDiagnostics(latestDeviceDiagnostics);
     setLoadError("");
     setLastLoadedAt(new Date().toISOString());
   }
@@ -154,11 +175,14 @@ export function RuntimeFleetPage() {
       try {
         const latestSnapshot = await fetchLatestSnapshot();
         if (!latestSnapshot) return;
-        const [latestWorkState, latestCollectionHealth] = await Promise.all([
+        const [latestWorkState, latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
           fetchLatestWorkStateSnapshot(),
           fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
+          fetchDeviceDiagnosticsForDevices(latestSnapshot).catch(() => []),
         ]);
-        if (!cancelled) applySnapshot(latestSnapshot, latestWorkState, latestCollectionHealth);
+        if (!cancelled) {
+          applySnapshot(latestSnapshot, latestWorkState, latestCollectionHealth, latestDeviceDiagnostics);
+        }
       } catch {
         if (!allowFixtureFallback && !cancelled) {
           setLoadError("后端查询失败，无法读取正式运行资产");
@@ -181,6 +205,10 @@ export function RuntimeFleetPage() {
     () => new Map(collectionHealth.map((health) => [health.deviceId, health])),
     [collectionHealth],
   );
+  const deviceDiagnosticsByDeviceId = useMemo(
+    () => new Map(deviceDiagnostics.map((diagnostic) => [diagnostic.deviceId, diagnostic])),
+    [deviceDiagnostics],
+  );
   useEffect(() => {
     if (runtimeKind !== "all" && !runtimeKindOptions.some((option) => option.value === runtimeKind)) {
       setRuntimeKind("all");
@@ -194,7 +222,14 @@ export function RuntimeFleetPage() {
   const result = useMemo(() => filterRuntimeFleet(snapshot, filters), [filters, snapshot]);
   const summary = useMemo(() => summarizeRuntimeFleet(snapshot, workStateSnapshot), [snapshot, workStateSnapshot]);
   const detail = selection
-    ? getRuntimeFleetDetail(snapshot, selection.kind, selection.id, workStateSnapshot, collectionHealthByDeviceId)
+    ? getRuntimeFleetDetail(
+      snapshot,
+      selection.kind,
+      selection.id,
+      workStateSnapshot,
+      collectionHealthByDeviceId,
+      deviceDiagnosticsByDeviceId,
+    )
     : null;
 
   async function fetchAgentSkillProbe(agentId: string): Promise<AgentSkillProbeSnapshot> {
@@ -343,6 +378,7 @@ export function RuntimeFleetPage() {
         <div className="runtimeStack">
           <DevicePanel
             collectionHealthByDeviceId={collectionHealthByDeviceId}
+            deviceDiagnosticsByDeviceId={deviceDiagnosticsByDeviceId}
             devices={result.devices}
             snapshot={snapshot}
             selectedId={selection?.kind === "device" ? selection.id : undefined}
@@ -468,6 +504,38 @@ function deviceCollectionHealthFromResponse(value: unknown): DeviceCollectionHea
   };
 }
 
+function deviceHealthFromResponse(value: unknown): DeviceHealthStatusResult | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<DeviceHealthStatusResult>;
+  if (
+    typeof candidate.deviceId !== "string"
+    || !isDeviceHealthStatus(candidate.status)
+    || !isDeviceHealthLabel(candidate.label)
+    || typeof candidate.reason !== "string"
+    || typeof candidate.message !== "string"
+  ) {
+    return null;
+  }
+  return {
+    deviceId: candidate.deviceId,
+    label: candidate.label,
+    lastHeartbeatAt: typeof candidate.lastHeartbeatAt === "string" ? candidate.lastHeartbeatAt : undefined,
+    lastInventoryFailureAt: typeof candidate.lastInventoryFailureAt === "string" ? candidate.lastInventoryFailureAt : undefined,
+    lastInventorySuccessAt: typeof candidate.lastInventorySuccessAt === "string" ? candidate.lastInventorySuccessAt : undefined,
+    message: candidate.message,
+    reason: candidate.reason as DeviceHealthStatusResult["reason"],
+    status: candidate.status,
+  };
+}
+
+function isDeviceHealthStatus(value: unknown): value is DeviceHealthStatus {
+  return value === "syncing" || value === "online" || value === "offline" || value === "abnormal";
+}
+
+function isDeviceHealthLabel(value: unknown): value is DeviceHealthStatusResult["label"] {
+  return value === "同步中" || value === "在线" || value === "离线" || value === "异常";
+}
+
 function isCollectionHealthCheck(value: unknown): value is CollectionHealthCheck {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<CollectionHealthCheck>;
@@ -524,12 +592,14 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
 
 function DevicePanel({
   collectionHealthByDeviceId,
+  deviceDiagnosticsByDeviceId,
   devices,
   snapshot,
   selectedId,
   onSelect,
 }: {
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
+  deviceDiagnosticsByDeviceId: ReadonlyMap<string, Pick<DeviceHealthStatusResult, "label" | "status">>;
   devices: RuntimeInventorySnapshot["device"][];
   snapshot: RuntimeInventorySnapshot;
   selectedId?: string;
@@ -547,29 +617,33 @@ function DevicePanel({
       {devices.length === 0 ? (
         <EmptyAsset message="没有匹配的设备" />
       ) : (
-        devices.map((device) => (
-          <button
-            className={
-              device.id === selectedId ? "deviceSummary deviceSummaryActive" : "deviceSummary"
-            }
-            key={device.id}
-            type="button"
-            onClick={() => onSelect(device.id)}
-          >
-            <span className="iconSquare">
-              <PixelIcon name="monitor" size={18} />
-            </span>
-            <span>
-              <strong>{device.id}</strong>
-              <small>{device.hostname}</small>
-              <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}</small>
-            </span>
-            <StatusBadge
-              label={runtimeFleetObjectStatusLabels[deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId)]}
-              status={deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId)}
-            />
-          </button>
-        ))
+        devices.map((device) => {
+          const deviceHealth = deviceDiagnosticsByDeviceId.get(device.id);
+          const status = deviceHealth
+            ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
+            : deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
+          const label = deviceHealth?.label ?? runtimeFleetObjectStatusLabels[status];
+          return (
+            <button
+              className={
+                device.id === selectedId ? "deviceSummary deviceSummaryActive" : "deviceSummary"
+              }
+              key={device.id}
+              type="button"
+              onClick={() => onSelect(device.id)}
+            >
+              <span className="iconSquare">
+                <PixelIcon name="monitor" size={18} />
+              </span>
+              <span>
+                <strong>{device.id}</strong>
+                <small>{device.hostname}</small>
+                <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}</small>
+              </span>
+              <StatusBadge label={label} status={status} />
+            </button>
+          );
+        })
       )}
     </section>
   );

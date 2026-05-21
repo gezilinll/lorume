@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,10 @@ import { createPostgresOperationStore } from "../operations/operation-store";
 import type { RuntimeInventorySnapshot, RuntimeWorkStateSnapshot } from "../runtime";
 import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
 import { createLorumeBackendServer, type LorumeBackendServer } from "./backend-server";
+import {
+  deviceInstallerPackageManifest,
+  deviceInstallerRuntimeFiles,
+} from "./device-installer-manifest";
 
 const describeDb = shouldRunPostgresTests() ? describe : describe.skip;
 const backends: LorumeBackendServer[] = [];
@@ -21,6 +25,24 @@ afterEach(async () => {
 });
 
 describe("standalone Lorume backend server", () => {
+  it("keeps installer manifest paths repository-relative and present", () => {
+    expect(deviceInstallerPackageManifest.map((entry) => entry.fileName)).toEqual([
+      "install-device-collector.sh",
+      "lorume-device-collector.mjs",
+      "lorume-runtime-adapters.mjs",
+      "lorume.mjs",
+    ]);
+    for (const entry of deviceInstallerPackageManifest) {
+      expect(path.isAbsolute(entry.sourcePath)).toBe(false);
+      expect(readFileSync(path.join(process.cwd(), entry.sourcePath), "utf8").length).toBeGreaterThan(0);
+    }
+    expect(deviceInstallerRuntimeFiles.map((entry) => entry.fileName)).toEqual([
+      "lorume-device-collector.mjs",
+      "lorume-runtime-adapters.mjs",
+      "lorume.mjs",
+    ]);
+  });
+
   it("keeps the device control websocket available outside Vite", async () => {
     const backend = await startBackend();
     const socket = new WebSocket(`${backend.wsUrl}/api/device-control/ws`);

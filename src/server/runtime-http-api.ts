@@ -11,6 +11,7 @@ import {
   type AgentSkillProbeSnapshot,
   type AgentSkillProbeStatus,
 } from "../runtime/agent-skill-probe";
+import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
 import type { OperationRow, OperationStatus, OperationStore } from "../operations/operation-store";
 
 const maxJsonBodyChars = 10_000_000;
@@ -225,6 +226,25 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         deviceId,
         ingestions: await options.postgresStore.listCollectorIngestions(deviceId),
       });
+      return;
+    }
+
+    const diagnosticsMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/diagnostics$/);
+    if (request.method === "GET" && diagnosticsMatch) {
+      if (!(await authorizeUserRead(options, request, response))) return;
+      if (!options.postgresStore) {
+        sendJson(response, 503, { error: "postgres_store_unavailable" });
+        return;
+      }
+      const deviceId = decodeURIComponent(diagnosticsMatch[1] ?? "");
+      const nowParam = requestUrl.searchParams.get("now");
+      const now = nowParam ? new Date(nowParam) : new Date();
+      sendJson(response, 200, deriveDeviceHealthStatus({
+        deviceId,
+        now,
+        connection: options.store.readDeviceConnection(deviceId, now),
+        inventoryIngestions: await options.postgresStore.listCollectorIngestions(deviceId),
+      }));
       return;
     }
 

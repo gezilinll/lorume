@@ -16,6 +16,7 @@ import {
 } from "./runtime-inventory-query";
 import type { RuntimeInventorySnapshot } from "./runtime-normalize";
 import type { RuntimeWorkStateSnapshot } from "./runtime-work-state";
+import type { DeviceHealthStatusResult } from "./runtime-device-health";
 
 const snapshot = fixtureSnapshot as RuntimeInventorySnapshot;
 const fixtureLastSeenAt = formatRuntimeTimestamp("2026-05-08T08:00:01.000Z");
@@ -381,6 +382,37 @@ describe("runtime inventory query", () => {
     ]);
     expect(sectionItems(sections, "已注册 Runtime")).toEqual(["OpenClaw Gateway", "Slock daemon"]);
     expect((detail as { sourceLabels?: string[] })?.sourceLabels).toBeUndefined();
+  });
+
+  it("uses Device health labels without reading Runtime or Agent state", () => {
+    const onlineHealth: ReadonlyMap<string, Pick<DeviceHealthStatusResult, "label" | "status">> = new Map([[
+      "fixture-mac",
+      {
+        status: "online",
+        label: "在线",
+      },
+    ]]);
+
+    const detail = getRuntimeFleetDetail(
+      {
+        ...snapshot,
+        runtimes: snapshot.runtimes.map((runtime) => ({ ...runtime, status: "degraded" as const })),
+        agents: snapshot.agents.map((agent) => ({ ...agent, status: "inactive" as const })),
+      },
+      "device",
+      "fixture-mac",
+      undefined,
+      undefined,
+      onlineHealth,
+    );
+    const sections = detailSections(detail);
+
+    expect(detail).toMatchObject({
+      kind: "device",
+      id: "fixture-mac",
+      statusLabel: "在线",
+    });
+    expect(sectionItems(sections, "运行资产")).toContain("状态: 在线");
   });
 
   it("resolves runtime detail around ownership without agent workload statistics", () => {

@@ -90,6 +90,18 @@ function collectionHealthResponse(snapshot: RuntimeInventorySnapshot) {
   };
 }
 
+function deviceDiagnosticsResponse(snapshot: RuntimeInventorySnapshot, status = "online", label = "在线") {
+  return {
+    deviceId: snapshot.device.id,
+    status,
+    label,
+    reason: "heartbeat_and_inventory_fresh",
+    message: "设备在线且采集正常",
+    lastHeartbeatAt: "2026-05-10T10:00:00.000Z",
+    lastInventorySuccessAt: "2026-05-10T09:59:01.000Z",
+  };
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -595,6 +607,37 @@ describe("Console shell", () => {
     expect(within(screen.getByLabelText("运行资产概览")).queryByText("异常")).not.toBeInTheDocument();
     expect(screen.queryByText("未知")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "请求设备刷新" })).not.toBeInTheDocument();
+  });
+
+  it("renders Device status from diagnostics without using Runtime or Agent state", async () => {
+    const user = userEvent.setup();
+    const backendSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/runtime-fleet")) {
+        return jsonResponse(runtimeFleetQueryResponse(backendSnapshot));
+      }
+      if (url.includes("/api/runtime-work-items")) {
+        return jsonResponse(emptyWorkStateQueryResponse());
+      }
+      if (url.includes("/api/devices/fixture-mac/collection-health")) {
+        return jsonResponse(collectionHealthResponse(backendSnapshot));
+      }
+      if (url.includes("/api/devices/fixture-mac/diagnostics")) {
+        return jsonResponse(deviceDiagnosticsResponse(backendSnapshot, "online", "在线"));
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+
+    const devicePanel = await screen.findByLabelText("设备");
+    expect(within(devicePanel).getByText("在线")).toBeInTheDocument();
+
+    await user.click(within(devicePanel).getByRole("button", { name: /fixture-mac/ }));
+
+    expect(within(screen.getByLabelText("运行资产详情")).getByText("状态: 在线")).toBeInTheDocument();
   });
 
   it("loads every backend work-item page before deriving Runtime Fleet operating status", async () => {

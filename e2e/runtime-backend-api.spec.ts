@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +74,7 @@ test.describe("Runtime backend API", () => {
       items: [expect.objectContaining({
         id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
         status: "todo",
+        taskType: "conversation",
         title: "Review DingTalk request",
       })],
       total: 1,
@@ -126,6 +127,102 @@ test.describe("Runtime backend API", () => {
       await waitForCollectorDevice(request, collector, deviceId);
       await waitForCollectorHealth(request, collector, deviceId);
       await expectDeviceDiagnostics(request, deviceId);
+    } finally {
+      await stopCollector(collector);
+      rmSync(collectorHome, { force: true, recursive: true });
+    }
+  });
+
+  test("accepts OpenClaw session Tasks uploaded by a real collector process", async ({ request }) => {
+    await expect((await request.get("/healthz")).ok()).toBe(true);
+    const deviceId = "collector-openclaw-e2e-device";
+    const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
+      deviceId,
+      name: "Collector OpenClaw E2E Token",
+    });
+
+    const collectorHome = mkdtempSync(path.join(tmpdir(), "lorume-backend-e2e-openclaw-"));
+    const binDir = path.join(collectorHome, "bin");
+    const sessionDir = path.join(collectorHome, ".openclaw", "agents", "main", "sessions", "live");
+    const sessionFile = path.join(sessionDir, "run-openclaw-1.session.jsonl");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir);
+    writeFileSync(sessionFile, [
+      JSON.stringify({ role: "user", content: "帮我查一下 Seedance 模型调用情况" }),
+      JSON.stringify({
+        role: "assistant",
+        toolCall: {
+          id: "exec-sls-1",
+          name: "bash",
+          arguments: { command: "python3 scripts/query_sls.py --metric seedance" },
+        },
+      }),
+      JSON.stringify({
+        type: "toolResult",
+        toolCallId: "exec-sls-1",
+        content: "success=42 failure=3",
+      }),
+    ].join("\n"));
+    writeTrajectoryFile(sessionDir, "run-openclaw-1", {
+      finalStatus: "success",
+      prompt: "帮我查一下 Seedance 模型调用情况",
+      runtimeContext: {
+        chat_id: "group-seedance",
+        group_subject: "日常工作提醒助手",
+        message_id: "msg-seedance-1",
+        sender: "张良",
+        sender_id: "user-zhangliang",
+      },
+      sessionFile,
+      sessionKey: "agent:main:dingtalk:group:group-seedance",
+    });
+    writeTrajectoryFile(sessionDir, "cron-openclaw-1", {
+      finalStatus: "success",
+      prompt: "[cron:daily-summary] 汇总今天项目风险",
+      sessionKey: "agent:main:cron:daily-summary",
+    });
+
+    const collector = spawn(process.execPath, [
+      collectorScriptPath,
+      "--server-url",
+      backendBaseUrl,
+      "--device-id",
+      deviceId,
+      "--device-token",
+      deviceToken,
+      "--once",
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: collectorHome,
+        LORUME_COLLECTOR_LOG_PATH: path.join(collectorHome, "collector.jsonl"),
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+      },
+    });
+
+    try {
+      await waitForCollectorTask(request, collector, "conversation", {
+        id: `${deviceId}:runtime:openclaw:agent:main:task:run-openclaw-1`,
+        taskType: "conversation",
+        source: { kind: "openclaw", externalId: "msg-seedance-1" },
+        creator: { name: "张良", externalId: "user-zhangliang" },
+        toolCalls: [expect.objectContaining({
+          arguments: { command: "python3 scripts/query_sls.py --metric seedance" },
+          id: "exec-sls-1",
+          name: "bash",
+          status: "done",
+        })],
+        raw: { openclaw: expect.objectContaining({ status: "success", statusSource: "trajectory" }) },
+      });
+      await waitForCollectorTask(request, collector, "scheduled", {
+        id: `${deviceId}:runtime:openclaw:agent:main:task:cron-openclaw-1`,
+        taskType: "scheduled",
+        source: { kind: "openclaw", externalId: "cron-openclaw-1" },
+      });
+      await waitForCollectorHealth(request, collector, deviceId);
     } finally {
       await stopCollector(collector);
       rmSync(collectorHome, { force: true, recursive: true });
@@ -211,6 +308,27 @@ async function waitForCollectorHealth(
   });
 }
 
+async function waitForCollectorTask(
+  request: APIRequestContext,
+  collector: ChildProcessWithoutNullStreams,
+  taskType: "conversation" | "scheduled",
+  expectedTask: Record<string, unknown>,
+): Promise<void> {
+  let lastTasksBody: unknown = null;
+  await pollCollector(`collector ${taskType} task query`, collector, async () => {
+    const tasksResponse = await request.get(`/api/runtime-tasks?taskType=${taskType}`);
+    if (!tasksResponse.ok()) return false;
+    const body = await tasksResponse.json() as { items?: Array<Record<string, unknown>> };
+    lastTasksBody = body;
+    const task = body.items?.find((item) => item.id === expectedTask.id);
+    if (!task) return false;
+    expect(task).toMatchObject(expectedTask);
+    return true;
+  }).catch((error) => {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nlast tasks:\n${JSON.stringify(lastTasksBody, null, 2)}`);
+  });
+}
+
 async function pollCollector(
   label: string,
   collector: ChildProcessWithoutNullStreams,
@@ -248,6 +366,68 @@ async function stopCollector(collector: ChildProcessWithoutNullStreams): Promise
     });
     collector.kill("SIGTERM");
   });
+}
+
+function writeOpenClawExecutable(binDir: string): void {
+  const executablePath = path.join(binDir, "openclaw");
+  writeFileSync(executablePath, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "health") {
+  console.log(JSON.stringify({ ok: true, agents: [{ agentId: "main" }] }));
+  process.exit(0);
+}
+if (args[0] === "status") {
+  console.log(JSON.stringify({
+    gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+    agents: { agents: [{ agentId: "main" }] },
+  }));
+  process.exit(0);
+}
+console.log("{}");
+`);
+  chmodSync(executablePath, 0o755);
+}
+
+function writeTrajectoryFile(
+  sessionDir: string,
+  runId: string,
+  options: {
+    finalStatus: "success" | "error";
+    prompt: string;
+    runtimeContext?: Record<string, unknown>;
+    sessionFile?: string;
+    sessionKey: string;
+  },
+): void {
+  writeFileSync(path.join(sessionDir, `${runId}.trajectory.jsonl`), [
+    JSON.stringify({
+      type: "session.started",
+      runId,
+      sessionKey: options.sessionKey,
+      ts: "2026-05-21T06:00:00.000Z",
+      data: {
+        agentId: "main",
+        ...(options.sessionFile ? { sessionFile: options.sessionFile } : {}),
+      },
+    }),
+    JSON.stringify({
+      type: "prompt.submitted",
+      runId,
+      sessionKey: options.sessionKey,
+      ts: "2026-05-21T06:01:00.000Z",
+      data: {
+        prompt: options.prompt,
+        ...(options.runtimeContext ? { runtimeContext: options.runtimeContext } : {}),
+      },
+    }),
+    JSON.stringify({
+      type: "trace.artifacts",
+      runId,
+      sessionKey: options.sessionKey,
+      ts: "2026-05-21T06:03:00.000Z",
+      data: { finalStatus: options.finalStatus },
+    }),
+  ].join("\n"));
 }
 
 async function readLatestLoginCode(email: string): Promise<string> {

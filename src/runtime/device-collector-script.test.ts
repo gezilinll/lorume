@@ -351,16 +351,51 @@ console.log(JSON.stringify({
         "secret-device-token",
       ], { env: { ...process.env, LORUME_COLLECTOR_LOG_PATH: logPath } })).rejects.toThrow("Snapshot post failed");
 
-      const record = JSON.parse(readFileSync(logPath, "utf8").trim());
+      const records = readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      const record = records.find((entry) => entry.event === "collector_run_failed");
       expect(record).toMatchObject({
         errorCode: "collector_post_failed",
         event: "collector_run_failed",
         level: "error",
         service: "lorume-device-collector",
       });
-      expect(JSON.stringify(record)).not.toContain("secret-device-token");
+      expect(JSON.stringify(records)).not.toContain("secret-device-token");
     } finally {
       server.close();
+    }
+  });
+
+  it("writes lightweight collector diagnostics for successful local once uploads", async () => {
+    const { server, receivedSnapshot, baseUrl } = await startSnapshotServer();
+    const logDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-success-logs-"));
+    const logPath = path.join(logDir, "collector.jsonl");
+
+    try {
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--server-url",
+        baseUrl,
+        "--device-token",
+        "secret-device-token",
+      ], { env: { ...process.env, LORUME_COLLECTOR_LOG_PATH: logPath } });
+      await receivedSnapshot;
+
+      const records = readFileSync(logPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+
+      expect(records).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event: "inventory_collected", level: "info" }),
+        expect.objectContaining({ event: "inventory_upload_succeeded", level: "info" }),
+      ]));
+      expect(JSON.stringify(records)).not.toContain("secret-device-token");
+    } finally {
+      server.close();
+      rmSync(logDir, { force: true, recursive: true });
     }
   });
 

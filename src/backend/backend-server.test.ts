@@ -230,30 +230,30 @@ describeDb("standalone Lorume backend server with Postgres", () => {
         const operation = await operationStore.createOperation({
           organizationId: organization.id,
           requestedByUserId: user.id,
-          resourceId: "gezilinll-claw",
-          resourceType: "device",
-          summary: "Refresh query device",
-          type: "device_refresh",
+          resourceId: "thread_1",
+          resourceType: "notification_thread",
+          summary: "Deliver query notification",
+          type: "notification_delivery",
         });
         operationId = operation.id;
         await operationStore.enqueueJob({
           operationId: operation.id,
           organizationId: organization.id,
-          payload: { deviceId: "gezilinll-claw" },
+          payload: { threadId: "thread_1" },
           type: "notification_in_app",
         });
         await notificationStore.createNotificationEvent({
           actorUserId: user.id,
-          dedupeKey: "runtime:gezilinll-claw:refresh_queued",
-          eventType: "device_refresh_queued",
+          dedupeKey: "operation:thread_1:notification_queued",
+          eventType: "notification_delivery_queued",
           organizationId: organization.id,
           recipientUserIds: [user.id],
-          resourceId: "gezilinll-claw",
-          resourceType: "device",
+          resourceId: "thread_1",
+          resourceType: "notification_thread",
           severity: "info",
-          sourceModule: "runtime",
-          summary: "设备刷新已进入队列。",
-          title: "设备刷新排队中",
+          sourceModule: "system",
+          summary: "通知投递已进入队列。",
+          title: "通知投递排队中",
         });
       } finally {
         await Promise.all([authStore.close(), operationStore.close(), notificationStore.close()]);
@@ -278,14 +278,14 @@ describeDb("standalone Lorume backend server with Postgres", () => {
       expect(operationDetailResponse.status).toBe(200);
       expect(notificationsResponse.status).toBe(200);
       await expect(operationsResponse.json()).resolves.toMatchObject({
-        operations: [expect.objectContaining({ id: operationId, summary: "Refresh query device" })],
+        operations: [expect.objectContaining({ id: operationId, summary: "Deliver query notification" })],
       });
       await expect(operationDetailResponse.json()).resolves.toMatchObject({
         jobs: [expect.objectContaining({ operationId })],
         operation: expect.objectContaining({ id: operationId }),
       });
       await expect(notificationsResponse.json()).resolves.toMatchObject({
-        threads: expect.arrayContaining([expect.objectContaining({ title: "设备刷新排队中" })]),
+        threads: expect.arrayContaining([expect.objectContaining({ title: "通知投递排队中" })]),
       });
     } finally {
       if (backend) await closeRegisteredBackend(backend);

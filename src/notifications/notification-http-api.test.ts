@@ -39,7 +39,7 @@ describe("notification HTTP API", () => {
     const forbiddenResponse = await fetch(`${api.url}/api/notifications?organizationId=org_2`);
 
     await expect(listResponse.json()).resolves.toMatchObject({
-      threads: [expect.objectContaining({ id: "nthr_1", title: "设备刷新完成" })],
+      threads: [expect.objectContaining({ id: "nthr_1", title: "设备状态采集完成" })],
     });
     await expect(detailResponse.json()).resolves.toMatchObject({
       deliveries: [expect.objectContaining({ id: "ndlv_1", channel: "in_app" })],
@@ -99,13 +99,13 @@ function createThread(overrides: Partial<NotificationThreadRow> = {}): Notificat
   return {
     cooldownUntil: null,
     createdAt: now,
-    dedupeKey: "runtime:device_1:refreshed",
-    eventType: "device_refresh_succeeded",
+    dedupeKey: "runtime:device_1:state_collected",
+    eventType: "device_state_collected",
     firstOccurredAt: now,
     id: "nthr_default",
     isRead: false,
     lastOccurredAt: now,
-    latestSummary: "设备快照已刷新。",
+    latestSummary: "设备状态已采集。",
     occurrenceCount: 1,
     organizationId: "org_1",
     readAt: null,
@@ -114,7 +114,7 @@ function createThread(overrides: Partial<NotificationThreadRow> = {}): Notificat
     resourceType: "device",
     severity: "info",
     status: "open",
-    title: "设备刷新完成",
+    title: "设备状态采集完成",
     updatedAt: now,
     ...overrides,
   };

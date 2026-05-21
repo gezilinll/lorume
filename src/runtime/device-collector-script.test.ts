@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -65,17 +65,6 @@ console.log(JSON.stringify({
     expect(snapshot.device).not.toHaveProperty("status");
     expect(snapshot.device).not.toHaveProperty("connectionMode");
     expect(calls).toContainEqual(["collect", "device-state", "--json"]);
-  });
-
-  it("does not expose the old work-state once mode", () => {
-    const result = spawnNode([
-      collectorScript,
-      "--work-state-once",
-      "--print-only",
-    ]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Unknown argument: --work-state-once");
   });
 
   it("installs the collector from a local source path and runs a once check", () => {
@@ -374,18 +363,6 @@ console.log(JSON.stringify({
     }
   });
 });
-
-function spawnNode(args: string[]): { status: number | null; stderr: string } {
-  const result = spawnSync(process.execPath, args, {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return {
-    status: result.status,
-    stderr: result.stderr.trim(),
-  };
-}
 
 function runNodeScript(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Promise<string> {
   return runCommand(process.execPath, args, options);

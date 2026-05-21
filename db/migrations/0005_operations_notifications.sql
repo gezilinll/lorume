@@ -2,7 +2,6 @@ CREATE TABLE IF NOT EXISTS operations (
   id text PRIMARY KEY,
   organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   type text NOT NULL CHECK (type IN (
-    'device_refresh',
     'notification_delivery'
   )),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN (

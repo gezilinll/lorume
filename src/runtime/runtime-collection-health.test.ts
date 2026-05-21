@@ -66,24 +66,6 @@ describe("runtime collection health", () => {
     ]);
   });
 
-  it("does not use legacy inventory or work_state ingestions as a fallback", () => {
-    const health = deriveDeviceCollectionHealth("gezilinll-claw", [
-      ingestion("inventory", "succeeded", "2026-05-12T09:50:00.000Z"),
-      ingestion("work_state", "succeeded", "2026-05-12T09:59:00.000Z"),
-    ], { now, staleAfterMs: 5 * 60 * 1000 });
-
-    expect(health.status).toBe("failed");
-    expect(health.summary).toBe("设备状态采集失败");
-    expect(health.checks).toEqual([
-      expect.objectContaining({
-        id: "device_state",
-        status: "failed",
-        message: "尚未收到采集记录",
-      }),
-    ]);
-    expect(health.checks.some((check) => ["inventory", "work_state"].includes(String(check.id)))).toBe(false);
-  });
-
   it("keeps old successful device-state ingestions normal because recency is shown as data, not a status", () => {
     const health = deriveDeviceCollectionHealth("gezilinll-claw", [
       ingestion("device_state", "succeeded", "2026-05-12T09:50:00.000Z"),
@@ -119,7 +101,7 @@ describe("runtime collection health", () => {
 });
 
 function ingestion(
-  snapshotType: CollectionHealthIngestion["snapshotType"] | "inventory" | "work_state",
+  snapshotType: CollectionHealthIngestion["snapshotType"],
   status: CollectionHealthIngestion["status"],
   receivedAt: string,
   counts: Record<string, number> = {},

@@ -25,8 +25,6 @@ export type OperationJobStatus =
 
 /** Operation type currently supported by Lorume. */
 export type OperationType =
-  | "device_refresh"
-  | "agent_skill_probe"
   | "notification_delivery";
 
 /** Operation job type currently supported by Lorume. */

@@ -2041,7 +2041,6 @@ button.tableRow:hover,
 .status-queued,
 .status-running,
 .status-open,
-.status-requested,
 .status-requires_manual_step {
   background: color-mix(in srgb, var(--lorume-color-warning) 9%, var(--lorume-color-paper));
   color: var(--lorume-color-warning);
@@ -2056,7 +2055,6 @@ button.tableRow:hover,
 
 .status-cancelled,
 .status-muted,
-.status-device_disconnected,
 .status-unsupported {
   background: color-mix(in srgb, var(--lorume-color-muted) 8%, var(--lorume-color-paper));
   color: var(--lorume-color-muted);

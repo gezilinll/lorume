@@ -48,29 +48,84 @@ describeDb("database migrations", () => {
           "tasks",
           "users",
         ]);
-        await expect(listPublicColumnNames(client, "runtimes")).resolves.not.toEqual(expect.arrayContaining([
-          "endpoint",
-          "capabilities",
-          "source_refs",
-        ]));
-        await expect(listPublicColumnNames(client, "agents")).resolves.not.toEqual(expect.arrayContaining([
-          "origin",
-          "load",
-          "source_refs",
-        ]));
-        await expect(listPublicColumnNames(client, "tasks")).resolves.toEqual(expect.arrayContaining([
+        await expect(listPublicColumnNames(client, "devices")).resolves.toEqual([
+          "id",
+          "hostname",
+          "os",
+          "architecture",
+          "collection_status",
+          "collector",
+          "last_seen_at",
+          "observed_at",
+          "raw",
+          "created_at",
+          "updated_at",
+        ]);
+        await expect(listPublicColumnNames(client, "runtimes")).resolves.toEqual([
+          "id",
+          "device_id",
+          "kind",
+          "name",
+          "collection_status",
+          "version",
+          "diagnostics",
+          "last_seen_at",
+          "raw",
+          "created_at",
+          "updated_at",
+        ]);
+        await expect(listPublicColumnNames(client, "agents")).resolves.toEqual([
+          "id",
+          "runtime_id",
+          "name",
+          "collection_status",
+          "diagnostics",
+          "last_seen_at",
+          "raw",
+          "created_at",
+          "updated_at",
+        ]);
+        await expect(listPublicColumnNames(client, "tasks")).resolves.toEqual([
+          "id",
+          "device_id",
+          "agent_id",
           "task_type",
-        ]));
+          "title",
+          "description",
+          "status",
+          "source_external_id",
+          "channel",
+          "conversation",
+          "creator",
+          "assignee",
+          "error",
+          "created_source_at",
+          "updated_source_at",
+          "last_seen_at",
+          "raw",
+          "created_at",
+          "updated_at",
+        ]);
+        await expect(listPublicColumnNames(client, "agent_skill_probe_snapshots")).resolves.toEqual([
+          "id",
+          "device_id",
+          "runtime_id",
+          "agent_id",
+          "status",
+          "observed_at",
+          "probed_at",
+          "error_summary",
+          "raw",
+          "created_at",
+          "updated_at",
+        ]);
         expect(await listMigrationVersions(client)).toEqual([
           "0001_backend_core",
           "0002_auth_access",
           "0005_operations_notifications",
           "0008_notification_read_state",
           "0009_agent_skill_probing",
-          "0010_narrow_device_facts",
           "0011_device_state_tasks",
-          "0012_remove_legacy_inventory_work_state",
-          "0013_task_type",
         ]);
       } finally {
         await client.end();

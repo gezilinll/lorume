@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   id text PRIMARY KEY,
   device_id text NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  task_type text NOT NULL DEFAULT 'conversation',
   title text NOT NULL,
   description text,
   status text NOT NULL,
@@ -21,5 +22,6 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_device_id ON tasks(device_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_agent_id ON tasks(agent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_last_seen_at ON tasks(last_seen_at);

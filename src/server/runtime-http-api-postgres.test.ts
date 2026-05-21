@@ -40,31 +40,6 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
-  it("does not expose legacy inventory or work-state APIs", async () => {
-    const database = await createTemporaryPostgresDatabase();
-    try {
-      runMigrationsScript(database.url);
-      const postgresStore = createPostgresStore({ connectionString: database.url });
-      try {
-        const { baseUrl } = await startRuntimeApi(postgresStore);
-
-        const responses = await Promise.all([
-          fetch(`${baseUrl}/api/runtime-inventory/latest`),
-          fetch(`${baseUrl}/api/runtime-work-state/latest`),
-          fetch(`${baseUrl}/api/runtime-work-items?limit=1`),
-          postJson(`${baseUrl}/api/device-snapshots`, { observedAt: "2026-05-21T00:00:00.000Z" }),
-          postJson(`${baseUrl}/api/runtime-work-state-snapshots`, { observedAt: "2026-05-21T00:00:00.000Z" }),
-        ]);
-
-        expect(responses.map((response) => response.status)).toEqual([404, 404, 404, 404, 404]);
-      } finally {
-        await postgresStore.close();
-      }
-    } finally {
-      await database.drop();
-    }
-  });
-
   it("persists unified device-state snapshots and serves current query endpoints", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

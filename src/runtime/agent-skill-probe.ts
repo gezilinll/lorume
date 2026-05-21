@@ -1,11 +1,9 @@
 /** Status values for read-only target-local Agent Skill probing. */
 export type AgentSkillProbeStatus =
   | "unknown"
-  | "requested"
   | "succeeded"
   | "unsupported"
-  | "failed"
-  | "device_disconnected";
+  | "failed";
 
 /** File metadata displayed for a discovered Skill file. Contents are intentionally excluded. */
 export interface AgentSkillProbeFileMetadata {
@@ -37,8 +35,6 @@ export interface AgentSkillProbeSnapshot {
   probedAt?: string | null;
   skills: AgentSkillProbeSkill[];
   errorSummary?: string;
-  operationId?: string;
-  commandId?: string;
 }
 
 /** File-like input reported by a local target probe. */
@@ -64,11 +60,9 @@ export interface AgentSkillProbeParseInput {
 
 export const agentSkillProbeStatuses: AgentSkillProbeStatus[] = [
   "unknown",
-  "requested",
   "succeeded",
   "unsupported",
   "failed",
-  "device_disconnected",
 ];
 
 /** Convert local probe file entries into Skill-root metadata without reading file contents. */
@@ -121,8 +115,6 @@ export function normalizeAgentSkillProbeSnapshot(value: unknown): AgentSkillProb
     ...(readNullableString(value.probedAt) !== undefined ? { probedAt: readNullableString(value.probedAt) } : {}),
     skills,
     ...(readString(value.errorSummary) ? { errorSummary: readString(value.errorSummary) } : {}),
-    ...(readString(value.operationId) ? { operationId: readString(value.operationId) } : {}),
-    ...(readString(value.commandId) ? { commandId: readString(value.commandId) } : {}),
   };
 }
 

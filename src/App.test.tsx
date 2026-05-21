@@ -142,7 +142,7 @@ describe("Console shell", () => {
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
     window.history.pushState({}, "", "/");
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(screen.getByRole("heading", { name: /把分散的 Agent 变成可运营的工作网络/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "登录" })).toHaveAttribute("href", "/login");
@@ -156,7 +156,7 @@ describe("Console shell", () => {
   it("keeps the public home preview scoped to implemented pages", () => {
     window.history.pushState({}, "", "/");
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     const previewNav = screen.getByRole("navigation", { name: "预览导航" });
     expect(within(previewNav).getByText("Runtime")).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe("Console shell", () => {
     }) as unknown as typeof fetch;
     window.history.pushState({}, "", "/runtime");
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "主导航" });
@@ -220,17 +220,16 @@ describe("Console shell", () => {
     expect(screen.getAllByText("精选AI").length).toBeGreaterThan(0);
   });
 
-  it("falls back from the removed Catalog route to Runtime Fleet", () => {
-    window.history.pushState({}, "", "/catalog");
+  it("defaults unknown Console routes to Runtime Fleet", () => {
+    window.history.pushState({}, "", "/unknown");
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "对象目录" })).not.toBeInTheDocument();
   });
 
   it("defaults the Console to Runtime Fleet when no protected page route is provided", () => {
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
   });
@@ -242,7 +241,7 @@ describe("Console shell", () => {
       if (url.includes("/api/runtime-tasks")) return jsonResponse({ error: "backend_unavailable" }, 503);
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
@@ -301,7 +300,7 @@ describe("Console shell", () => {
       if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(tasks));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: /Task without execution record/ }));
@@ -330,7 +329,7 @@ describe("Console shell", () => {
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: new RegExp(longTitle.slice(0, 12)) }));
@@ -348,7 +347,7 @@ describe("Console shell", () => {
       if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse([]));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
@@ -394,7 +393,7 @@ describe("Console shell", () => {
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
@@ -434,7 +433,7 @@ describe("Console shell", () => {
       }
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: "加载更多" })).toBeInTheDocument();
@@ -468,7 +467,7 @@ describe("Console shell", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
@@ -501,7 +500,7 @@ describe("Console shell", () => {
       if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(allTasks));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Runs" }));
     await act(async () => {
@@ -528,29 +527,6 @@ describe("Console shell", () => {
     expect(requests.at(-1)).toContain("status=in_progress");
   });
 
-  it("does not fall back to legacy work-state endpoints when Runs task query fails", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input) => {
-      const url = requestUrl(input);
-      if (url.includes("/api/runtime-tasks")) return jsonResponse({ error: "backend_unavailable" }, 503);
-      return jsonResponse({ error: "legacy endpoint should not be requested" }, 500);
-    }) as unknown as typeof fetch;
-    globalThis.fetch = fetchMock;
-
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Runs" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(fetchMock).mock.calls.some((call) => requestUrl(call[0]).includes("/api/runtime-tasks"))).toBe(true);
-    });
-    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
-      requestUrl(call[0]).includes("/api/runtime-work-state/latest"),
-    )).toBe(false);
-    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
-      requestUrl(call[0]).includes("/api/runtime-work-items"),
-    )).toBe(false);
-  });
-
   it("filters Runs cards by manual time range without quick-range state", async () => {
     const user = userEvent.setup();
     const tasks = [
@@ -572,7 +548,7 @@ describe("Console shell", () => {
       if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(tasks));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: /Old task/ })).toBeInTheDocument();
@@ -595,7 +571,7 @@ describe("Console shell", () => {
 
   it("opens Runtime Fleet and renders the OpenClaw-first fixture data", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
@@ -618,7 +594,7 @@ describe("Console shell", () => {
     const user = userEvent.setup();
     installRuntimeFleetFetch();
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     expect((await screen.findAllByText("fixture-mac")).length).toBeGreaterThan(0);
@@ -642,7 +618,7 @@ describe("Console shell", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     const devicePanel = await screen.findByLabelText("设备");
@@ -658,7 +634,7 @@ describe("Console shell", () => {
     const snapshot = fleetWithStatus("offline", "error");
     installRuntimeFleetFetch(snapshot);
 
-    render(<App />);
+    render(<App runtimeMode="agent" />);
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     const runtimeTable = await screen.findByRole("table", { name: "Runtime 列表" });
@@ -681,7 +657,7 @@ describe("Console shell", () => {
 
   it("filters Runtime Fleet agents by search and opens agent details", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
     expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
@@ -705,55 +681,6 @@ describe("Console shell", () => {
     expect(within(detail).queryByText("load")).not.toBeInTheDocument();
   });
 
-  it("strips legacy Agent channel fields from Runtime Fleet without duplicate key warnings", async () => {
-    const user = userEvent.setup();
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const backendSnapshot = {
-      ...fleetSnapshot,
-      agents: fleetSnapshot.agents.map((agent) => ({
-        ...agent,
-        channelBindings: [
-          { externalId: "default", kind: "dingtalk", label: "DingTalk default", status: "enabled" },
-          { externalId: "backup", kind: "dingtalk", label: "DingTalk backup", status: "enabled" },
-        ],
-        load: { activeTasks: 1 },
-        origin: { source: "legacy" },
-        sourceRefs: [{ kind: "legacy", value: "legacy-ref" }],
-      })),
-    };
-    installRuntimeFleetFetch(backendSnapshot as RuntimeFleetSnapshot);
-    render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-    await screen.findByText("main");
-    expect(screen.queryByText("DingTalk backup")).not.toBeInTheDocument();
-
-    const duplicateKeyWarning = consoleError.mock.calls.some((call) =>
-      call.some((argument) => String(argument).includes("Encountered two children with the same key")),
-    );
-    expect(duplicateKeyWarning).toBe(false);
-  });
-
-  it("does not fall back to the legacy latest inventory API when Runtime Fleet query fails", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input) => {
-      const url = requestUrl(input);
-      if (url.includes("/api/runtime-fleet")) return jsonResponse({ error: "backend_unavailable" }, 503);
-      return jsonResponse({ error: "legacy endpoint should not be requested" }, 500);
-    }) as unknown as typeof fetch;
-    globalThis.fetch = fetchMock;
-
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
-
-    await waitFor(() => {
-      expect(vi.mocked(fetchMock).mock.calls.some((call) => requestUrl(call[0]).includes("/api/runtime-fleet"))).toBe(true);
-    });
-    expect(vi.mocked(fetchMock).mock.calls.some((call) =>
-      requestUrl(call[0]).includes("/api/runtime-inventory/latest"),
-    )).toBe(false);
-  });
-
   it("automatically refreshes Runtime Fleet query data while mounted", async () => {
     vi.useFakeTimers();
     let latestRequests = 0;
@@ -775,7 +702,7 @@ describe("Console shell", () => {
       if (url.includes("/api/devices/fixture-mac/diagnostics")) return jsonResponse(deviceDiagnosticsResponse(fleetSnapshot));
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
-    render(<App />);
+    render(<App runtimeMode="agent" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Runtime Fleet" }));
     await act(async () => {

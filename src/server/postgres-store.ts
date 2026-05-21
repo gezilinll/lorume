@@ -167,7 +167,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         }
         await deleteExistingTasksForDevice(client, snapshot.device.id);
         for (const task of snapshot.tasks) await upsertTask(client, snapshot.device.id, task);
-        await deleteStaleInventoryObjects(client, snapshot);
+        await deleteStaleRuntimeObjects(client, snapshot);
 
         const counts = {
           agents: snapshot.agents.length,
@@ -313,13 +313,11 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           status,
           observed_at,
           probed_at,
-          operation_id,
-          command_id,
           error_summary,
           raw,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now())
         ON CONFLICT (id) DO UPDATE SET
           device_id = excluded.device_id,
           runtime_id = excluded.runtime_id,
@@ -327,8 +325,6 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           status = excluded.status,
           observed_at = excluded.observed_at,
           probed_at = excluded.probed_at,
-          operation_id = excluded.operation_id,
-          command_id = excluded.command_id,
           error_summary = excluded.error_summary,
           raw = excluded.raw,
           updated_at = now()
@@ -340,8 +336,6 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         normalized.status,
         normalized.observedAt ?? null,
         normalized.probedAt ?? null,
-        normalized.operationId ?? null,
-        normalized.commandId ?? null,
         normalized.errorSummary ?? null,
         JSON.stringify(normalized),
       ]);
@@ -369,13 +363,14 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
 async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceStateSnapshot): Promise<void> {
   await client.query(`
     INSERT INTO devices (
-      id, hostname, os, architecture, collector, last_seen_at, observed_at, raw, updated_at
+      id, hostname, os, architecture, collection_status, collector, last_seen_at, observed_at, raw, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
       hostname = excluded.hostname,
       os = excluded.os,
       architecture = excluded.architecture,
+      collection_status = excluded.collection_status,
       collector = excluded.collector,
       last_seen_at = excluded.last_seen_at,
       observed_at = excluded.observed_at,
@@ -386,6 +381,7 @@ async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceSt
     snapshot.device.hostname,
     snapshot.device.os,
     snapshot.device.architecture ?? null,
+    snapshot.device.collectionStatus,
     toJson(snapshot.device.collector ?? {}),
     toDate(snapshot.device.lastSeenAt),
     toDate(snapshot.observedAt),
@@ -396,16 +392,16 @@ async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceSt
 async function upsertDeviceStateRuntime(client: pg.PoolClient, runtime: Runtime): Promise<void> {
   await client.query(`
     INSERT INTO runtimes (
-      id, device_id, kind, name, status, version, health, last_seen_at, raw, updated_at
+      id, device_id, kind, name, collection_status, version, diagnostics, last_seen_at, raw, updated_at
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
       device_id = excluded.device_id,
       kind = excluded.kind,
       name = excluded.name,
-      status = excluded.status,
+      collection_status = excluded.collection_status,
       version = excluded.version,
-      health = excluded.health,
+      diagnostics = excluded.diagnostics,
       last_seen_at = excluded.last_seen_at,
       raw = excluded.raw,
       updated_at = now()
@@ -425,13 +421,14 @@ async function upsertDeviceStateRuntime(client: pg.PoolClient, runtime: Runtime)
 async function upsertDeviceStateAgent(client: pg.PoolClient, agent: Agent): Promise<void> {
   await client.query(`
     INSERT INTO agents (
-      id, runtime_id, name, status, last_seen_at, raw, updated_at
+      id, runtime_id, name, collection_status, diagnostics, last_seen_at, raw, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
       runtime_id = excluded.runtime_id,
       name = excluded.name,
-      status = excluded.status,
+      collection_status = excluded.collection_status,
+      diagnostics = excluded.diagnostics,
       last_seen_at = excluded.last_seen_at,
       raw = excluded.raw,
       updated_at = now()
@@ -440,12 +437,13 @@ async function upsertDeviceStateAgent(client: pg.PoolClient, agent: Agent): Prom
     agent.runtimeId,
     agent.name,
     agent.collectionStatus,
+    toJson(agent.diagnostics ?? {}),
     toDate(agent.lastSeenAt),
     toJson(agent),
   ]);
 }
 
-async function deleteStaleInventoryObjects(
+async function deleteStaleRuntimeObjects(
   client: pg.PoolClient,
   snapshot: { device: { id: string }; runtimes: Array<{ id: string }>; agents: Array<{ id: string }> },
 ): Promise<void> {

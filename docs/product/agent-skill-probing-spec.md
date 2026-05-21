@@ -40,7 +40,7 @@ Probe status values are:
 - `GET /api/agents/:agentId/skill-probe` returns the latest read-only probe snapshot for an Agent. If no snapshot exists, it returns an `unknown` snapshot rather than inventing Skill data.
 - `POST /api/agent-skill-probe-snapshots` accepts collector/device reported probe snapshots and stores normalized metadata only.
 
-Backend-triggered probe requests, `agent_skill_probe` Operations, and device-disconnected request states are not part of P0. Notification copy for stored probe failures must avoid raw tokens, file contents, full logs, and external private payloads.
+Backend-triggered probe requests and device-disconnected request states are not part of P0. Notification copy for stored probe failures must avoid raw tokens, file contents, full logs, and external private payloads.
 
 ## Runtime Fleet Display
 

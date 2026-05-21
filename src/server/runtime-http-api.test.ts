@@ -28,36 +28,6 @@ describe("runtime HTTP API", () => {
     await expect(readyResponse.json()).resolves.toMatchObject({ ok: false, error: "postgres_store_unavailable" });
   });
 
-  it("does not expose legacy snapshot APIs", async () => {
-    const { baseUrl, store } = await startRuntimeApi();
-    store.writeLatestSnapshot(fixtureSnapshot);
-
-    const inventoryResponse = await fetch(`${baseUrl}/api/runtime-inventory/latest`);
-    const workStateResponse = await fetch(`${baseUrl}/api/runtime-work-state/latest`);
-    const legacyInventoryPostResponse = await fetch(`${baseUrl}/api/device-snapshots`, {
-      body: JSON.stringify(fixtureSnapshot),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    const legacyWorkStatePostResponse = await fetch(`${baseUrl}/api/runtime-work-state-snapshots`, {
-      body: JSON.stringify({
-        observedAt: "2026-05-09T08:00:00.000Z",
-        deviceId: "fixture-device",
-        workItems: [],
-        conversations: [],
-        executions: [],
-        capabilities: [],
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-
-    expect(inventoryResponse.status).toBe(404);
-    expect(workStateResponse.status).toBe(404);
-    expect(legacyInventoryPostResponse.status).toBe(404);
-    expect(legacyWorkStatePostResponse.status).toBe(404);
-  });
-
   it("rejects runtime read APIs when the configured session guard fails", async () => {
     const { baseUrl } = await startRuntimeApi({
       auth: {

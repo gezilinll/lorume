@@ -6,7 +6,7 @@ import type { AuthEmailProvider } from "../auth/auth-http-api";
 export function createBackendEmailProvider(): AuthEmailProvider {
   return {
     async sendLoginCode({ code, email }) {
-      const appMode = resolveLorumeAppMode(process.env.LORUME_APP_MODE ?? process.env.LORUME_AUTH_MODE);
+      const appMode = resolveLorumeAppMode(process.env.LORUME_APP_MODE);
       if (appMode === "development" || process.env.LORUME_AUTH_DEBUG_CODES === "1") {
         process.stdout.write(`Lorume login code for ${email}: ${code}\n`);
         return;

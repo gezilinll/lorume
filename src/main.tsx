@@ -5,9 +5,7 @@ import { resolveLorumeAppMode } from "./app-mode";
 import "./ui/tokens.css";
 import "./styles.css";
 
-const runtimeMode = resolveLorumeAppMode(
-  import.meta.env.VITE_LORUME_APP_MODE ?? import.meta.env.VITE_LORUME_AUTH_MODE,
-);
+const runtimeMode = resolveLorumeAppMode(import.meta.env.VITE_LORUME_APP_MODE);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

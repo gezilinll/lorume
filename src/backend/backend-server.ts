@@ -114,7 +114,7 @@ export function createLorumeBackendServer(
       runnerId: process.env.LORUME_OPERATION_RUNNER_ID ?? "lorume-backend",
     })
     : undefined;
-  const appMode = options.appMode ?? resolveLorumeAppMode(process.env.LORUME_APP_MODE ?? process.env.LORUME_AUTH_MODE);
+  const appMode = options.appMode ?? resolveLorumeAppMode(process.env.LORUME_APP_MODE);
   const authRequired = options.authRequired ?? readBooleanEnv("LORUME_AUTH_REQUIRED", appMode !== "agent");
   const deviceTokenRequired = options.deviceTokenRequired ?? process.env.LORUME_DEVICE_TOKEN_REQUIRED === "1";
   const authHandler = authStore
@@ -133,13 +133,6 @@ export function createLorumeBackendServer(
     controlChannel,
     postgresStore: postgresStore ?? undefined,
     collectorNotifications: authStore && notificationStore
-      ? {
-        createNotificationEvent: notificationStore.createNotificationEvent,
-        listRecipientUserIds: (organizationId) => authStore.listOrganizationAdminUserIds(organizationId),
-      }
-      : undefined,
-    operationStore: operationStore ?? undefined,
-    skillProbeNotifications: authStore && notificationStore
       ? {
         createNotificationEvent: notificationStore.createNotificationEvent,
         listRecipientUserIds: (organizationId) => authStore.listOrganizationAdminUserIds(organizationId),

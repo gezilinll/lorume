@@ -54,11 +54,9 @@ type AgentSkillProbeViewState = {
 
 const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
   unknown: "未探测",
-  requested: "已请求探测",
   succeeded: "探测完成",
   unsupported: "不支持探测",
   failed: "探测失败",
-  device_disconnected: "设备未连接",
 };
 
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and channel exposure. */
@@ -230,47 +228,6 @@ export function RuntimeFleetPage() {
     }
   }
 
-  async function handleRequestAgentSkillProbe(agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) {
-    setAgentSkillProbeState((current) => ({
-      agentId: agentDetail.id,
-      isVisible: true,
-      snapshot: current.agentId === agentDetail.id ? current.snapshot : null,
-      status: "loading",
-    }));
-    try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentDetail.id)}/skill-probe`, {
-        body: JSON.stringify({
-          deviceId: agentDetail.deviceId,
-          runtimeId: agentDetail.runtimeId,
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const body = await response.json();
-      const snapshot = normalizeAgentSkillProbeSnapshot(
-        body && typeof body === "object" && "snapshot" in body
-          ? (body as { snapshot?: unknown }).snapshot
-          : body,
-      );
-      if (!snapshot) throw new Error("Skill 探测请求返回了无效数据");
-      setAgentSkillProbeState({
-        agentId: agentDetail.id,
-        errorMessage: response.ok ? undefined : snapshot.errorSummary,
-        isVisible: true,
-        snapshot,
-        status: "ready",
-      });
-    } catch (error) {
-      setAgentSkillProbeState({
-        agentId: agentDetail.id,
-        errorMessage: formatRuntimeFleetError(error, "请求 Skill 探测失败"),
-        isVisible: true,
-        snapshot: null,
-        status: "error",
-      });
-    }
-  }
-
   return (
     <section className="workspace">
       <header className="pageHeader">
@@ -377,8 +334,8 @@ export function RuntimeFleetPage() {
         <RuntimeDetail
           detail={detail}
           skillProbeState={agentSkillProbeState}
-          onRequestSkillProbe={(agentDetail) => {
-            void handleRequestAgentSkillProbe(agentDetail);
+          onRefreshSkillProbe={(agentDetail) => {
+            void handleShowAgentSkillProbe(agentDetail);
           }}
         />
       </section>
@@ -409,7 +366,6 @@ function formatHttpError(status: number, fallback: string): string {
 }
 
 function formatBackendErrorMessage(message: string, fallback: string): string {
-  if (message.includes("device_not_connected")) return "设备控制通道未连接，无法下发请求。";
   if (message.includes("HTTP 502") || message.includes("HTTP 503") || message.includes("HTTP 504")) {
     return "本地后端暂不可用，请稍后重试。";
   }
@@ -721,11 +677,11 @@ function AgentTable({
 function RuntimeDetail({
   detail,
   skillProbeState,
-  onRequestSkillProbe,
+  onRefreshSkillProbe,
 }: {
   detail: RuntimeFleetDetail | null;
   skillProbeState: AgentSkillProbeViewState;
-  onRequestSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
+  onRefreshSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
   if (!detail) {
     return (
@@ -753,7 +709,7 @@ function RuntimeDetail({
         <AgentSkillProbePanel
           detail={detail}
           state={skillProbeState}
-          onRequest={() => onRequestSkillProbe(detail)}
+          onRefresh={() => onRefreshSkillProbe(detail)}
         />
       ) : null}
     </aside>
@@ -763,11 +719,11 @@ function RuntimeDetail({
 function AgentSkillProbePanel({
   detail,
   state,
-  onRequest,
+  onRefresh,
 }: {
   detail: Extract<RuntimeFleetDetail, { kind: "agent" }>;
   state: AgentSkillProbeViewState;
-  onRequest: () => void;
+  onRefresh: () => void;
 }) {
   const snapshot = state.snapshot ?? null;
   const status = snapshot?.status ?? "unknown";
@@ -780,9 +736,9 @@ function AgentSkillProbePanel({
           className="secondaryButton compactButton"
           type="button"
           disabled={state.status === "loading"}
-          onClick={onRequest}
+          onClick={onRefresh}
         >
-          请求探测
+          刷新
         </button>
       </div>
       <div className="skillProbeActions">
@@ -810,12 +766,6 @@ function AgentSkillProbeSnapshotView({ snapshot }: { snapshot: AgentSkillProbeSn
   }
   if (snapshot.status === "failed") {
     return <p className="healthIssueText">{snapshot.errorSummary || "Skill 探测失败"}</p>;
-  }
-  if (snapshot.status === "device_disconnected") {
-    return <p className="healthIssueText">{snapshot.errorSummary || "设备控制通道未连接"}</p>;
-  }
-  if (snapshot.status === "requested") {
-    return <p>探测请求已下发，等待目标设备回传结果。</p>;
   }
   if (snapshot.skills.length === 0) {
     return <p>未发现本地 Skill。</p>;

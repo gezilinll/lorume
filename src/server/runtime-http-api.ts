@@ -13,7 +13,6 @@ import {
 import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
 import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
 import type { CollectionHealthIngestion } from "../runtime/runtime-collection-health";
-import type { OperationRow, OperationStatus, OperationStore } from "../operations/operation-store";
 
 const maxJsonBodyChars = 10_000_000;
 type CollectorSnapshotType = "device_state";
@@ -33,13 +32,6 @@ export interface RuntimeHttpApiHandlerOptions {
   postgresStore?: PostgresStore;
   /** Optional notification integration for collector ingestion health events. */
   collectorNotifications?: {
-    createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
-    listRecipientUserIds: (organizationId: string, deviceId: string) => Promise<string[]>;
-  };
-  /** Optional Operation integration for device-reported Agent Skill probe snapshots. */
-  operationStore?: Pick<OperationStore, "updateOperationStatus">;
-  /** Optional notification integration for Agent Skill probe lifecycle. */
-  skillProbeNotifications?: {
     createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
     listRecipientUserIds: (organizationId: string, deviceId: string) => Promise<string[]>;
   };
@@ -129,10 +121,6 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       try {
         const body = await readJsonBody(request);
         const snapshot = await persistAgentSkillProbeSnapshot(options, body);
-        const operation = snapshot.operationId
-          ? await updateOperationFromProbeSnapshot(options, snapshot)
-          : null;
-        await notifyAgentSkillProbeSnapshot(options, snapshot, operation);
         sendJson(response, 201, {
           ok: true,
           deviceId: snapshot.deviceId,
@@ -225,7 +213,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
   };
 }
 
-interface AgentSkillProbeRequestContext {
+interface AgentSkillProbeSnapshotContext {
   targetAgentId: string;
   targetAgentName?: string;
   deviceId: string;
@@ -242,7 +230,7 @@ async function readAgentSkillProbeSnapshot(
   if (postgresSnapshot) return postgresSnapshot;
   if (storeSnapshot) return storeSnapshot;
   try {
-    const context = await resolveAgentSkillProbeRequestContext(options, agentId, {});
+    const context = await resolveAgentSkillProbeSnapshotContext(options, agentId);
     return createAgentSkillProbeSnapshot(context, "unknown");
   } catch {
     return {
@@ -256,19 +244,16 @@ async function readAgentSkillProbeSnapshot(
   }
 }
 
-async function resolveAgentSkillProbeRequestContext(
+async function resolveAgentSkillProbeSnapshotContext(
   options: RuntimeHttpApiHandlerOptions,
   agentId: string,
-  body: unknown,
-): Promise<AgentSkillProbeRequestContext> {
-  const requestedDeviceId = readString(body, "deviceId");
-  const requestedRuntimeId = readString(body, "runtimeId");
+): Promise<AgentSkillProbeSnapshotContext> {
   const fleet = await readRuntimeFleetForProbe(options);
   const agent = fleet.agents.find((candidate) => candidate.id === agentId);
-  const runtime = fleet.runtimes.find((candidate) => candidate.id === (agent?.runtimeId ?? requestedRuntimeId));
-  const device = fleet.devices.find((candidate) => candidate.id === (runtime?.deviceId ?? requestedDeviceId));
-  const runtimeId = runtime?.id ?? requestedRuntimeId;
-  const deviceId = device?.id ?? requestedDeviceId;
+  const runtime = fleet.runtimes.find((candidate) => candidate.id === agent?.runtimeId);
+  const device = fleet.devices.find((candidate) => candidate.id === runtime?.deviceId);
+  const runtimeId = runtime?.id;
+  const deviceId = device?.id;
   if (!runtimeId) throw new Error("runtimeId is required for skill probe");
   if (!deviceId) throw new Error("deviceId is required for skill probe");
   return {
@@ -297,7 +282,7 @@ async function readRuntimeFleetForProbe(options: RuntimeHttpApiHandlerOptions): 
 }
 
 function createAgentSkillProbeSnapshot(
-  context: AgentSkillProbeRequestContext,
+  context: AgentSkillProbeSnapshotContext,
   status: AgentSkillProbeStatus,
 ): AgentSkillProbeSnapshot {
   return {
@@ -319,109 +304,6 @@ async function persistAgentSkillProbeSnapshot(
   const snapshot = options.store.writeAgentSkillProbeSnapshot(value);
   await options.postgresStore?.upsertAgentSkillProbeSnapshot(snapshot).catch(() => undefined);
   return snapshot;
-}
-
-async function updateAgentSkillProbeOperation(
-  options: RuntimeHttpApiHandlerOptions,
-  operationId: string,
-  status: OperationStatus,
-  errorSummary?: string,
-): Promise<OperationRow | null> {
-  if (!options.operationStore) return null;
-  return options.operationStore.updateOperationStatus({
-    errorSummary,
-    now: new Date(),
-    operationId,
-    status,
-  });
-}
-
-async function updateOperationFromProbeSnapshot(
-  options: RuntimeHttpApiHandlerOptions,
-  snapshot: AgentSkillProbeSnapshot,
-): Promise<OperationRow | null> {
-  const operationStatus = operationStatusForProbeStatus(snapshot.status);
-  if (!operationStatus || !snapshot.operationId) return null;
-  return updateAgentSkillProbeOperation(options, snapshot.operationId, operationStatus, snapshot.errorSummary);
-}
-
-function operationStatusForProbeStatus(status: AgentSkillProbeStatus): OperationStatus | null {
-  if (status === "succeeded") return "succeeded";
-  if (status === "unsupported") return "unsupported";
-  if (status === "failed" || status === "device_disconnected") return "failed";
-  return null;
-}
-
-async function notifyAgentSkillProbeSnapshot(
-  options: RuntimeHttpApiHandlerOptions,
-  snapshot: AgentSkillProbeSnapshot,
-  operation: OperationRow | null,
-): Promise<void> {
-  if (snapshot.status !== "succeeded" && snapshot.status !== "failed" && snapshot.status !== "unsupported") return;
-  const title = snapshot.status === "succeeded"
-    ? "Skill 探测完成"
-    : snapshot.status === "unsupported"
-      ? "Skill 探测不支持"
-      : "Skill 探测失败";
-  const eventType = snapshot.status === "succeeded"
-    ? "agent_skill_probe_succeeded"
-    : snapshot.status === "unsupported"
-      ? "agent_skill_probe_unsupported"
-      : "agent_skill_probe_failed";
-  await notifyAgentSkillProbe(options, {
-    eventType,
-    operation,
-    requestContext: {
-      targetAgentId: snapshot.targetAgentId,
-      targetAgentName: snapshot.targetAgentName,
-      deviceId: snapshot.deviceId,
-      runtimeId: snapshot.runtimeId,
-      runtimeName: snapshot.runtimeName,
-    },
-    severity: snapshot.status === "succeeded" ? "info" : "warning",
-    snapshot,
-    summary: snapshot.errorSummary
-      ? `${snapshot.targetAgentName ?? snapshot.targetAgentId} Skill 探测状态：${snapshot.errorSummary}`
-      : `${snapshot.targetAgentName ?? snapshot.targetAgentId} Skill 探测状态：${snapshot.status}`,
-    title,
-  });
-}
-
-async function notifyAgentSkillProbe(
-  options: RuntimeHttpApiHandlerOptions,
-  input: {
-    eventType: string;
-    operation: OperationRow | null;
-    requestContext: AgentSkillProbeRequestContext;
-    severity: "info" | "warning" | "critical";
-    snapshot: AgentSkillProbeSnapshot;
-    summary: string;
-    title: string;
-  },
-): Promise<void> {
-  if (!options.skillProbeNotifications || !input.operation) return;
-  const recipients = uniqueNonEmptyStrings([
-    input.operation.requestedByUserId ?? "",
-    ...await options.skillProbeNotifications.listRecipientUserIds(
-      input.operation.organizationId,
-      input.requestContext.deviceId,
-    ).catch(() => []),
-  ]);
-  if (recipients.length === 0) return;
-  await options.skillProbeNotifications.createNotificationEvent({
-    actorUserId: input.operation.requestedByUserId ?? undefined,
-    dedupeKey: `agent-skill-probe:${input.snapshot.targetAgentId}:${input.eventType}`,
-    eventType: input.eventType,
-    operationId: input.operation.id,
-    organizationId: input.operation.organizationId,
-    recipientUserIds: recipients,
-    resourceId: input.snapshot.targetAgentId,
-    resourceType: "agent",
-    severity: input.severity,
-    sourceModule: "runtime",
-    summary: input.summary,
-    title: input.title,
-  }).catch(() => undefined);
 }
 
 function readString(value: unknown, key: string): string {

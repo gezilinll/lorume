@@ -33,17 +33,12 @@ const utilityPathByView: Record<ConsoleUtilityView, string> = {
   operations: "/operations",
 };
 
-export type AppAuthMode = "disabled" | "required";
-
 export function App({
-  authMode,
   runtimeMode,
 }: {
-  /** Legacy test harness prop. Prefer runtimeMode for new code. */
-  authMode?: AppAuthMode;
   runtimeMode?: LorumeAppMode;
 }) {
-  const mode = runtimeMode ?? legacyAuthModeToRuntimeMode(authMode);
+  const mode = runtimeMode ?? "production";
   if (mode !== "agent" && getCurrentPath() === "/") {
     return <HomePage />;
   }
@@ -237,11 +232,6 @@ function initialFromText(value: string): string {
   const normalized = value.trim();
   if (!normalized) return "L";
   return normalized.slice(0, 1).toUpperCase();
-}
-
-function legacyAuthModeToRuntimeMode(authMode?: AppAuthMode): LorumeAppMode {
-  if (authMode === "required") return "production";
-  return "agent";
 }
 
 function createAgentAuthContext(): AuthContextValue {

@@ -12,8 +12,8 @@ describe("Lorume app mode", () => {
     expect(resolveLorumeAppMode("agent")).toBe("agent");
   });
 
-  it("keeps legacy auth mode values mapped to safe profiles", () => {
-    expect(resolveLorumeAppMode("required")).toBe("production");
-    expect(resolveLorumeAppMode("disabled")).toBe("agent");
+  it("defaults unknown profile values to production", () => {
+    expect(resolveLorumeAppMode("staging")).toBe("production");
+    expect(resolveLorumeAppMode("custom")).toBe("production");
   });
 });

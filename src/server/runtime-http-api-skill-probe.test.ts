@@ -3,8 +3,6 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CreateNotificationEventInput } from "../notifications/notification-store";
-import type { OperationRow, OperationStore } from "../operations/operation-store";
 import { createRuntimeControlChannel } from "./runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "./runtime-http-api";
 import { createRuntimeDeviceStateStore } from "./runtime-device-state-store";
@@ -37,54 +35,9 @@ describe("runtime HTTP API agent Skill probing", () => {
       ],
     });
   });
-
-  it("marks the probe operation succeeded and notifies recipients when a device reports results", async () => {
-    const operationStore = createFakeOperationStore();
-    const operation = await operationStore.createOperation({
-      organizationId: "org-1",
-      requestedByUserId: "requester-1",
-      resourceId: "fixture-mac:runtime:openclaw:agent:main",
-      resourceType: "agent",
-      summary: "探测 main 的 Skill",
-      targetId: "fixture-mac",
-      targetType: "device",
-      type: "agent_skill_probe",
-    });
-    const notifications: CreateNotificationEventInput[] = [];
-    const { baseUrl } = await startRuntimeApi({
-      operationStore,
-      skillProbeNotifications: {
-        createNotificationEvent: async (input) => {
-          notifications.push(input);
-          return {};
-        },
-        listRecipientUserIds: async () => ["owner-1"],
-      },
-    });
-
-    const response = await postJson(
-      `${baseUrl}/api/agent-skill-probe-snapshots`,
-      createProbeSnapshot({ operationId: operation.id, status: "succeeded" }),
-    );
-    const updatedOperation = await operationStore.readOperation({ operationId: operation.id });
-
-    expect(response.status).toBe(201);
-    expect(updatedOperation).toMatchObject({ status: "succeeded", errorSummary: null });
-    expect(notifications).toEqual([
-      expect.objectContaining({
-        eventType: "agent_skill_probe_succeeded",
-        operationId: operation.id,
-        recipientUserIds: ["requester-1", "owner-1"],
-        resourceId: "fixture-mac:runtime:openclaw:agent:main",
-      }),
-    ]);
-  });
 });
 
-async function startRuntimeApi(options: {
-  operationStore?: OperationStore;
-  skillProbeNotifications?: Parameters<typeof createRuntimeHttpApiHandler>[0]["skillProbeNotifications"];
-} = {}) {
+async function startRuntimeApi() {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-skill-probe-api-"));
   const store = createRuntimeDeviceStateStore({
     snapshotPath: path.join(dataDir, "latest.json"),
@@ -119,8 +72,6 @@ async function startRuntimeApi(options: {
   const handler = createRuntimeHttpApiHandler({
     store,
     controlChannel: channel,
-    operationStore: options.operationStore,
-    skillProbeNotifications: options.skillProbeNotifications,
   });
   const server = createServer((request, response) => {
     void handler(request, response, () => {
@@ -163,85 +114,6 @@ function createProbeSnapshot(overrides: Record<string, unknown> = {}) {
         content: "not exposed",
       }],
     }],
-    ...overrides,
-  };
-}
-
-function createFakeOperationStore(): OperationStore {
-  const operations = new Map<string, OperationRow>();
-  return {
-    async createOperation(input) {
-      const operation = createOperationRow({
-        id: "op-1",
-        organizationId: input.organizationId,
-        requestedByUserId: input.requestedByUserId,
-        resourceId: input.resourceId,
-        resourceType: input.resourceType,
-        status: "queued",
-        summary: input.summary,
-        targetId: input.targetId,
-        targetType: input.targetType,
-        type: input.type,
-      });
-      operations.set(operation.id, operation);
-      return operation;
-    },
-    async updateOperationStatus(input) {
-      const operation = operations.get(input.operationId);
-      if (!operation) return null;
-      const nextOperation = {
-        ...operation,
-        status: input.status,
-        errorSummary: input.errorSummary ?? null,
-      };
-      operations.set(operation.id, nextOperation);
-      return nextOperation;
-    },
-    async readOperation({ operationId }) {
-      return operations.get(operationId) ?? null;
-    },
-    async enqueueJob() {
-      throw new Error("not used");
-    },
-    async listOperations() {
-      return [];
-    },
-    async listJobs() {
-      return [];
-    },
-    async claimNextJob() {
-      return null;
-    },
-    async completeJob() {
-      return null;
-    },
-    async failJob() {
-      return null;
-    },
-    async close() {},
-  };
-}
-
-function createOperationRow(overrides: Partial<OperationRow>): OperationRow {
-  const now = new Date("2026-05-18T10:00:00.000Z");
-  return {
-    id: "op-1",
-    organizationId: "org-1",
-    type: "agent_skill_probe",
-    status: "queued",
-    resourceType: null,
-    resourceId: null,
-    targetType: null,
-    targetId: null,
-    requestedByUserId: null,
-    summary: "探测 Agent Skill",
-    errorSummary: null,
-    manualInstruction: null,
-    metadata: {},
-    startedAt: null,
-    finishedAt: null,
-    createdAt: now,
-    updatedAt: now,
     ...overrides,
   };
 }

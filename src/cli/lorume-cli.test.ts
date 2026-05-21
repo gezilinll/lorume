@@ -42,17 +42,6 @@ describe("lorume CLI", () => {
     expect(output.agents.map((agent: { name: string }) => agent.name)).toContain("main");
   });
 
-  it("does not expose legacy inventory or work-state collection commands", () => {
-    expect(runCliFailure(["collect", "inventory", "--json", "--snapshot", fixturePath])).toMatchObject({
-      status: 2,
-      stderr: expect.stringContaining("Unsupported lorume command: collect inventory"),
-    });
-    expect(runCliFailure(["collect", "work-state", "--json", "--device-id", "test-device"])).toMatchObject({
-      status: 2,
-      stderr: expect.stringContaining("Unsupported lorume command: collect work-state"),
-    });
-  });
-
   it("collects OpenClaw-only device state without invoking disabled adapters", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-"));
     const binDir = path.join(root, "bin");
@@ -643,13 +632,11 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Reco
   }));
 }
 
-function runCliFailure(args: string[]): { status: number | null; stderr: string } {
-  return spawnCli(args);
-}
-
-function spawnCli(args: string[]): { status: number | null; stderr: string } {
-  const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8" });
-  return { status: result.status, stderr: result.stderr.trim() };
+function spawnCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}) {
+  return spawnSync(process.execPath, [cliPath, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...options.env },
+  });
 }
 
 function writeOpenClawExecutable(

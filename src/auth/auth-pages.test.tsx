@@ -73,7 +73,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("后端暂不可用，请稍后重试。");
@@ -113,7 +113,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     await user.type(await screen.findByLabelText("邮箱"), "ZHANGLIANG@GAODING.COM");
     await user.click(screen.getByRole("button", { name: /发送验证码/ }));
@@ -144,7 +144,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     await user.type(await screen.findByLabelText("邮箱"), "zhangliang@gaoding.com");
     await user.click(screen.getByRole("button", { name: /发送验证码/ }));
@@ -167,7 +167,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     await user.type(await screen.findByLabelText("邮箱"), "zhangliang@gaoding.com");
     await user.click(screen.getByRole("button", { name: /发送验证码/ }));
@@ -190,7 +190,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "创建组织" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "运营概览" })).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "运营概览" })).toBeInTheDocument();
@@ -238,7 +238,7 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    render(<App authMode="required" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "打开个人入口" }));

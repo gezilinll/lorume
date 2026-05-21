@@ -43,7 +43,6 @@ const vite = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", 
     ...process.env,
     LORUME_BACKEND_URL: backend.url,
     VITE_LORUME_APP_MODE: "agent",
-    VITE_LORUME_AUTH_MODE: "agent",
   },
   stdio: "inherit",
 });
@@ -73,58 +72,32 @@ async function prepareDatabase(connectionString: string): Promise<void> {
     cwd: repoRoot,
     stdio: "inherit",
   });
-  await ensureDatabase(connectionString);
+  await recreateIsolatedDatabase(connectionString);
   execFileSync(process.execPath, [path.join(repoRoot, "scripts", "db-migrate.mjs")], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: connectionString },
     stdio: "inherit",
   });
-  await resetDatabase(connectionString);
 }
 
-async function ensureDatabase(connectionString: string): Promise<void> {
+async function recreateIsolatedDatabase(connectionString: string): Promise<void> {
   const targetUrl = new URL(connectionString);
   const databaseName = targetUrl.pathname.replace(/^\//, "");
+  if (!databaseName.includes("e2e")) {
+    throw new Error(`Refusing to recreate non-e2e database: ${databaseName}`);
+  }
   const adminUrl = new URL(connectionString);
   adminUrl.pathname = "/postgres";
   const client = await connectWithRetry(adminUrl.toString());
   try {
-    const result = await client.query<{ exists: number }>(
-      "SELECT 1 AS exists FROM pg_database WHERE datname = $1",
-      [databaseName],
-    );
-    if (result.rowCount === 0) {
-      await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
-    }
-  } finally {
-    await client.end();
-  }
-}
-
-async function resetDatabase(connectionString: string): Promise<void> {
-  const client = await connectWithRetry(connectionString);
-  try {
     await client.query(`
-      TRUNCATE
-        notification_deliveries,
-        notification_preferences,
-        notification_threads,
-        notification_events,
-        operation_jobs,
-        operations,
-        device_tokens,
-        organization_invitations,
-        sessions,
-        email_login_codes,
-        organization_members,
-        organizations,
-        users,
-        collector_ingestions,
-        agents,
-        runtimes,
-        devices
-      RESTART IDENTITY CASCADE
-    `);
+      SELECT pg_terminate_backend(pid)
+      FROM pg_stat_activity
+      WHERE datname = $1
+        AND pid <> pg_backend_pid()
+    `, [databaseName]);
+    await client.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)}`);
+    await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
   } finally {
     await client.end();
   }

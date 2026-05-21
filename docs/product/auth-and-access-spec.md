@@ -165,9 +165,7 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 - `development`：开发者本地联调模式。权限规则仍与 production 一致，但验证码可以在本地后端日志中输出，便于开发者完成真实登录链路。
 - `agent`：自动化验收和本地代理开发模式。只用于本地 harness 或 coding agent 自测，可注入本地 session 进入已验收 Console 页面；不得作为线上默认值，也不得绕过生产后端的 session 校验。
 
-`disabled` 仅作为旧 harness 环境值的兼容别名解析为 `agent`，新文档、脚本和测试应使用 `agent`。
-
-前端使用 `VITE_LORUME_APP_MODE` 配置运行模式，并兼容读取旧 `VITE_LORUME_AUTH_MODE`；后端使用 `LORUME_APP_MODE`，并兼容读取旧 `LORUME_AUTH_MODE`。本地 `npm run dev` 与 `npm run dev:backend` 在未覆盖环境变量时使用 `development`，Playwright Console harness 显式覆盖为 `agent`，生产构建/启动不设置时回到 `production`。
+前端使用 `VITE_LORUME_APP_MODE` 配置运行模式；后端使用 `LORUME_APP_MODE`。本地 `npm run dev` 与 `npm run dev:backend` 在未覆盖环境变量时使用 `development`，Playwright Console harness 显式覆盖为 `agent`，生产构建/启动不设置时回到 `production`。
 
 ## Harness
 
@@ -185,7 +183,7 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 - Console 必须被 `/api/me` gate 保护。
 - Glacier Premium Precision 组件测试必须覆盖现代 logo、基础面板/button/badge/token 类名和身份页结构，防止后续页面绕开共享 token。
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。
-- Playwright Console harness 可以通过 `VITE_LORUME_AUTH_MODE=agent` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
+- Playwright Console harness 可以通过 `VITE_LORUME_APP_MODE=agent` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
 - 已验收的 Runtime Fleet 和 Runs 交互不得因 auth 和视觉改造回退。
 
 ## 验收标准

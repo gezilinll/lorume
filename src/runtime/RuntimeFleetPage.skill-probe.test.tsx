@@ -62,17 +62,17 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     expect(within(panel).queryByRole("link", { name: "scripts/probe.sh" })).not.toBeInTheDocument();
   });
 
-  it("surfaces unsupported, failed, and disconnected states from the probe API", async () => {
-    globalThis.fetch = vi.fn(async (input, init) => {
+  it("surfaces unsupported and failed states from stored probe snapshots", async () => {
+    let probeReads = 0;
+    globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();
-      if (url.includes("/api/agents/") && url.includes("/skill-probe") && init?.method === "POST") {
-        return new Response(JSON.stringify({
-          error: "device_not_connected",
-          snapshot: createProbeSnapshot("device_disconnected"),
-        }), { status: 409, headers: { "content-type": "application/json" } });
-      }
       if (url.includes("/api/agents/") && url.includes("/skill-probe")) {
-        return new Response(JSON.stringify(createProbeSnapshot("unsupported", "当前 runtime 不支持本地 Skill 探测")), {
+        probeReads += 1;
+        return new Response(JSON.stringify(
+          probeReads === 1
+            ? createProbeSnapshot("unsupported", "当前 runtime 不支持本地 Skill 探测")
+            : createProbeSnapshot("failed", "Skill 探测失败"),
+        ), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -87,8 +87,9 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
     expect(within(panel).getByText("不支持探测")).toBeInTheDocument();
     expect(within(panel).getByText("当前 runtime 不支持本地 Skill 探测")).toBeInTheDocument();
 
-    fireEvent.click(within(panel).getByRole("button", { name: "请求探测" }));
-    await waitFor(() => expect(within(panel).getByText("设备控制通道未连接")).toBeInTheDocument());
+    fireEvent.click(within(panel).getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(within(panel).getByText("探测失败")).toBeInTheDocument());
+    expect(within(panel).getByText("Skill 探测失败")).toBeInTheDocument();
   });
 
   it("maps backend transport failures to readable messages", async () => {

@@ -65,10 +65,6 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 `DeviceStateSnapshot` 是全量 snapshot。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
-### Removed collection commands
-
-`lorume collect inventory` 和 `lorume collect work-state` 不再是支持命令。当前没有历史用户需要兼容，新增代码和测试必须以 `lorume collect device-state --json` 为唯一采集入口。旧命令必须返回 `unsupported_command`，不能静默转换或回退。
-
 ### `lorume collector stop --json --install-dir <path>`
 
 停止本机 Lorume collector 服务，但不删除安装文件或配置。该命令必须幂等：服务不存在或已经停止时仍返回成功状态，并在 JSON 中说明没有可停止的服务。
@@ -107,7 +103,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ## Harness
 
 - `src/cli/lorume-cli.test.ts` 覆盖命令 shape、JSON 输出、路径安全和 unsupported command。
-- `src/cli/lorume-cli.test.ts` 覆盖 `collect device-state`、旧采集命令 unsupported、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
+- `src/cli/lorume-cli.test.ts` 覆盖 `collect device-state`、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
 - `src/runtime/device-collector-script.test.ts` 必须验证 collector 通过 `lorume` CLI 获取 `device_state`，而不是直接新增第三方私有探测逻辑。
 - `npm run check:cli` 运行 CLI harness。
 - `npm run check:runtime`、`npm run check:backend`、`npm run check:quick` 继续覆盖 collector、backend 和 TypeScript 边界。

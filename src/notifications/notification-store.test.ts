@@ -25,16 +25,16 @@ describeDb("Postgres notification store", () => {
         });
         const result = await notificationStore.createNotificationEvent({
           actorUserId: user.id,
-          dedupeKey: "runtime:device_detail:refresh_succeeded",
-          eventType: "device_refresh_succeeded",
+          dedupeKey: "runtime:device_detail:state_collected",
+          eventType: "device_state_collected",
           organizationId: organization.id,
           recipientUserIds: [user.id],
           resourceId: "gezilinll-claw",
           resourceType: "device",
           severity: "info",
           sourceModule: "runtime",
-          summary: "设备快照已刷新。",
-          title: "设备刷新完成",
+          summary: "设备状态已采集。",
+          title: "设备状态采集完成",
         });
 
         const thread = await notificationStore.readThread({ threadId: result.thread.id });
@@ -42,8 +42,8 @@ describeDb("Postgres notification store", () => {
 
         expect(thread).toMatchObject({
           id: result.thread.id,
-          latestSummary: "设备快照已刷新。",
-          title: "设备刷新完成",
+          latestSummary: "设备状态已采集。",
+          title: "设备状态采集完成",
         });
         expect(deliveries).toEqual([
           expect.objectContaining({
@@ -75,16 +75,16 @@ describeDb("Postgres notification store", () => {
         });
         const result = await notificationStore.createNotificationEvent({
           actorUserId: user.id,
-          dedupeKey: "runtime:device_read:queued",
-          eventType: "device_refresh_queued",
+          dedupeKey: "runtime:device_read:state_collection_queued",
+          eventType: "device_state_collection_queued",
           organizationId: organization.id,
           recipientUserIds: [user.id],
           resourceId: "gezilinll-claw",
           resourceType: "device",
           severity: "info",
           sourceModule: "runtime",
-          summary: "设备刷新等待执行。",
-          title: "设备刷新排队中",
+          summary: "设备状态采集通知等待处理。",
+          title: "设备状态采集排队中",
         });
 
         await expect(notificationStore.listThreads({
@@ -129,29 +129,29 @@ describeDb("Postgres notification store", () => {
 
         await notificationStore.createNotificationEvent({
           actorUserId: user.id,
-          dedupeKey: "runtime:device_1:refresh_failed",
-          eventType: "device_refresh_failed",
+          dedupeKey: "runtime:device_1:state_collection_failed",
+          eventType: "device_state_collection_failed",
           organizationId: organization.id,
           recipientUserIds: [user.id],
           resourceId: "device_1",
           resourceType: "device",
           severity: "warning",
           sourceModule: "runtime",
-          summary: "Collector rejected device refresh.",
-          title: "设备刷新失败",
+          summary: "Collector rejected device state collection.",
+          title: "设备状态采集失败",
         });
         const second = await notificationStore.createNotificationEvent({
           actorUserId: user.id,
-          dedupeKey: "runtime:device_1:refresh_failed",
-          eventType: "device_refresh_failed",
+          dedupeKey: "runtime:device_1:state_collection_failed",
+          eventType: "device_state_collection_failed",
           organizationId: organization.id,
           recipientUserIds: [user.id],
           resourceId: "device_1",
           resourceType: "device",
           severity: "warning",
           sourceModule: "runtime",
-          summary: "Collector still rejects device refresh.",
-          title: "设备刷新失败",
+          summary: "Collector still rejects device state collection.",
+          title: "设备状态采集失败",
         });
 
         const threads = await notificationStore.listThreads({
@@ -164,8 +164,8 @@ describeDb("Postgres notification store", () => {
 
         expect(threads).toEqual([
           expect.objectContaining({
-            dedupeKey: "runtime:device_1:refresh_failed",
-            latestSummary: "Collector still rejects device refresh.",
+            dedupeKey: "runtime:device_1:state_collection_failed",
+            latestSummary: "Collector still rejects device state collection.",
             occurrenceCount: 2,
           }),
         ]);

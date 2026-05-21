@@ -31,30 +31,30 @@ describeDb("Postgres operation store", () => {
         const operation = await operationStore.createOperation({
           organizationId: organization.id,
           requestedByUserId: user.id,
-          resourceId: "device_list",
-          resourceType: "device",
-          summary: "Refresh listed device",
-          type: "device_refresh",
+          resourceId: "thread_list",
+          resourceType: "notification_thread",
+          summary: "Deliver listed notification",
+          type: "notification_delivery",
         });
         await operationStore.enqueueJob({
           operationId: operation.id,
           organizationId: organization.id,
-          payload: { deviceId: "device_list" },
+          payload: { threadId: "thread_list" },
           type: "notification_in_app",
         });
         await operationStore.createOperation({
           organizationId: otherOrganization.id,
           requestedByUserId: user.id,
-          resourceId: "device_other",
-          resourceType: "device",
+          resourceId: "thread_other",
+          resourceType: "notification_thread",
           summary: "Other org operation",
-          type: "device_refresh",
+          type: "notification_delivery",
         });
 
         const operations = await operationStore.listOperations({
           organizationId: organization.id,
-          resourceId: "device_list",
-          resourceType: "device",
+          resourceId: "thread_list",
+          resourceType: "notification_thread",
           status: "queued",
         });
         const jobs = await operationStore.listJobs({ operationId: operation.id });
@@ -63,7 +63,7 @@ describeDb("Postgres operation store", () => {
           expect.objectContaining({
             id: operation.id,
             organizationId: organization.id,
-            resourceId: "device_list",
+            resourceId: "thread_list",
           }),
         ]);
         expect(jobs).toEqual([
@@ -96,15 +96,15 @@ describeDb("Postgres operation store", () => {
         const operation = await operationStore.createOperation({
           organizationId: organization.id,
           requestedByUserId: user.id,
-          resourceId: "device_1",
-          resourceType: "device",
-          summary: "Refresh device state",
-          type: "device_refresh",
+          resourceId: "thread_1",
+          resourceType: "notification_thread",
+          summary: "Deliver in-app notification",
+          type: "notification_delivery",
         });
         const job = await operationStore.enqueueJob({
           operationId: operation.id,
           organizationId: organization.id,
-          payload: { deviceId: "device_1" },
+          payload: { threadId: "thread_1" },
           runAfter: new Date("2026-05-14T09:59:00.000Z"),
           type: "notification_in_app",
         });
@@ -205,28 +205,28 @@ describeDb("Postgres operation store", () => {
     }
   });
 
-  it("updates Agent Skill probe operations without an executable job", async () => {
+  it("updates notification operations without an executable job", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
       runMigrationsScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {
-        const user = await authStore.upsertUserForEmail("skill-probe@example.com");
+        const user = await authStore.upsertUserForEmail("notification-status@example.com");
         const organization = await authStore.createOrganization({
           createdByUserId: user.id,
-          name: "Skill Probe Team",
-          slug: "skill-probe-team",
+          name: "Notification Status Team",
+          slug: "notification-status-team",
         });
         const operation = await operationStore.createOperation({
           organizationId: organization.id,
           requestedByUserId: user.id,
-          resourceId: "agent-1",
-          resourceType: "agent",
-          summary: "探测 tester 的 Skill",
-          targetId: "device-1",
-          targetType: "device",
-          type: "agent_skill_probe",
+          resourceId: "thread_1",
+          resourceType: "notification_thread",
+          summary: "发送通知",
+          targetId: "thread_1",
+          targetType: "notification_thread",
+          type: "notification_delivery",
         });
 
         const running = await operationStore.updateOperationStatus({
@@ -235,7 +235,7 @@ describeDb("Postgres operation store", () => {
           status: "running",
         });
         const failed = await operationStore.updateOperationStatus({
-          errorSummary: "设备控制通道未连接",
+          errorSummary: "通知渠道未配置",
           operationId: operation.id,
           now: new Date("2026-05-18T10:01:00.000Z"),
           status: "failed",
@@ -243,7 +243,7 @@ describeDb("Postgres operation store", () => {
 
         expect(running).toMatchObject({ id: operation.id, status: "running" });
         expect(failed).toMatchObject({
-          errorSummary: "设备控制通道未连接",
+          errorSummary: "通知渠道未配置",
           id: operation.id,
           status: "failed",
         });

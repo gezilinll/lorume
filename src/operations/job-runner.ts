@@ -149,7 +149,7 @@ function titleSuffixForStatus(status: OperationStatus): string {
 }
 
 function sourceModuleForOperation(operation: OperationRow): NotificationSourceModule {
-  if (operation.type === "device_refresh" || operation.type === "agent_skill_probe") return "runtime";
+  void operation;
   return "system";
 }
 

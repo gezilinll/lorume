@@ -5,7 +5,7 @@ export function resolveLorumeAppMode(value?: string | null): LorumeAppMode {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return "production";
   if (normalized === "development" || normalized === "dev") return "development";
-  if (normalized === "agent" || normalized === "disabled") return "agent";
-  if (normalized === "production" || normalized === "prod" || normalized === "required") return "production";
+  if (normalized === "agent") return "agent";
+  if (normalized === "production" || normalized === "prod") return "production";
   return "production";
 }

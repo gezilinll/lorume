@@ -152,11 +152,11 @@ describe("operation job runner", () => {
       createJob({ type: "notification_in_app" }),
       createOperation({
         requestedByUserId: "user_1",
-        resourceId: "gezilinll-claw",
-        resourceType: "device",
+        resourceId: "thread_1",
+        resourceType: "notification_thread",
         status: "queued",
-        summary: "刷新设备快照",
-        type: "device_refresh",
+        summary: "发送通知",
+        type: "notification_delivery",
       }),
     );
     const runner = createOperationJobRunner({
@@ -183,12 +183,12 @@ describe("operation job runner", () => {
         dedupeKey: "operation:operation_1:succeeded",
         eventType: "operation_succeeded",
         recipientUserIds: ["user_1"],
-        resourceId: "gezilinll-claw",
-        resourceType: "device",
+        resourceId: "thread_1",
+        resourceType: "notification_thread",
         severity: "info",
-        sourceModule: "runtime",
-        summary: "刷新设备快照",
-        title: "刷新设备快照 已完成",
+        sourceModule: "system",
+        summary: "发送通知",
+        title: "发送通知 已完成",
       }),
     ]);
   });

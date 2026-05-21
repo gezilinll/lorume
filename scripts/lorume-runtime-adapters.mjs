@@ -285,8 +285,8 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId,
 
     const agentId = makeAgentId(runtimeId, agentResolution.agentExternalId);
     agentExternalIds.add(agentResolution.agentExternalId);
-    const legacyChannel = openClawChannelFromTrajectoryRun(run, dingtalkState.targetsByConversationId);
-    const channel = legacyChannel ? openClawProductChannel(legacyChannel) : undefined;
+    const trajectoryChannel = openClawChannelFromTrajectoryRun(run, dingtalkState.targetsByConversationId);
+    const channel = trajectoryChannel ? openClawProductChannel(trajectoryChannel) : undefined;
     const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
     const prompt = cleanOpenClawPromptText(run.prompt);
     const status = normalizeOpenClawTrajectoryProductTaskStatus(run);

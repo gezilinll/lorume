@@ -179,6 +179,90 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
+  it("derives device diagnostics from local connection and inventory ingestion", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runMigrationsScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl, store } = await startRuntimeApi(postgresStore);
+        const currentTime = new Date().toISOString();
+        store.writeDeviceConnection({
+          deviceId: "diagnostic-device",
+          status: "online",
+          connectedAt: currentTime,
+          lastHeartbeatAt: currentTime,
+        });
+
+        const inventoryResponse = await postJson(`${baseUrl}/api/device-snapshots`, {
+          observedAt: "2026-05-21T08:59:30.000Z",
+          collector: { version: "0.1.0", status: "online" },
+          device: {
+            id: "diagnostic-device",
+            hostname: "diagnostic.local",
+            os: "darwin",
+            architecture: "arm64",
+            lastSeenAt: "2026-05-21T08:59:30.000Z",
+          },
+          runtimes: [],
+          agents: [],
+          reports: [],
+        });
+        const response = await fetch(`${baseUrl}/api/devices/diagnostic-device/diagnostics`);
+
+        expect(inventoryResponse.status).toBe(201);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+          deviceId: "diagnostic-device",
+          status: "online",
+          label: "在线",
+          reason: "heartbeat_and_inventory_fresh",
+          message: "设备在线且采集正常",
+        });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("marks diagnostics abnormal after invalid inventory ingestion", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runMigrationsScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl, store } = await startRuntimeApi(postgresStore);
+        store.writeDeviceConnection({
+          deviceId: "broken-diagnostic-device",
+          status: "online",
+          connectedAt: "2026-05-21T08:59:00.000Z",
+          lastHeartbeatAt: "2026-05-21T08:59:50.000Z",
+        });
+
+        const inventoryResponse = await postJson(`${baseUrl}/api/device-snapshots`, {
+          observedAt: "2026-05-21T08:59:30.000Z",
+          device: { id: "broken-diagnostic-device" },
+        });
+        const response = await fetch(`${baseUrl}/api/devices/broken-diagnostic-device/diagnostics?now=2026-05-21T09:00:00.000Z`);
+
+        expect(inventoryResponse.status).toBe(400);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+          deviceId: "broken-diagnostic-device",
+          status: "abnormal",
+          label: "异常",
+          reason: "last_inventory_failed",
+        });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("creates a runtime notification when authenticated collector ingestion fails", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -268,7 +352,7 @@ async function startRuntimeApi(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("missing test server address");
-  return { baseUrl: `http://127.0.0.1:${address.port}` };
+  return { baseUrl: `http://127.0.0.1:${address.port}`, store };
 }
 
 function postJson(url: string, payload: unknown): Promise<Response> {

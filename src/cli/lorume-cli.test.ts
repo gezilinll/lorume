@@ -136,6 +136,188 @@ exit 91
     expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
+  it("maps OpenClaw task evidence into device-state tasks with only agent linkage", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: {
+        tasks: [{
+          taskId: "task-live-1",
+          runId: "run-live-1",
+          status: "running",
+          agentId: "main",
+          task: "帮我检查线上告警，并回复群里",
+          requesterSessionKey: "agent:main:dingtalk:group:group-live",
+          requesterOriginJson: JSON.stringify({
+            channel: "dingtalk",
+            to: "group-live",
+            messageId: "msg-live-1",
+            senderId: "user-live-1",
+            senderName: "张三",
+          }),
+          createdAt: "2026-05-21T01:00:00.000Z",
+          lastEventAt: "2026-05-21T01:05:00.000Z",
+        }],
+      },
+    });
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      id: "test-device:runtime:openclaw:agent:main:task:task-live-1",
+      agentId: "test-device:runtime:openclaw:agent:main",
+      title: "帮我检查线上告警",
+      description: "帮我检查线上告警，并回复群里",
+      status: "in_progress",
+      source: { externalId: "task-live-1" },
+      channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-live" },
+      conversation: {
+        title: "DingTalk 群聊",
+        externalId: "group-live",
+        lastActivityAt: "2026-05-21T01:05:00.000Z",
+      },
+      creator: { name: "张三" },
+      createdAt: "2026-05-21T01:00:00.000Z",
+      updatedAt: "2026-05-21T01:05:00.000Z",
+      lastSeenAt: "2026-05-21T01:05:00.000Z",
+    });
+    expect(output.tasks[0]).not.toHaveProperty("runtimeId");
+    expect(output.tasks[0]).not.toHaveProperty("lastRun");
+    expect(output.tasks[0]).not.toHaveProperty("sourceRefs");
+  });
+
+  it("skips OpenClaw tasks when agent ownership is ambiguous", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-ambiguous-task-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }, { agentId: "backup" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }, { agentId: "backup" }] },
+      },
+      tasks: {
+        tasks: [{
+          taskId: "task-ambiguous-1",
+          status: "pending",
+          task: "没有明确 agent 的任务",
+          requesterOriginJson: JSON.stringify({ channel: "dingtalk", to: "group-live" }),
+        }],
+      },
+    });
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toEqual([]);
+    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("task-ambiguous-1"));
+    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("ambiguous OpenClaw agent"));
+  });
+
+  it("maps OpenClaw trajectory run evidence into device-state tasks", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-trajectory-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "live");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-traj-1.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-traj-1",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T02:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "run-traj-1",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T02:01:00.000Z",
+        data: { prompt: "整理今天项目风险并同步到群里" },
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "run-traj-1",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T02:03:00.000Z",
+        data: { finalStatus: "error", error: "tool failed" },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      id: "test-device:runtime:openclaw:agent:main:task:run-traj-1",
+      agentId: "test-device:runtime:openclaw:agent:main",
+      title: "整理今天项目风险并同步到群里",
+      description: "整理今天项目风险并同步到群里",
+      status: "failed",
+      source: { externalId: "run-traj-1" },
+      channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-live" },
+      conversation: {
+        title: "DingTalk 群聊",
+        externalId: "group-live",
+        lastActivityAt: "2026-05-21T02:03:00.000Z",
+      },
+      error: "tool failed",
+      createdAt: "2026-05-21T02:00:00.000Z",
+      updatedAt: "2026-05-21T02:03:00.000Z",
+      lastSeenAt: "2026-05-21T02:03:00.000Z",
+    });
+    expect(output.tasks[0]).not.toHaveProperty("runtimeId");
+  });
+
   it("keeps legacy inventory collection OpenClaw-only by default", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-inventory-openclaw-"));
     const binDir = path.join(root, "bin");
@@ -378,6 +560,29 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Reco
 function spawnCli(args: string[]): { status: number | null; stderr: string } {
   const result = spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8" });
   return { status: result.status, stderr: result.stderr.trim() };
+}
+
+function writeOpenClawExecutable(
+  binDir: string,
+  payload: { health: unknown; status: unknown; tasks: unknown },
+) {
+  writeExecutable(path.join(binDir, "openclaw"), `#!/usr/bin/env node
+const payload = ${JSON.stringify(payload)};
+const args = process.argv.slice(2);
+if (args[0] === "health") {
+  console.log(JSON.stringify(payload.health));
+  process.exit(0);
+}
+if (args[0] === "status") {
+  console.log(JSON.stringify(payload.status));
+  process.exit(0);
+}
+if (args[0] === "tasks" && args[1] === "list") {
+  console.log(JSON.stringify(payload.tasks));
+  process.exit(0);
+}
+console.log("{}");
+`);
 }
 
 function writeExecutable(filePath: string, content: string) {

@@ -234,6 +234,10 @@ function createProductAgent({ runtimeId, externalId, name, collectionStatus, las
   };
 }
 
+function makeProductTaskId(agentId, externalId) {
+  return `${agentId}:task:${sanitizeId(externalId)}`;
+}
+
 function readOpenClawConfig() {
   const configPath = path.join(homeDir(), ".openclaw", "openclaw.json");
   if (!existsSync(configPath)) return null;
@@ -349,6 +353,7 @@ function collectOpenClawDeviceState(deviceId, observedAt) {
   const config = readOpenClawConfig();
   const health = runJson("openclaw", ["health", "--json", "--timeout", "5000"]);
   const status = runJson("openclaw", ["status", "--json", "--timeout", "5000"]);
+  const taskReport = runJson("openclaw", ["tasks", "list", "--json"], 20_000);
   if (!health && !status && !config) return { runtimes: [], agents: [], tasks: [], warnings: [] };
 
   const gateway = status?.gateway;
@@ -370,9 +375,28 @@ function collectOpenClawDeviceState(deviceId, observedAt) {
   });
 
   const openclawAgents = health?.agents || status?.agents?.agents || [];
-  const agentIds = Array.from(new Set([
+  const knownAgentIds = Array.from(new Set([
     ...openclawAgents.map((agent) => agent.agentId || agent.id || "main"),
     ...listOpenClawConfigAgentIds(config),
+  ])).filter(Boolean);
+  const rawTasks = toArray(taskReport, ["tasks"]);
+  const taskMapping = collectOpenClawProductTasks({
+    rawTasks,
+    knownAgentIds,
+    runtimeId: runtime.id,
+    observedAt,
+  });
+  const trajectoryMapping = collectOpenClawProductTrajectoryTasks({
+    runs: readOpenClawTrajectoryRuns(),
+    knownAgentIds,
+    runtimeId: runtime.id,
+    observedAt,
+    coveredRunIds: new Set(rawTasks.map(openClawTaskRunId).filter(Boolean)),
+  });
+  const agentIds = Array.from(new Set([
+    ...knownAgentIds,
+    ...taskMapping.agentExternalIds,
+    ...trajectoryMapping.agentExternalIds,
   ])).filter(Boolean);
   const agents = agentIds.map((agentId) =>
     createProductAgent({
@@ -387,7 +411,180 @@ function collectOpenClawDeviceState(deviceId, observedAt) {
     }),
   );
 
-  return { runtimes: [runtime], agents, tasks: [], warnings: [] };
+  const warnings = [...taskMapping.warnings, ...trajectoryMapping.warnings];
+  if (!taskReport) warnings.push("OpenClaw task probe unavailable: openclaw tasks list --json failed or returned non-JSON.");
+
+  return { runtimes: [runtime], agents, tasks: [...taskMapping.tasks, ...trajectoryMapping.tasks], warnings };
+}
+
+function collectOpenClawProductTasks({ rawTasks, knownAgentIds, runtimeId, observedAt }) {
+  const dingtalkState = readOpenClawDingTalkState();
+  const tasks = [];
+  const warnings = [];
+  const agentExternalIds = new Set();
+
+  for (const rawTask of rawTasks) {
+    const taskExternalId = openClawTaskExternalId(rawTask);
+    const agentResolution = resolveOpenClawTaskAgentExternalId(rawTask, knownAgentIds);
+    if (!agentResolution.agentExternalId) {
+      warnings.push(`Skipped OpenClaw task ${taskExternalId}: ${agentResolution.reason}.`);
+      continue;
+    }
+
+    const agentId = makeAgentId(runtimeId, agentResolution.agentExternalId);
+    agentExternalIds.add(agentResolution.agentExternalId);
+    const origin = extractOpenClawOrigin(rawTask);
+    const sessionKey = rawTask.requesterSessionKey || rawTask.requester_session_key || rawTask.childSessionKey || rawTask.child_session_key || rawTask.sessionKey || rawTask.session_key;
+    const legacyChannel = openClawChannelFromOrigin(origin, dingtalkState.targetsByConversationId) ||
+      openClawChannelFromDingTalkSession(sessionKey, dingtalkState.targetsByConversationId) ||
+      { kind: "openclaw", label: "OpenClaw" };
+    const channel = openClawProductChannel(legacyChannel);
+    const lastActivityAt = toIsoTimestamp(rawTask.lastEventAt || rawTask.last_event_at || rawTask.endedAt || rawTask.ended_at || rawTask.completedAt || rawTask.completed_at || rawTask.startedAt || rawTask.started_at);
+    const titleSource = rawTask.task || rawTask.label || rawTask.title || taskExternalId;
+
+    tasks.push({
+      id: makeProductTaskId(agentId, taskExternalId),
+      agentId,
+      title: messageTitle(titleSource),
+      ...(typeof rawTask.task === "string" ? { description: rawTask.task.slice(0, 500) } : {}),
+      status: normalizeOpenClawProductTaskStatus(rawTask.status),
+      source: { externalId: String(taskExternalId) },
+      channel,
+      conversation: {
+        title: channel.name || channel.kind,
+        ...(openClawProductConversationExternalId(origin, sessionKey) ? { externalId: openClawProductConversationExternalId(origin, sessionKey) } : {}),
+        ...(lastActivityAt ? { lastActivityAt } : {}),
+      },
+      ...(openClawProductCreator(origin) ? { creator: openClawProductCreator(origin) } : {}),
+      ...(toIsoTimestamp(rawTask.createdAt || rawTask.created_at) ? { createdAt: toIsoTimestamp(rawTask.createdAt || rawTask.created_at) } : {}),
+      ...(lastActivityAt ? { updatedAt: lastActivityAt, lastSeenAt: lastActivityAt } : { lastSeenAt: observedAt }),
+      ...(rawTask.error || rawTask.lastError || rawTask.last_error ? { error: String(rawTask.error || rawTask.lastError || rawTask.last_error).slice(0, 240) } : {}),
+    });
+  }
+
+  return { tasks, warnings, agentExternalIds: Array.from(agentExternalIds) };
+}
+
+function openClawTaskExternalId(task) {
+  return String(task.taskId || task.task_id || task.id || task.runId || task.run_id || "task");
+}
+
+function openClawTaskRunId(task) {
+  return task.runId || task.run_id || task.taskId || task.task_id || task.id;
+}
+
+function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId, observedAt, coveredRunIds }) {
+  const dingtalkState = readOpenClawDingTalkState();
+  const tasks = [];
+  const warnings = [];
+  const agentExternalIds = new Set();
+
+  for (const run of runs) {
+    if (!shouldCreateOpenClawTrajectoryWorkItem(run)) continue;
+    const runId = String(run.runId || "run");
+    if (coveredRunIds.has(runId)) continue;
+    const agentResolution = resolveOpenClawTrajectoryAgentExternalId(run, knownAgentIds);
+    if (!agentResolution.agentExternalId) {
+      warnings.push(`Skipped OpenClaw trajectory run ${runId}: ${agentResolution.reason}.`);
+      continue;
+    }
+
+    const agentId = makeAgentId(runtimeId, agentResolution.agentExternalId);
+    agentExternalIds.add(agentResolution.agentExternalId);
+    const legacyChannel = openClawChannelFromTrajectoryRun(run, dingtalkState.targetsByConversationId);
+    const channel = openClawProductChannel(legacyChannel);
+    const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
+    const prompt = cleanOpenClawPromptText(run.prompt);
+
+    tasks.push({
+      id: makeProductTaskId(agentId, runId),
+      agentId,
+      title: messageTitle(prompt),
+      description: prompt,
+      status: normalizeOpenClawTrajectoryProductTaskStatus(run),
+      source: { externalId: runId },
+      channel,
+      conversation: {
+        title: channel.name || channel.kind,
+        ...(openClawProductConversationExternalId(null, run.sessionKey) ? { externalId: openClawProductConversationExternalId(null, run.sessionKey) } : {}),
+        ...(lastActivityAt ? { lastActivityAt } : {}),
+      },
+      ...(openClawProductCreatorFromTrajectoryRun(run) ? { creator: openClawProductCreatorFromTrajectoryRun(run) } : {}),
+      ...(run.startedAt ? { createdAt: run.startedAt } : {}),
+      ...(lastActivityAt ? { updatedAt: lastActivityAt, lastSeenAt: lastActivityAt } : { lastSeenAt: observedAt }),
+      ...(run.error ? { error: String(run.error).slice(0, 240) } : {}),
+    });
+  }
+
+  return { tasks, warnings, agentExternalIds: Array.from(agentExternalIds) };
+}
+
+function resolveOpenClawTrajectoryAgentExternalId(run, knownAgentIds) {
+  if (run.agentExternalId) return { agentExternalId: String(run.agentExternalId) };
+  const sessionAgentId = openClawAgentIdFromSessionKey(run.sessionKey);
+  if (sessionAgentId) return { agentExternalId: sessionAgentId };
+  if (knownAgentIds.length === 1) return { agentExternalId: String(knownAgentIds[0]) };
+  if (knownAgentIds.length > 1) return { reason: "ambiguous OpenClaw agent ownership" };
+  return { reason: "missing OpenClaw agent ownership" };
+}
+
+function resolveOpenClawTaskAgentExternalId(task, knownAgentIds) {
+  const explicitAgentId = task.agentId || task.agent_id || task.assigneeAgentId || task.assignee_agent_id;
+  if (explicitAgentId) return { agentExternalId: String(explicitAgentId) };
+
+  const sessionAgentId = openClawAgentIdFromSessionKey(task.requesterSessionKey || task.requester_session_key || task.childSessionKey || task.child_session_key || task.sessionKey || task.session_key);
+  if (sessionAgentId) return { agentExternalId: sessionAgentId };
+
+  if (knownAgentIds.length === 1) return { agentExternalId: String(knownAgentIds[0]) };
+  if (knownAgentIds.length > 1) return { reason: "ambiguous OpenClaw agent ownership" };
+  return { reason: "missing OpenClaw agent ownership" };
+}
+
+function openClawAgentIdFromSessionKey(sessionKey) {
+  const match = /^agent:([^:]+):/.exec(String(sessionKey || ""));
+  return match?.[1] ? String(match[1]) : "";
+}
+
+function normalizeOpenClawProductTaskStatus(status) {
+  const executionStatus = normalizeOpenClawExecutionStatus(status);
+  return normalizeOpenClawExecutionProductTaskStatus(executionStatus);
+}
+
+function normalizeOpenClawTrajectoryProductTaskStatus(run) {
+  return normalizeOpenClawExecutionProductTaskStatus(normalizeOpenClawTrajectoryExecutionStatus(run));
+}
+
+function normalizeOpenClawExecutionProductTaskStatus(executionStatus) {
+  if (executionStatus === "queued") return "todo";
+  if (executionStatus === "running") return "in_progress";
+  if (executionStatus === "succeeded") return "done";
+  if (executionStatus === "failed") return "failed";
+  if (executionStatus === "cancelled") return "cancelled";
+  return "unknown";
+}
+
+function openClawProductChannel(channel) {
+  return {
+    kind: channel?.kind || "other",
+    ...(channel?.label ? { name: channel.label } : {}),
+    ...(channel?.externalId ? { externalId: channel.externalId } : {}),
+  };
+}
+
+function openClawProductConversationExternalId(origin, sessionKey) {
+  return normalizeOpenClawOriginConversationId(origin) || parseOpenClawDingTalkSession(sessionKey)?.conversationId;
+}
+
+function openClawProductCreator(origin) {
+  const name = origin?.senderName || origin?.sender_name || origin?.sender || origin?.userName || origin?.user_name;
+  const id = origin?.senderId || origin?.sender_id || origin?.userId || origin?.user_id;
+  if (!name && !id) return undefined;
+  return { name: String(name || id) };
+}
+
+function openClawProductCreatorFromTrajectoryRun(run) {
+  if (!run.senderName && !run.senderId) return undefined;
+  return { name: String(run.senderName || run.senderId) };
 }
 
 function collectMultica(deviceId, observedAt) {

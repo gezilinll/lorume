@@ -42,6 +42,7 @@ assert(composeFile.includes("Dockerfile.frontend"), "prod-like compose must buil
 assert(composeFile.includes("LORUME_POSTGRES_PASSWORD"), "prod-like compose must allow overriding the Postgres password");
 assert(composeFile.includes("LORUME_BACKEND_PUBLISH"), "prod-like compose must allow backend host port binding override");
 assert(composeFile.includes("LORUME_FRONTEND_PUBLISH"), "prod-like compose must allow frontend host port binding override");
+assert(composeFile.includes("LORUME_DEVICE_TOKEN_REQUIRED"), "prod-like compose must require device tokens by default");
 
 const packageJson = JSON.parse(read("package.json"));
 assert(packageJson.scripts?.["smoke:production"] === "node scripts/smoke-production.mjs", "package must expose production smoke script");

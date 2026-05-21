@@ -26,8 +26,8 @@ required_paths=(
   "docs/product/design/review-and-harness.md"
   "docs/product/runtime-device-registration-spec.md"
   "docs/product/runtime-fleet-page-spec.md"
-  "docs/product/runtime-work-state-probe.md"
-  "docs/product/runtime-listening-acceptance-spec.md"
+  "docs/product/runtime-task-probe.md"
+  "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
   "docs/product/cli-device-capability-spec.md"
   "docs/product/agent-skill-probing-spec.md"
@@ -41,10 +41,10 @@ required_paths=(
   "src/console/ConsoleUtilityDrawer.tsx"
   "src/console/ConsoleUtilityDrawer.test.tsx"
   "src/settings/OrganizationSettingsPage.tsx"
-  "src/runtime/runtime-inventory-query.ts"
-  "src/runtime/runtime-normalize.ts"
+  "src/runtime/runtime-fleet-query.ts"
+  "src/runtime/runtime-model.ts"
   "src/backend/backend-server.ts"
-  "src/server/runtime-inventory-store.ts"
+  "src/server/runtime-device-state-store.ts"
   "src/server/postgres-store.ts"
   "src/server/runtime-http-api-postgres.test.ts"
   "src/test/postgres.ts"
@@ -104,8 +104,8 @@ markdown_files = [
     Path("docs/product/design/review-and-harness.md"),
     Path("docs/product/runtime-device-registration-spec.md"),
     Path("docs/product/runtime-fleet-page-spec.md"),
-    Path("docs/product/runtime-work-state-probe.md"),
-    Path("docs/product/runtime-listening-acceptance-spec.md"),
+    Path("docs/product/runtime-task-probe.md"),
+    Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
     Path("docs/product/agent-skill-probing-spec.md"),
@@ -150,6 +150,41 @@ for md_path in markdown_files:
         if not resolved.exists():
             display = resolved.relative_to(root)
             problems.append(f"{md_path}: missing link target {raw_target} -> {display}")
+
+runtime_device_spec = Path("docs/product/runtime-device-registration-spec.md").read_text(encoding="utf-8")
+expected_runtime_kind = 'export type RuntimeKind = "openclaw" | "slock" | "multica" | "codex";'
+if expected_runtime_kind not in runtime_device_spec:
+    problems.append("docs/product/runtime-device-registration-spec.md: RuntimeKind must list only openclaw, slock, multica, and codex")
+
+if "claude_code" in runtime_device_spec:
+    problems.append("docs/product/runtime-device-registration-spec.md: claude_code must not be a supported RuntimeKind")
+
+typescript_blocks = re.findall(r"```ts\n(.*?)\n```", runtime_device_spec, re.S)
+
+def code_block_containing(marker):
+    for block in typescript_blocks:
+        if marker in block:
+            return block
+    problems.append(f"docs/product/runtime-device-registration-spec.md: missing TypeScript block `{marker}`")
+    return ""
+
+runtime_interface = code_block_containing("export interface Runtime")
+forbidden_runtime_fields = ["endpoint", "capabilities", "sourceRefs"]
+for field in forbidden_runtime_fields:
+    if field in runtime_interface:
+        problems.append(f"docs/product/runtime-device-registration-spec.md: Runtime product model must not expose `{field}`")
+
+agent_interface = code_block_containing("export interface Agent")
+forbidden_agent_fields = ["origin", "sourceRefs", "load"]
+for field in forbidden_agent_fields:
+    if field in agent_interface:
+        problems.append(f"docs/product/runtime-device-registration-spec.md: Agent product model must not expose `{field}`")
+
+task_interface = code_block_containing("export interface Task")
+if "runtimeId" in task_interface:
+    problems.append("docs/product/runtime-device-registration-spec.md: Task product model must not expose runtimeId")
+if "lastRun" in task_interface:
+    problems.append("docs/product/runtime-device-registration-spec.md: Task product model must not expose lastRun")
 
 if problems:
     print("check:repo: Markdown link check failed", file=sys.stderr)

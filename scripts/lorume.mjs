@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } fr
 import { hostname, arch, platform, userInfo, networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectInventorySnapshot, collectWorkStateSnapshot } from "./lorume-runtime-adapters.mjs";
+import { collectDeviceStateSnapshot } from "./lorume-runtime-adapters.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,12 +50,8 @@ async function main() {
     writeJson(listRuntimes(flags));
     return;
   }
-  if (group === "collect" && command === "inventory") {
-    writeJson(await collectInventory(flags));
-    return;
-  }
-  if (group === "collect" && command === "work-state") {
-    writeJson(await collectWorkState(flags));
+  if (group === "collect" && command === "device-state") {
+    writeJson(await collectDeviceState(flags));
     return;
   }
   if (group === "agent" && command === "skill-probe") {
@@ -99,10 +95,7 @@ function identifyDevice(flags) {
 
 function listRuntimes(flags) {
   const snapshotPath = requireFlag(flags, "snapshot");
-  const snapshot = readJson(snapshotPath);
-  if (!snapshot || typeof snapshot !== "object") {
-    throw createCliError("invalid_snapshot", "Runtime snapshot must be a JSON object", 2);
-  }
+  const snapshot = readDeviceStateSnapshot(snapshotPath);
   return {
     agents: Array.isArray(snapshot.agents) ? snapshot.agents : [],
     command: "runtime.list",
@@ -112,33 +105,18 @@ function listRuntimes(flags) {
   };
 }
 
-async function collectInventory(flags) {
+async function collectDeviceState(flags) {
   const snapshotPath = stringFlag(flags, "snapshot");
   if (snapshotPath) {
-    const snapshot = applyInventoryDeviceOverrides(readRuntimeInventorySnapshot(snapshotPath), flags);
+    const snapshot = applyDeviceStateDeviceOverrides(readDeviceStateSnapshot(snapshotPath), flags);
     return {
       ...snapshot,
-      command: "collect.inventory",
+      command: "collect.device-state",
     };
   }
   return {
-    ...collectInventorySnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags)),
-    command: "collect.inventory",
-  };
-}
-
-async function collectWorkState(flags) {
-  const snapshotPath = stringFlag(flags, "snapshot");
-  if (snapshotPath) {
-    const snapshot = readJson(snapshotPath);
-    if (!snapshot || typeof snapshot !== "object") {
-      throw createCliError("invalid_snapshot", "Work-state snapshot must be a JSON object", 2);
-    }
-    return { ...snapshot, command: "collect.work-state" };
-  }
-  return {
-    ...(await collectWorkStateSnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags))),
-    command: "collect.work-state",
+    ...collectDeviceStateSnapshot(readCollectorConfig(flags), collectorAdapterArgs(flags)),
+    command: "collect.device-state",
   };
 }
 
@@ -206,22 +184,23 @@ function runCollectorLifecycleCommand(command, flags) {
   };
 }
 
-function readRuntimeInventorySnapshot(snapshotPath) {
+function readDeviceStateSnapshot(snapshotPath) {
   const snapshot = readJson(snapshotPath);
   if (!snapshot || typeof snapshot !== "object") {
-    throw createCliError("invalid_snapshot", "Runtime snapshot must be a JSON object", 2);
+    throw createCliError("invalid_snapshot", "Device-state snapshot must be a JSON object", 2);
   }
+  const device = snapshot.device ?? (Array.isArray(snapshot.devices) ? snapshot.devices[0] : null);
   return {
     agents: Array.isArray(snapshot.agents) ? snapshot.agents : [],
-    collector: snapshot.collector && typeof snapshot.collector === "object" ? snapshot.collector : { status: "unknown" },
-    device: snapshot.device ?? null,
+    device,
+    diagnostics: snapshot.diagnostics && typeof snapshot.diagnostics === "object" ? snapshot.diagnostics : undefined,
     observedAt: typeof snapshot.observedAt === "string" ? snapshot.observedAt : new Date().toISOString(),
-    reports: Array.isArray(snapshot.reports) ? snapshot.reports : [],
     runtimes: Array.isArray(snapshot.runtimes) ? snapshot.runtimes : [],
+    tasks: Array.isArray(snapshot.tasks) ? snapshot.tasks : [],
   };
 }
 
-function applyInventoryDeviceOverrides(snapshot, flags) {
+function applyDeviceStateDeviceOverrides(snapshot, flags) {
   const deviceId = stringFlag(flags, "device-id");
   if (!deviceId) return snapshot;
   const currentDeviceId = snapshot.device?.id;
@@ -248,7 +227,13 @@ function applyInventoryDeviceOverrides(snapshot, flags) {
       runtimeId,
     };
   });
-  return { ...snapshot, device: nextDevice, runtimes, agents };
+  const agentIdReplacements = new Map(snapshot.agents.map((agent, index) => [agent.id, agents[index]?.id ?? agent.id]));
+  const tasks = snapshot.tasks.map((task) => ({
+    ...task,
+    id: String(task.id).replace(`${currentDeviceId}:`, `${deviceId}:`),
+    agentId: agentIdReplacements.get(task.agentId) || String(task.agentId).replace(`${currentDeviceId}:`, `${deviceId}:`),
+  }));
+  return { ...snapshot, device: nextDevice, runtimes, agents, tasks };
 }
 
 function copyExplicitPath(flags) {
@@ -429,8 +414,7 @@ function helpText() {
 
 Commands:
   lorume device identify --json [--device-id <id>]
-  lorume collect inventory --json [--snapshot <path>]
-  lorume collect work-state --json [--snapshot <path>]
+  lorume collect device-state --json [--snapshot <path>]
   lorume agent skill-probe --json --agent-id <id> [--runtime-id <id>] [--device-id <id>] [--skill-root <path>]
   lorume collector stop --json [--install-dir <path>]
   lorume collector uninstall --json [--install-dir <path>]

@@ -4,7 +4,7 @@ import { deriveDeviceHealthStatus } from "./runtime-device-health";
 const now = new Date("2026-05-21T09:00:00.000Z");
 
 describe("deriveDeviceHealthStatus", () => {
-  it("returns syncing before the first successful inventory when no explicit error exists", () => {
+  it("returns syncing before the first successful device-state collection when no explicit error exists", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -14,7 +14,7 @@ describe("deriveDeviceHealthStatus", () => {
         connectedAt: "2026-05-21T08:59:30.000Z",
         lastHeartbeatAt: "2026-05-21T08:59:50.000Z",
       },
-      inventoryIngestions: [],
+      deviceStateIngestions: [],
     })).toMatchObject({
       status: "syncing",
       label: "同步中",
@@ -22,7 +22,7 @@ describe("deriveDeviceHealthStatus", () => {
     });
   });
 
-  it("returns online when heartbeat and inventory are fresh", () => {
+  it("returns online when heartbeat and device-state collection are fresh", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -32,9 +32,9 @@ describe("deriveDeviceHealthStatus", () => {
         connectedAt: "2026-05-21T08:50:00.000Z",
         lastHeartbeatAt: "2026-05-21T08:59:45.000Z",
       },
-      inventoryIngestions: [{
+      deviceStateIngestions: [{
         deviceId: "device-a",
-        snapshotType: "inventory",
+        snapshotType: "device_state",
         status: "succeeded",
         observedAt: "2026-05-21T08:59:30.000Z",
         receivedAt: "2026-05-21T08:59:35.000Z",
@@ -44,11 +44,11 @@ describe("deriveDeviceHealthStatus", () => {
     })).toMatchObject({
       status: "online",
       label: "在线",
-      reason: "heartbeat_and_inventory_fresh",
+      reason: "heartbeat_and_device_state_fresh",
     });
   });
 
-  it("returns offline when previous inventory succeeded but freshness expired", () => {
+  it("returns offline when previous device-state collection succeeded but freshness expired", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -58,9 +58,9 @@ describe("deriveDeviceHealthStatus", () => {
         connectedAt: "2026-05-21T08:00:00.000Z",
         lastHeartbeatAt: "2026-05-21T08:40:00.000Z",
       },
-      inventoryIngestions: [{
+      deviceStateIngestions: [{
         deviceId: "device-a",
-        snapshotType: "inventory",
+        snapshotType: "device_state",
         status: "succeeded",
         observedAt: "2026-05-21T08:40:00.000Z",
         receivedAt: "2026-05-21T08:40:10.000Z",
@@ -70,11 +70,11 @@ describe("deriveDeviceHealthStatus", () => {
     })).toMatchObject({
       status: "offline",
       label: "离线",
-      reason: "inventory_or_heartbeat_stale",
+      reason: "device_state_or_heartbeat_stale",
     });
   });
 
-  it("returns abnormal for the latest failed inventory", () => {
+  it("returns abnormal for the latest failed device-state collection", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -84,25 +84,25 @@ describe("deriveDeviceHealthStatus", () => {
         connectedAt: "2026-05-21T08:50:00.000Z",
         lastHeartbeatAt: "2026-05-21T08:59:50.000Z",
       },
-      inventoryIngestions: [{
+      deviceStateIngestions: [{
         deviceId: "device-a",
-        snapshotType: "inventory",
+        snapshotType: "device_state",
         status: "failed",
         observedAt: "2026-05-21T08:59:30.000Z",
         receivedAt: "2026-05-21T08:59:35.000Z",
         counts: {},
         warnings: [],
-        error: "invalid runtime inventory snapshot",
+        error: "invalid device state snapshot",
       }],
     })).toMatchObject({
       status: "abnormal",
       label: "异常",
-      reason: "last_inventory_failed",
-      message: "最近一次设备资产采集失败",
+      reason: "last_device_state_failed",
+      message: "最近一次设备状态采集失败",
     });
   });
 
-  it("returns abnormal when a fresh connection exceeds the first sync window without inventory", () => {
+  it("returns abnormal when a fresh connection exceeds the first sync window without device-state collection", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -112,7 +112,7 @@ describe("deriveDeviceHealthStatus", () => {
         connectedAt: "2026-05-21T08:55:00.000Z",
         lastHeartbeatAt: "2026-05-21T08:59:50.000Z",
       },
-      inventoryIngestions: [],
+      deviceStateIngestions: [],
     })).toMatchObject({
       status: "abnormal",
       label: "异常",

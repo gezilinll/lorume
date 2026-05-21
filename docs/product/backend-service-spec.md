@@ -7,7 +7,7 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 ## 目标
 
 - 提供独立于 Vite 的 Lorume backend 服务，前端和 collector 都通过 HTTP / WebSocket 访问它。
-- 使用 Postgres 持久化设备、Runtime、Agent、Channel binding、工作项、会话、执行记录和采集记录。
+- 使用 Postgres 持久化 Device、Runtime、Agent、Task 和采集记录。
 - 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 上报连接健康，通过 HTTP POST 上报采集结果。
 - 将 Runs / Runtime Fleet 的正式数据读取固定为“后端查询、前端展示”，不再使用前端拉 latest snapshot 后本地筛选作为正式路径。
 - 每次 collector 上报都记录 ingestion 结果，并由后端生成设备采集诊断结论，支持排查某个平台为什么缺数据、什么时候缺数据、缺了哪些能力。
@@ -62,38 +62,34 @@ flowchart LR
 - `devices`：设备身份、hostname、OS、架构、collector 状态、最近同步和连接摘要。
 - `runtimes`：设备上的 Runtime / 平台入口，例如 OpenClaw、Multica、Codex、Slock。
 - `agents`：Lorume 管理视角下的 Managed Agent。
-- `channel_bindings`：Agent 暴露给用户的触达渠道，例如 DingTalk、Telegram、Slack；Multica、Slock、OpenClaw、Codex 不作为 Runs 的 Channel。
-- `work_items`：Agent 承接的业务工作项。
-- `work_conversations`：会话、群组、线程或私聊上下文。
-- `work_executions`：具体执行记录。
+- `tasks`：Agent 承接的业务工作。Task 只通过 `agent_id` 关联 Agent，不直接保存 Runtime 或 Device 外键。
 - `collector_ingestions`：每次 collector 上报的结果、数量、耗时、warning 和错误摘要。
 - `operations`：用户可见的异步动作状态。
 - `operation_jobs`：后端 runner 可 claim 和执行的任务单元。
 - `notification_events` / `notification_threads` / `notification_deliveries` / `notification_preferences`：公共通知事件、聚合、投递和偏好。
 
-暂不单独建 `device_connections`。WebSocket 在线状态可以保存在内存控制通道；可持久化的连接摘要先落在 `devices` 和 `collector_ingestions` 中。
+不保留旧 inventory / work_state 表或兼容读写入口。暂不单独建 `device_connections`。WebSocket 在线状态可以保存在内存控制通道；可持久化的连接摘要先落在 `devices` 和 `collector_ingestions` 中。
 
 ## 上报与采集
 
 Collector 保持主动上报：
 
-- Inventory 快照可以全量上报，因为设备、Runtime、Agent 数量较小。
-- Inventory 和 Work state 上报代表该设备的最新观测快照。后端按稳定 ID upsert 当前对象，并删除同一设备在新快照中已经消失的 Runtime、Agent、工作项、会话和执行记录；历史只保留在 `collector_ingestions` 中。
-- Work state 里的 `workItemId`、`conversationId` 等可选关联必须以当前快照中真实存在的对象为准。缺失的可选关联写成 `NULL`，不能因为单个平台的关联证据不完整而拒绝整批工作态上报。
-- Work state 里的 `runtimeId`、`agentId` 也必须按当前设备已注册对象校验。会话和工作项的陈旧 `runtimeId` / `agentId` 降级为 `NULL`；执行记录的 `runtimeId` 是必填外键，若 runtime 不存在则跳过该 execution，并在本次 ingestion 数量中反映实际写入数量。
+- 当前唯一正式路径是 `device_state` 全量快照，包含 Device、Runtime、Agent 和 Task。后端按稳定 ID upsert 当前对象，并删除同一设备在新快照中已经消失的 Runtime、Agent 和 Task；历史只保留在 `collector_ingestions` 中。
+- `inventory` 和 `work_state` 不作为兼容回退保留；对应旧 HTTP 入口、CLI 命令和 DB 表都不属于当前规则。
+- Task 必须引用当前快照中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录 warning，不能写成悬空任务。
 - 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、规范化错误码、用户可读错误摘要和接收时间。
-- 认证后的 inventory / work-state 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
-- Collector 上报 inventory / work-state 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
-- 设备 WebSocket 在线只表示控制面可达，不等于 inventory / work-state 采集成功。采集诊断必须从 `collector_ingestions` 中最近一次 inventory 与 work-state 记录独立判断，并折叠进 Runtime Fleet 对象状态。
+- 认证后的 collector 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
+- Collector 上报 `device_state` 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
+- 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
 - 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- Collector 可以在后续演进为增量采集；当前 inventory 与 work-state 都按全量 snapshot 入库，由后端通过 upsert、替换和删除 stale 对象保持当前态。
+- Collector 可以在后续演进为增量采集；当前 `device_state` 按全量 snapshot 入库，由后端通过 upsert、替换和删除 stale 对象保持当前态。
 
 建议节奏：
 
 - `10-30s`：heartbeat / 连接状态。
-- `30-60s`：work state 变化采集。
-- `5-10min`：inventory 快照。
+- `30-60s`：`device_state` 变化采集。
+- `5-10min`：`device_state` 全量 reconcile。
 - 低频任务：全量 reconcile。
 
 ## API
@@ -104,8 +100,7 @@ Collector 保持主动上报：
 - `GET /readyz`
 - `GET /api/device-collector/install.sh`
 - `GET /api/device-collector/files/:fileName`
-- `POST /api/device-snapshots`
-- `POST /api/runtime-work-state-snapshots`
+- `POST /api/device-state-snapshots`
 - `WS /api/device-control/ws`
 
 Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于 P0 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
@@ -115,16 +110,14 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
 - `GET /api/runtime-fleet`
   - 参数：`search`、`runtimeKind`、`syncWindow`。
   - 返回 Runtime Fleet 页面需要的设备、Runtime、Agent、summary 和详情基础数据。
-- `GET /api/runtime-work-items`
-  - 参数：`search`、`source`、`channelKind`、`stage`、`startAt`、`endAt`、`limit`、`cursor`。
+- `GET /api/runtime-tasks`
+  - 参数：`search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
   - 后端负责筛选、时间范围、稳定 cursor 分页和排序，返回 `total` 与 `nextCursor`。
-  - 返回行中的 `stage` 是后端已物化的 Lorume WorkStage；前端可以用它筛选和分栏，不能再按 `status` 覆盖成另一套阶段。
-- `GET /api/runtime-work-items/:id`
-  - 返回工作项详情。
+  - 返回行是 Lorume `Task`。`Task.status` 是任务当前状态的唯一来源，Task 不包含 `runtimeId` 或 `lastRun`。
 - `GET /api/devices/:deviceId/ingestions`
   - 返回最近采集记录，用于解释数据新鲜度和缺口；记录必须包含 `observedAt` 和 `receivedAt`，方便区分设备观测时间与后端接收时间。
 - `GET /api/devices/:deviceId/collection-health`
-  - 返回设备级采集诊断摘要和 inventory / work-state 两个检查项。
+  - 返回设备级采集诊断摘要，只返回 `device_state` 检查项。
   - `healthy`：最近一次上报成功；warnings 只进入诊断信息，不改变 Runtime Fleet 展示状态。
   - `failed`：尚未收到记录、最近一次上报失败、payload 结构不可用或后端写入失败。
   - 该接口不再返回用户界面专用的 `warning`、`stale` 或 `unknown` 状态；Runtime Fleet 展示层只把 `failed` 折叠为对象 `异常`。
@@ -172,7 +165,7 @@ ECS 部署形态：
 - 域名：`lorume.com`。
 - 系统 Nginx 负责公网 `80/443`、HTTP 到 HTTPS 跳转、TLS 证书、静态前端反代、`/api`、`/healthz`、`/readyz` 和 WebSocket upgrade。
 - Docker Compose 运行 Postgres、backend 和 frontend 容器；frontend 绑定 `127.0.0.1:8080`，backend 绑定 `127.0.0.1:4173`，Postgres 不暴露宿主端口。
-- Nginx 必须配置足够的 `client_max_body_size`，当前为 `50m`，否则 collector 的 work-state 快照可能被 413 拒绝。
+- Nginx 必须配置足够的 `client_max_body_size`，当前为 `50m`，否则 collector 的 `device_state` 快照可能被 413 拒绝。
 - 证书由 certbot 管理，`lorume.com` 当前使用独立证书；`/.well-known/acme-challenge/` 保留给续签。
 
 后续以当前 ECS 形态为基线补齐生产鉴权、备份、监控和告警。
@@ -182,18 +175,18 @@ ECS 部署形态：
 后端正式化必须补齐以下检查：
 
 - migration harness：迁移能在空 Postgres 上创建 schema，重复执行有可解释结果。
-- repository harness：inventory / work-state snapshot 能 upsert 并查询。
-- HTTP API harness：collector POST、runtime fleet query、work item query、ingestion query。
+- repository harness：`device_state` snapshot 能 upsert 并查询 Device / Runtime / Agent / Task。
+- HTTP API harness：collector POST、runtime fleet query、runtime task query、ingestion query。
 - readiness harness：`/healthz` 和 `/readyz` 能区分进程存活与数据库可用。
 - connection channel harness：WebSocket hello、heartbeat、断连和 stale 判定继续可用。
 - operation runner harness：Postgres Job claim、lease、retry、完成态和失败态。
 - notification harness：事件聚合、限流、in-app 记录和 email delivery 记录。
 - collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime warning 通知。
-- collector contract harness：现有 collector 上报 payload 仍可被后端接收。
+- collector contract harness：当前 collector `device_state` payload 可被后端接收。
 - error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
 - structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。
 - deploy config harness：backend bundle、Dockerfile、Nginx、production-like compose 必须和当前服务入口一致。
-- production smoke harness：`npm run smoke:production` 是非写入型部署读检查，可以检查 `/healthz`、`/readyz`、已鉴权读 API 和 collection-health / diagnostics 读路径；不得创建 device token、运行 installer、POST collector snapshot 或写入生产数据。
+- production smoke harness：`npm run smoke:production` 默认只检查公开部署入口，例如 `/healthz`、`/readyz` 和 collector installer 公开资源；只有显式提供 `LORUME_SMOKE_COOKIE` 或 `LORUME_SMOKE_BEARER_TOKEN` 时，才检查已鉴权 Runtime Fleet、Runs、collection-health 和 diagnostics 读路径。它不得创建 device token、运行 installer、POST collector snapshot 或写入生产数据。
 - backend API-only E2E harness：本地 isolated Postgres 加本地 backend 验证 device token 创建、installer assets、真实 collector 进程上传、Device diagnostics、query APIs 和 heartbeat-only WebSocket。
 - Playwright harness：Runtime Fleet 和 Runs 页面继续通过，且不依赖手动 dev 数据。
 - `./scripts/verify.sh` 必须包含新增 backend 检查。

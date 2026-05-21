@@ -1,120 +1,49 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import {
-  mapMulticaWorkState,
-  mapOpenClawWorkState,
-  mapSlockWorkState,
-  type RuntimeInventorySnapshot,
-  multicaWorkStateFixture,
-  openClawWorkStateFixture,
-  slockWorkStateFixture,
-  type RuntimeWorkStateSnapshot,
-} from "../src/runtime";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { DeviceStateSnapshot, Task } from "../src/runtime/runtime-model";
 import { resetE2eDatabase } from "./db";
 
-const openclaw = mapOpenClawWorkState(openClawWorkStateFixture);
-const multica = mapMulticaWorkState(multicaWorkStateFixture);
-const slock = mapSlockWorkState(slockWorkStateFixture);
-
-const backendInventory: RuntimeInventorySnapshot = {
-  observedAt: "2026-05-09T08:00:00.000Z",
-  collector: { version: "0.1.0", status: "online" },
-  device: {
-    id: "fixture-device",
-    hostname: "fixture-device.local",
-    os: "darwin",
-    architecture: "arm64",
-    lastSeenAt: "2026-05-09T08:00:00.000Z",
-  },
-  runtimes: [
-    {
-      id: "fixture-device:openclaw:gateway",
-      deviceId: "fixture-device",
-      kind: "openclaw",
-      name: "OpenClaw Gateway",
-      status: "online",
-      capabilities: ["tasks"],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-      sourceRefs: [{ source: "openclaw", externalId: "gateway", label: "OpenClaw Gateway" }],
-    },
-    {
-      id: "fixture-device:multica:runtime-openclaw",
-      deviceId: "fixture-device",
-      kind: "multica",
-      name: "Multica OpenClaw",
-      status: "online",
-      capabilities: ["issues", "runs"],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-      sourceRefs: [{ source: "multica", externalId: "runtime-openclaw", label: "Multica OpenClaw" }],
-    },
-    {
-      id: "fixture-device:slock:daemon",
-      deviceId: "fixture-device",
-      kind: "slock",
-      name: "Slock daemon",
-      status: "online",
-      capabilities: ["task-board"],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-      sourceRefs: [{ source: "slock", externalId: "daemon", label: "Slock daemon" }],
-    },
-  ],
-  agents: [
-    {
-      id: "fixture-device:openclaw:gateway:agent:main",
-      runtimeId: "fixture-device:openclaw:gateway",
-      name: "main",
-      origin: "openclaw",
-      status: "idle",
-      channelBindings: [{ kind: "dingtalk", label: "DingTalk default", status: "enabled" }],
-      sourceRefs: [{ source: "openclaw", externalId: "main", label: "main" }],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-    },
-    {
-      id: "fixture-device:multica:runtime-openclaw:agent:fixture-agent",
-      runtimeId: "fixture-device:multica:runtime-openclaw",
-      name: "@example-agent",
-      origin: "multica",
-      status: "idle",
-      channelBindings: [{ kind: "multica", label: "Multica", status: "enabled" }],
-      sourceRefs: [{ source: "multica", externalId: "fixture-agent", label: "@example-agent" }],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-    },
-    {
-      id: "fixture-device:slock:daemon:agent:tester",
-      runtimeId: "fixture-device:slock:daemon",
-      name: "tester",
-      origin: "slock",
-      status: "idle",
-      channelBindings: [{ kind: "slock", label: "Slock", status: "enabled" }],
-      sourceRefs: [{ source: "slock", externalId: "tester", label: "tester" }],
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-    },
-  ],
-  reports: [],
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const fixture = JSON.parse(
+  readFileSync(path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json"), "utf8"),
+) as {
+  agents: DeviceStateSnapshot["agents"];
+  devices: DeviceStateSnapshot["device"][];
+  observedAt: string;
+  runtimes: DeviceStateSnapshot["runtimes"];
+  tasks: DeviceStateSnapshot["tasks"];
 };
 
-const backendSnapshot: RuntimeWorkStateSnapshot = {
-  observedAt: "2026-05-09T08:00:00.000Z",
-  deviceId: "fixture-device",
-  workItems: [
-    ...openclaw.workItems,
-    ...multica.workItems,
-    ...slock.workItems,
-    {
-      id: "fixture-long-title-card",
-      source: "slock",
-      externalId: "fixture-long-title-card",
-      title: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复",
-      description: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复并回报结果",
-      status: "done",
-      channel: { kind: "slock", label: "#AjisGTD" },
-      creator: { kind: "human", label: "AjiHuang" },
-      assignee: { kind: "agent", label: "PMO" },
-      lastSeenAt: "2026-05-09T08:00:00.000Z",
-    },
-  ],
-  conversations: [...openclaw.conversations, ...multica.conversations, ...slock.conversations],
-  executions: [...openclaw.executions, ...multica.executions, ...slock.executions],
-  capabilities: [...openclaw.capabilities, ...multica.capabilities, ...slock.capabilities],
+const defaultAgentId = fixture.agents[0].id;
+const reviewTask: Task = {
+  ...fixture.tasks[0],
+  lastSeenAt: "2026-05-09T15:50:00.000Z",
+};
+const runningTask: Task = {
+  ...fixture.tasks[1],
+  lastSeenAt: "2026-05-09T15:59:00.000Z",
+};
+const longTask: Task = {
+  agentId: defaultAgentId,
+  assignee: { name: "main" },
+  channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+  conversation: { title: "DingTalk 群聊", lastActivityAt: "2026-05-09T15:55:00.000Z" },
+  creator: { name: "AjiHuang" },
+  description: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复并回报结果",
+  id: `${defaultAgentId}:task:merge-request-184`,
+  lastSeenAt: "2026-05-09T15:55:00.000Z",
+  status: "done",
+  title: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复",
+};
+
+const backendDeviceState: DeviceStateSnapshot = {
+  agents: fixture.agents,
+  device: fixture.devices[0],
+  observedAt: "2026-05-09T16:00:00.000Z",
+  runtimes: fixture.runtimes,
+  tasks: [reviewTask, runningTask, longTask],
 };
 
 test.describe("Runs / Work Board", () => {
@@ -122,81 +51,65 @@ test.describe("Runs / Work Board", () => {
     await resetE2eDatabase();
   });
 
-  test("filters Slock work by task context, opens details, and stays responsive", async ({ page, request }) => {
-    await seedWorkBoardData(request, backendSnapshot);
+  test("filters OpenClaw tasks by task context, opens details, and stays responsive", async ({ page, request }) => {
+    await seedWorkBoardData(request, backendDeviceState);
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
 
     await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
-    await expect(page.getByText("统一查看 Agent 承接的工作项、发起人、Channel、会话/群组、消息摘要和当前阶段。")).toBeVisible();
-    for (const lane of ["待处理", "处理中", "待验收", "已关闭", "需关注"]) {
+    await expect(page.getByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeVisible();
+    for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       await expect(page.getByRole("heading", { name: lane })).toBeVisible();
     }
     await expect(page.getByLabel("渠道")).toHaveValue("all");
     await expect(page.getByLabel("渠道").locator("option")).toHaveText(["全部", "DingTalk"]);
+    await expect(page.getByLabel("状态")).toHaveValue("all");
+    await expect(page.getByLabel("开始时间")).toHaveCount(1);
+    await expect(page.getByLabel("结束时间")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /选择时间范围/ })).toHaveCount(0);
+
     const searchBox = await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").boundingBox();
-    const stageBox = await page.getByLabel("阶段").boundingBox();
-    const timeTriggerBox = await page.getByRole("button", { name: /选择时间范围/ }).boundingBox();
+    const statusBox = await page.getByLabel("状态").boundingBox();
+    const startBox = await page.getByLabel("开始时间").boundingBox();
     expect(searchBox?.width ?? 0).toBeLessThan(620);
     expect(searchBox?.width ?? 0).toBeGreaterThan(300);
-    expect(timeTriggerBox?.width ?? 0).toBeLessThan(480);
-    expect(timeTriggerBox?.x ?? 0).toBeGreaterThan(stageBox?.x ?? 0);
-    await expect(page.getByLabel("开始时间")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /帮我检查今天的线上异常/ })).toBeVisible();
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await expect(page.getByRole("button", { name: "清除时间" })).toBeVisible();
-    await page.getByRole("button", { name: "1天" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toHaveCount(0);
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await page.getByRole("button", { name: "确认" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toHaveCount(0);
-    const timeSummaryFits = await page.locator(".timeRangeSummary").evaluate(
-      (element) => element.scrollWidth <= element.clientWidth + 1,
-    );
-    expect(timeSummaryFits).toBe(true);
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await page.getByRole("heading", { name: "工作看板" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toHaveCount(0);
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await page.getByRole("button", { name: "日历中选择" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toBeVisible();
-    await page.getByLabel("开始时间").fill("2026-05-09T15:45");
-    await page.getByLabel("结束时间").fill("2026-05-09T16:00");
-    await page.getByRole("button", { name: "立即查询" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /帮我检查今天的线上异常/ })).toBeVisible();
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await page.getByRole("button", { name: "日历中选择" }).click();
+    expect(startBox?.x ?? 0).toBeGreaterThan(statusBox?.x ?? 0);
+
+    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
+    await page.getByLabel("状态").selectOption("todo");
+    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Execute OpenClaw run/ })).not.toBeVisible();
+    await page.getByLabel("状态").selectOption("all");
+
+    await page.getByLabel("开始时间").fill("2026-05-08T00:00");
+    await page.getByLabel("结束时间").fill("2026-05-10T23:59");
+    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
     await page.getByLabel("开始时间").fill("2026-05-10T00:00");
     await page.getByLabel("结束时间").fill("2026-05-10T23:59");
-    await page.getByRole("button", { name: "立即查询" }).click();
-    await expect(page.getByRole("button", { name: /帮我检查今天的线上异常/ })).not.toBeVisible();
-    await page.getByRole("button", { name: /选择时间范围/ }).click();
-    await page.getByRole("button", { name: "清除时间" }).click();
-    await expect(page.getByRole("dialog", { name: "时间范围选择" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /帮我检查今天的线上异常/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).not.toBeVisible();
+    await page.getByLabel("开始时间").fill("");
+    await page.getByLabel("结束时间").fill("");
 
-    await page.getByLabel("来源 Runtime").selectOption("slock");
-    await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("@fixture-human");
-
-    const slockCard = page.getByRole("button", { name: /Example in progress card/ });
-    await expect(slockCard).toBeVisible();
-    await expect(slockCard).not.toContainText("处理中");
-    await expect(page.getByRole("button", { name: /@example-agent/ }).first()).toBeVisible();
+    await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("PMO");
+    const reviewCard = page.getByRole("button", { name: /Review DingTalk request/ });
+    await expect(reviewCard).toBeVisible();
+    await expect(reviewCard).toContainText("待处理");
     await expect(page.getByText(/OpenClaw execution/)).not.toBeVisible();
     await expect(page.getByText("直接证据")).not.toBeVisible();
-    await expect(page.getByText(/OpenClaw has no/)).not.toBeVisible();
     await expect(page.getByText("能力缺口")).not.toBeVisible();
+    await expect(page.getByLabel("来源 Runtime")).toHaveCount(0);
 
-    await page.getByRole("button", { name: /Example in progress card/ }).click();
-    const detail = page.getByRole("complementary", { name: "工作项详情" });
-    await expect(detail).toContainText("来源 Runtime: Slock");
-    await expect(detail).toContainText("Channel: 默认渠道");
-    await expect(detail).toContainText("发起人: @fixture-human");
-    await expect(detail).toContainText("承接 Agent: @example-agent");
-    await expect(detail).toContainText("会话/群组: #example-board");
+    await reviewCard.click();
+    const detail = page.getByRole("complementary", { name: "任务详情" });
+    await expect(detail).toContainText("Channel: DingTalk");
+    await expect(detail).toContainText("发起人: PMO");
+    await expect(detail).toContainText("承接 Agent: main");
+    await expect(detail).toContainText("会话/群组: DingTalk 群聊");
+    await expect(detail).toContainText("任务状态: 待处理");
+    await expect(detail).not.toContainText("来源 Runtime:");
+    await expect(detail).not.toContainText("执行状态:");
 
     await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("merge_requests/184");
     const longCard = page.getByRole("button", { name: /merge_requests\/184/ });
@@ -207,7 +120,7 @@ test.describe("Runs / Work Board", () => {
     expect(longCardFits).toBe(true);
 
     await longCard.click();
-    const longDetail = page.getByRole("complementary", { name: "工作项详情" });
+    const longDetail = page.getByRole("complementary", { name: "任务详情" });
     const longDetailFits = await longDetail.evaluate(
       (element) => element.scrollWidth <= element.clientWidth + 1,
     );
@@ -223,7 +136,7 @@ test.describe("Runs / Work Board", () => {
   });
 
   test("keeps the board within the viewport on laptop widths", async ({ page, request }) => {
-    await seedWorkBoardData(request, backendSnapshot);
+    await seedWorkBoardData(request, backendDeviceState);
 
     await page.setViewportSize({ width: 1185, height: 900 });
     await page.goto("/");
@@ -236,56 +149,25 @@ test.describe("Runs / Work Board", () => {
     expect(pageOverflows).toBe(false);
   });
 
-  test("keeps source listening gaps out of task cards when a target platform has no task-board data", async ({ page, request }) => {
-    const workspaceOnlySnapshot: RuntimeWorkStateSnapshot = {
-      observedAt: "2026-05-09T08:00:00.000Z",
-      deviceId: "fixture-device",
-      workItems: [],
-      conversations: [],
-      executions: [],
-      capabilities: [{
-        source: "slock",
-        collectedAt: "2026-05-09T08:00:00.000Z",
-        workItems: {
-          support: "unknown",
-          strategies: ["local_state"],
-          evidence: [],
-          limitations: [],
-        },
-        conversations: {
-          support: "unknown",
-          strategies: ["local_state"],
-          evidence: [],
-          limitations: [],
-        },
-        executions: {
-          support: "unknown",
-          strategies: ["local_state"],
-          evidence: [],
-          limitations: [],
-        },
-      }],
-    };
-    await seedWorkBoardData(request, workspaceOnlySnapshot);
+  test("keeps adapter diagnostic gaps out of task cards when no tasks are available", async ({ page, request }) => {
+    await seedWorkBoardData(request, { ...backendDeviceState, tasks: [] });
 
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
-    await page.getByLabel("来源 Runtime").selectOption("slock");
 
     await expect(page.getByRole("button", { name: /Slock 监听未就绪/ })).not.toBeVisible();
     await expect(page.getByRole("button", { name: /缺少 Slock task board 或 API adapter/ })).not.toBeVisible();
     await expect(page.getByText("无匹配项").first()).toBeVisible();
     await expect(page.getByText("直接证据")).not.toBeVisible();
     await expect(page.getByText("能力缺口")).not.toBeVisible();
+    await expect(page.getByLabel("来源 Runtime")).toHaveCount(0);
   });
 });
 
 async function seedWorkBoardData(
   request: APIRequestContext,
-  workStateSnapshot: RuntimeWorkStateSnapshot,
+  deviceStateSnapshot: DeviceStateSnapshot,
 ): Promise<void> {
-  const inventoryResponse = await request.post("/api/device-snapshots", { data: backendInventory });
-  expect(inventoryResponse.ok()).toBe(true);
-  const workStateResponse = await request.post("/api/runtime-work-state-snapshots", { data: workStateSnapshot });
-  expect(workStateResponse.ok()).toBe(true);
+  const response = await request.post("/api/device-state-snapshots", { data: deviceStateSnapshot });
+  expect(response.ok()).toBe(true);
 }

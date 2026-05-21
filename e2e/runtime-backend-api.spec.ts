@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import type { RuntimeInventorySnapshot, RuntimeWorkStateSnapshot } from "../src/runtime";
+import type { DeviceStateSnapshot } from "../src/runtime/runtime-model";
 import { resetE2eDatabase } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,36 +13,21 @@ const backendBaseUrl = process.env.LORUME_BACKEND_E2E_BASE_URL ?? "http://127.0.
 const loginCodePath = path.join(repoRoot, ".lorume", "backend-e2e", "latest-login-code.json");
 const collectorScriptPath = path.join(repoRoot, "scripts", "lorume-device-collector.mjs");
 const fixtureSnapshotPath = path.join(repoRoot, "fixtures", "runtime", "collector-snapshot.sample.json");
-const fixtureSnapshot = JSON.parse(
-  readFileSync(fixtureSnapshotPath, "utf8"),
-) as RuntimeInventorySnapshot;
-
-const inventorySnapshot: RuntimeInventorySnapshot = {
-  ...fixtureSnapshot,
-  observedAt: "2026-05-20T08:00:00.000Z",
+const deviceStateFixturePath = path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json");
+const deviceStateFixture = JSON.parse(readFileSync(deviceStateFixturePath, "utf8")) as {
+  agents: DeviceStateSnapshot["agents"];
+  devices: DeviceStateSnapshot["device"][];
+  observedAt: string;
+  runtimes: DeviceStateSnapshot["runtimes"];
+  tasks: DeviceStateSnapshot["tasks"];
 };
 
-const workStateSnapshot: RuntimeWorkStateSnapshot = {
-  observedAt: "2026-05-20T08:01:00.000Z",
-  deviceId: inventorySnapshot.device.id,
-  workItems: [
-    {
-      id: "backend-e2e-work-1",
-      source: "slock",
-      externalId: "backend-e2e-work-1",
-      title: "Backend E2E task",
-      status: "in_progress",
-      runtimeId: "fixture-mac:slock:slock-daemon",
-      agentId: "fixture-mac:slock:slock-daemon:agent:tester",
-      channel: { kind: "slock", label: "Team General", externalId: "team-general" },
-      creator: { kind: "human", label: "测试用户" },
-      assignee: { kind: "agent", label: "tester" },
-      lastSeenAt: "2026-05-20T08:01:00.000Z",
-    },
-  ],
-  conversations: [],
-  executions: [],
-  capabilities: [],
+const deviceStateSnapshot: DeviceStateSnapshot = {
+  agents: deviceStateFixture.agents,
+  device: deviceStateFixture.devices[0],
+  observedAt: "2026-05-20T08:00:00.000Z",
+  runtimes: deviceStateFixture.runtimes,
+  tasks: deviceStateFixture.tasks,
 };
 
 test.describe("Runtime backend API", () => {
@@ -51,43 +36,46 @@ test.describe("Runtime backend API", () => {
     await resetE2eDatabase();
   });
 
-  test("authenticates, creates a device token, ingests snapshots, serves queries, and accepts heartbeat websocket", async ({ request }) => {
+  test("authenticates, creates a device token, ingests device state, serves queries, and accepts heartbeat websocket", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     await expect((await request.get("/readyz")).ok()).toBe(true);
 
     const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request);
 
-    const unauthorizedIngest = await request.post("/api/device-snapshots", { data: inventorySnapshot });
+    const unauthorizedIngest = await request.post("/api/device-state-snapshots", { data: deviceStateSnapshot });
     expect(unauthorizedIngest.status()).toBe(401);
 
     const authHeaders = { authorization: `Bearer ${deviceToken}` };
-    const inventoryResponse = await request.post("/api/device-snapshots", {
-      data: inventorySnapshot,
+    const deviceStateResponse = await request.post("/api/device-state-snapshots", {
+      data: deviceStateSnapshot,
       headers: authHeaders,
     });
-    expect(inventoryResponse.status()).toBe(201);
-    await expect(inventoryResponse.json()).resolves.toMatchObject({
+    expect(deviceStateResponse.status()).toBe(201);
+    await expect(deviceStateResponse.json()).resolves.toMatchObject({
       deviceId: "fixture-mac",
       ok: true,
     });
 
-    const workStateResponse = await request.post("/api/runtime-work-state-snapshots", {
-      data: workStateSnapshot,
-      headers: authHeaders,
-    });
-    expect(workStateResponse.status()).toBe(201);
-
     const fleetResponse = await request.get("/api/runtime-fleet");
     expect(fleetResponse.status()).toBe(200);
     await expect(fleetResponse.json()).resolves.toMatchObject({
+      agents: [expect.objectContaining({ id: "fixture-mac:runtime:openclaw:agent:main" })],
       devices: [expect.objectContaining({ id: "fixture-mac", hostname: "fixture-mac.local" })],
-      summary: { deviceCount: 1 },
+      runtimes: [expect.objectContaining({ id: "fixture-mac:runtime:openclaw", kind: "openclaw" })],
+      summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
+      tasks: expect.arrayContaining([
+        expect.objectContaining({ id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1" }),
+      ]),
     });
 
-    const workItemsResponse = await request.get("/api/runtime-work-items?source=slock");
-    expect(workItemsResponse.status()).toBe(200);
-    await expect(workItemsResponse.json()).resolves.toMatchObject({
-      items: [expect.objectContaining({ id: "backend-e2e-work-1", title: "Backend E2E task" })],
+    const tasksResponse = await request.get("/api/runtime-tasks?status=todo&channelKind=dingtalk");
+    expect(tasksResponse.status()).toBe(200);
+    await expect(tasksResponse.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({
+        id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
+        status: "todo",
+        title: "Review DingTalk request",
+      })],
       total: 1,
     });
 
@@ -97,8 +85,7 @@ test.describe("Runtime backend API", () => {
       deviceId: "fixture-mac",
       status: "healthy",
       checks: [
-        expect.objectContaining({ id: "inventory", message: "采集正常" }),
-        expect.objectContaining({ id: "work_state", message: "采集正常" }),
+        expect.objectContaining({ id: "device_state", message: "采集正常" }),
       ],
     });
 
@@ -106,7 +93,7 @@ test.describe("Runtime backend API", () => {
     await expectDeviceDiagnostics(request, "fixture-mac");
   });
 
-  test("accepts inventory and work-state uploaded by a real collector process", async ({ request }) => {
+  test("accepts device-state uploaded by a real collector process", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     const deviceId = "collector-e2e-device";
     const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
@@ -125,8 +112,7 @@ test.describe("Runtime backend API", () => {
       deviceToken,
       "--fixture",
       fixtureSnapshotPath,
-      "--interval-ms",
-      "600000",
+      "--once",
     ], {
       cwd: repoRoot,
       env: {
@@ -198,7 +184,7 @@ async function waitForCollectorDevice(
   collector: ChildProcessWithoutNullStreams,
   deviceId: string,
 ): Promise<void> {
-  await pollCollector("collector inventory upload", collector, async () => {
+  await pollCollector("collector device-state upload", collector, async () => {
     const fleetResponse = await request.get("/api/runtime-fleet");
     if (!fleetResponse.ok()) return false;
     const body = await fleetResponse.json() as { devices?: Array<{ id?: string; hostname?: string }> };
@@ -212,14 +198,13 @@ async function waitForCollectorHealth(
   deviceId: string,
 ): Promise<void> {
   let lastHealthBody: unknown = null;
-  await pollCollector("collector work-state upload", collector, async () => {
+  await pollCollector("collector device-state health", collector, async () => {
     const healthResponse = await request.get(`/api/devices/${encodeURIComponent(deviceId)}/collection-health`);
     if (!healthResponse.ok()) return false;
     const body = await healthResponse.json() as { checks?: Array<{ id?: string; status?: string }> };
     lastHealthBody = body;
     return Boolean(
-      body.checks?.some((check) => check.id === "inventory" && check.status === "healthy")
-      && body.checks?.some((check) => check.id === "work_state" && check.status === "healthy"),
+      body.checks?.some((check) => check.id === "device_state" && check.status === "healthy"),
     );
   }).catch((error) => {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nlast health:\n${JSON.stringify(lastHealthBody, null, 2)}`);
@@ -304,7 +289,7 @@ async function expectDeviceHeartbeatAccepted(deviceToken: string): Promise<void>
       socket.send(JSON.stringify({
         type: "heartbeat",
         deviceId: "fixture-mac",
-        summary: { inventoryUploadedAt: inventorySnapshot.observedAt },
+        summary: { deviceStateUploadedAt: deviceStateSnapshot.observedAt },
       }));
       clearTimeout(timeout);
       socket.close();

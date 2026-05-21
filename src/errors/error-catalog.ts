@@ -13,11 +13,10 @@ const errorMessages: Record<string, string> = {
   email_provider_unavailable: "验证码暂时无法发送，请确认邮件服务已配置后重试。",
   email_required: "请输入邮箱地址。",
   forbidden: "当前账号没有执行此操作的权限。",
-  invalid_collector_snapshot: "设备采集数据无效，请检查 Lorume CLI 版本或上报结构。",
+  invalid_device_state_snapshot: "设备状态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
   invalid_device_token: "设备认证失败，请检查 Lorume CLI 的设备令牌配置。",
   invalid_json_body: "请求内容不是有效的 JSON。",
   invalid_or_expired_code: "验证码无效或已过期，请重新获取验证码。",
-  invalid_work_state_snapshot: "工作态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
   invitation_email_and_role_required: "请输入邀请邮箱并选择成员角色。",
   invitation_not_available: "邀请链接无效、已过期或与当前邮箱不匹配。",
   organization_name_required: "请输入组织名称。",
@@ -25,18 +24,15 @@ const errorMessages: Record<string, string> = {
   request_body_too_large: "请求内容过大，请减少单次上报的数据量。",
   request_failed: "操作失败，请稍后重试。",
   unauthorized: "请先登录后再继续操作。",
-  work_state_store_unavailable: "工作态存储暂时不可用，请稍后重试。",
 };
 
 const technicalCodePatterns: Array<[RegExp, string]> = [
-  [/invalid runtime inventory snapshot/i, "invalid_collector_snapshot"],
-  [/invalid collector snapshot/i, "invalid_collector_snapshot"],
-  [/invalid snapshot/i, "invalid_collector_snapshot"],
-  [/invalid runtime work state snapshot/i, "invalid_work_state_snapshot"],
+  [/invalid device state snapshot/i, "invalid_device_state_snapshot"],
+  [/invalid collector snapshot/i, "invalid_device_state_snapshot"],
+  [/invalid snapshot/i, "invalid_device_state_snapshot"],
   [/invalid json body/i, "invalid_json_body"],
   [/request body too large/i, "request_body_too_large"],
   [/snapshot post failed/i, "collector_post_failed"],
-  [/work state snapshot post failed/i, "collector_post_failed"],
   [/device.*not connected/i, "device_not_connected"],
 ];
 

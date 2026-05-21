@@ -15,9 +15,8 @@ import { createOperationJobRunner } from "../operations/job-runner";
 import { createPostgresOperationStore, type OperationStore } from "../operations/operation-store";
 import { createRuntimeControlChannel, type RuntimeControlSocket } from "../server/runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "../server/runtime-http-api";
-import { createRuntimeInventoryStore } from "../server/runtime-inventory-store";
+import { createRuntimeDeviceStateStore } from "../server/runtime-device-state-store";
 import { createPostgresStore, type PostgresStore } from "../server/postgres-store";
-import { createRuntimeWorkStateStore } from "../server/runtime-work-state-store";
 import { createStructuredLogger, type StructuredLogger } from "../logging/structured-logger";
 import { createDeviceInstallerHttpApiHandler } from "./device-installer-http-api";
 import { createBackendEmailProvider } from "./email-provider";
@@ -28,10 +27,8 @@ export interface LorumeBackendServerOptions {
   host?: string;
   /** Port passed to `server.listen`; use 0 for tests. */
   port?: number;
-  /** Optional internal inventory snapshot path used for collector validation and control state. */
-  inventorySnapshotPath?: string;
-  /** Optional internal work-state snapshot path used for collector validation. */
-  workStateSnapshotPath?: string;
+  /** Optional internal device_state snapshot path used for Skill probe fallback context and control state. */
+  deviceStateSnapshotPath?: string;
   /** Milliseconds before a silent connected device is considered stale. */
   staleAfterMs?: number;
   /** Postgres connection string for the formal backend repository. */
@@ -80,12 +77,9 @@ export function createLorumeBackendServer(
 ): LorumeBackendServer {
   const host = options.host ?? process.env.LORUME_BACKEND_HOST ?? "0.0.0.0";
   const port = options.port ?? Number(process.env.LORUME_BACKEND_PORT ?? 4173);
-  const store = createRuntimeInventoryStore({
-    snapshotPath: options.inventorySnapshotPath,
+  const store = createRuntimeDeviceStateStore({
+    snapshotPath: options.deviceStateSnapshotPath,
     staleAfterMs: options.staleAfterMs,
-  });
-  const workStateStore = createRuntimeWorkStateStore({
-    snapshotPath: options.workStateSnapshotPath,
   });
   const controlChannel = createRuntimeControlChannel({
     store,
@@ -137,7 +131,6 @@ export function createLorumeBackendServer(
     },
     store,
     controlChannel,
-    workStateStore,
     postgresStore: postgresStore ?? undefined,
     collectorNotifications: authStore && notificationStore
       ? {

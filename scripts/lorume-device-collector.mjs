@@ -27,7 +27,6 @@ const COLLECTOR_LOG_SECRET_KEYS = new Set([
 function parseArgs(argv) {
   const args = {
     once: false,
-    workStateOnce: false,
     printOnly: false,
     configPath: "",
     fixturePath: "",
@@ -47,7 +46,6 @@ function parseArgs(argv) {
     };
 
     if (arg === "--once") args.once = true;
-    else if (arg === "--work-state-once") args.workStateOnce = true;
     else if (arg === "--print-only") args.printOnly = true;
     else if (arg === "--config") args.configPath = next();
     else if (arg === "--fixture") args.fixturePath = next();
@@ -72,7 +70,6 @@ function printHelp() {
 
 Options:
   --once                 Collect once and exit
-  --work-state-once      Collect one runtime work-state snapshot and exit
   --print-only           Print snapshot instead of posting
   --config <path>        Read collector config JSON
   --fixture <path>       Load a fixture snapshot instead of probing the host
@@ -163,7 +160,7 @@ function redactCollectorLogFields(value) {
 function collectorErrorCode(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/post failed/i.test(message)) return "collector_post_failed";
-  if (/non-json|invalid|snapshot/i.test(message)) return "invalid_collector_snapshot";
+  if (/non-json|invalid|snapshot/i.test(message)) return "invalid_device_state_snapshot";
   return "collector_run_failed";
 }
 
@@ -244,7 +241,7 @@ function collectSnapshot(config, args) {
 }
 
 function collectSnapshotViaLorumeCli(config, args) {
-  const cliArgs = ["collect", "inventory", "--json"];
+  const cliArgs = ["collect", "device-state", "--json"];
   if (args.configPath) cliArgs.push("--config", args.configPath);
   if (args.fixturePath) cliArgs.push("--snapshot", args.fixturePath);
   const identity = resolveCliDeviceIdentity(config, args);
@@ -257,13 +254,8 @@ function resolveDeviceToken(config, args) {
 }
 
 async function postSnapshot(serverUrl, snapshot, deviceToken = "") {
-  const url = new URL("/api/device-snapshots", serverUrl);
-  await postJsonWithRetry(url, snapshot, "Snapshot", deviceToken);
-}
-
-async function postWorkStateSnapshot(serverUrl, snapshot, deviceToken = "") {
-  const url = new URL("/api/runtime-work-state-snapshots", serverUrl);
-  await postJsonWithRetry(url, snapshot, "Work state snapshot", deviceToken);
+  const url = new URL("/api/device-state-snapshots", serverUrl);
+  await postJsonWithRetry(url, snapshot, "Device state snapshot", deviceToken);
 }
 
 async function postJsonWithRetry(url, payload, label, deviceToken = "") {
@@ -299,41 +291,29 @@ async function runOnce(config, args) {
   const logger = createCollectorLogger(config);
   const snapshot = collectSnapshot(config, args);
   logger.info({
-    event: "inventory_collected",
+    event: "device_state_collected",
     deviceId: snapshot.device.id,
     counts: {
-      runtimes: snapshot.runtimes.length,
-      agents: snapshot.agents.length,
-      reports: snapshot.reports.length,
+      runtimes: snapshot.runtimes?.length ?? 0,
+      agents: snapshot.agents?.length ?? 0,
+      tasks: snapshot.tasks?.length ?? 0,
     },
   });
   const serverUrl = args.serverUrl || config.serverUrl || "";
   if (serverUrl && !args.printOnly) {
     await postSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
     logger.info({
-      event: "inventory_upload_succeeded",
+      event: "device_state_upload_succeeded",
       deviceId: snapshot.device.id,
       counts: {
-        runtimes: snapshot.runtimes.length,
-        agents: snapshot.agents.length,
-        reports: snapshot.reports.length,
+        runtimes: snapshot.runtimes?.length ?? 0,
+        agents: snapshot.agents?.length ?? 0,
+        tasks: snapshot.tasks?.length ?? 0,
       },
     });
   }
   if (args.printOnly || !serverUrl) console.log(JSON.stringify(snapshot, null, 2));
   return snapshot;
-}
-
-async function collectWorkStateSnapshot(config, args) {
-  return collectWorkStateViaLorumeCli(config, args);
-}
-
-async function collectWorkStateViaLorumeCli(config, args) {
-  const cliArgs = ["collect", "work-state", "--json"];
-  if (args.configPath) cliArgs.push("--config", args.configPath);
-  const identity = resolveCliDeviceIdentity(config, args);
-  if (identity.deviceId) cliArgs.push("--device-id", identity.deviceId);
-  return stripCliCommand(runLorumeCliJson(config, cliArgs));
 }
 
 function resolveCliDeviceIdentity(config, args) {
@@ -386,30 +366,9 @@ function stripCliCommand(value) {
   return snapshot;
 }
 
-async function runWorkStateOnce(config, args) {
-  const logger = createCollectorLogger(config);
-  const snapshot = await collectWorkStateSnapshot(config, args);
-  const serverUrl = args.serverUrl || config.serverUrl || "";
-  if (serverUrl && !args.printOnly) {
-    await postWorkStateSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
-    logger.info({
-      event: "work_state_upload_succeeded",
-      deviceId: snapshot.deviceId,
-      counts: {
-        workItems: snapshot.workItems.length,
-        conversations: snapshot.conversations.length,
-        executions: snapshot.executions.length,
-      },
-    });
-  }
-  if (args.printOnly || !serverUrl) console.log(JSON.stringify(snapshot, null, 2));
-  return snapshot;
-}
-
 async function refreshSnapshots(config, args) {
-  const inventorySnapshot = await runOnce(config, args);
-  const workStateSnapshot = await runWorkStateOnce(config, args);
-  return { inventorySnapshot, workStateSnapshot };
+  const deviceStateSnapshot = await runOnce(config, args);
+  return { deviceStateSnapshot };
 }
 
 function createRefreshRunner(config, args) {
@@ -531,11 +490,6 @@ async function main() {
   const logger = createCollectorLogger(config);
 
   try {
-    if (args.workStateOnce) {
-      await runWorkStateOnce(config, args);
-      return;
-    }
-
     if (args.once) {
       await runOnce(config, args);
       return;

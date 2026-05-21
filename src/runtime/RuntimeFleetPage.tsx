@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import fixtureSnapshot from "../../fixtures/runtime/collector-snapshot.sample.json";
+import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import {
-  channelKindLabels,
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
@@ -11,25 +10,17 @@ import {
   listRuntimeFleetRuntimeKindOptions,
   runtimeAgentLastSeenAt,
   runtimeFleetObjectStatusLabels,
+  runtimeFleetSnapshotFromQueryResponse,
   runtimeFleetStatusFromDeviceHealth,
   runtimeKindLabels,
   summarizeRuntimeFleet,
   type RuntimeFleetDetail,
   type RuntimeFleetFilters,
   type RuntimeFleetLastSeenRange,
-} from "./runtime-inventory-query";
-import {
-  type LorumeRuntime,
-  type ManagedRuntimeAgent,
-  type RuntimeInventorySnapshot,
-  type RuntimeKind,
-} from "./runtime-normalize";
-import type { RuntimeWorkStateSnapshot } from "./runtime-work-state";
+  type RuntimeFleetSnapshot,
+} from "./runtime-fleet-query";
+import type { Agent, Runtime, RuntimeKind } from "./runtime-model";
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
-import {
-  createWorkItemsQueryUrl,
-  runtimeWorkItemsQueryPageFromResponse,
-} from "./runtime-work-query-api";
 import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
 import {
@@ -39,7 +30,7 @@ import {
 } from "./agent-skill-probe";
 import { PixelIcon } from "../ui/PixelIcon";
 
-const fixtureRuntimeSnapshot = fixtureSnapshot as RuntimeInventorySnapshot;
+const fixtureRuntimeSnapshot = runtimeFleetSnapshotFromQueryResponse(fixtureSnapshot) ?? createEmptyRuntimeInventorySnapshot();
 const autoRefreshIntervalMs = 30_000;
 const lastSeenRangeLabels: Record<RuntimeFleetLastSeenRange, string> = {
   all: "全部时间",
@@ -47,13 +38,6 @@ const lastSeenRangeLabels: Record<RuntimeFleetLastSeenRange, string> = {
   "7d": "最近 7 天",
   "30d": "最近 30 天",
 };
-
-interface RuntimeFleetQueryResponse {
-  observedAt: string | null;
-  devices: RuntimeInventorySnapshot["device"][];
-  runtimes: LorumeRuntime[];
-  agents: ManagedRuntimeAgent[];
-}
 
 type RuntimeFleetSelection = {
   kind: RuntimeFleetDetail["kind"];
@@ -80,10 +64,9 @@ const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and channel exposure. */
 export function RuntimeFleetPage() {
   const allowFixtureFallback = isFixtureFallbackAllowed();
-  const [snapshot, setSnapshot] = useState<RuntimeInventorySnapshot>(
+  const [snapshot, setSnapshot] = useState<RuntimeFleetSnapshot>(
     allowFixtureFallback ? fixtureRuntimeSnapshot : createEmptyRuntimeInventorySnapshot(),
   );
-  const [workStateSnapshot, setWorkStateSnapshot] = useState<RuntimeWorkStateSnapshot | null>(null);
   const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth[]>([]);
   const [deviceDiagnostics, setDeviceDiagnostics] = useState<DeviceHealthStatusResult[]>([]);
   const [loadError, setLoadError] = useState("");
@@ -99,7 +82,7 @@ export function RuntimeFleetPage() {
     status: "idle",
   });
 
-  async function fetchLatestSnapshot(): Promise<RuntimeInventorySnapshot | null> {
+  async function fetchLatestSnapshot(): Promise<RuntimeFleetSnapshot | null> {
     const queryResponse = await fetch(new URL("/api/runtime-fleet", window.location.origin));
     if (!queryResponse.ok) {
       throw new Error(`runtime fleet query failed: ${queryResponse.status}`);
@@ -115,8 +98,8 @@ export function RuntimeFleetPage() {
     return deviceCollectionHealthFromResponse(await response.json());
   }
 
-  async function fetchCollectionHealthForDevices(latestSnapshot: RuntimeInventorySnapshot): Promise<DeviceCollectionHealth[]> {
-    const devices = latestSnapshot.devices ?? [latestSnapshot.device];
+  async function fetchCollectionHealthForDevices(latestSnapshot: RuntimeFleetSnapshot): Promise<DeviceCollectionHealth[]> {
+    const devices = latestSnapshot.devices;
     const health = await Promise.all(
       devices.map((device) => fetchCollectionHealth(device.id).catch(() => null)),
     );
@@ -130,38 +113,21 @@ export function RuntimeFleetPage() {
   }
 
   async function fetchDeviceDiagnosticsForDevices(
-    latestSnapshot: RuntimeInventorySnapshot,
+    latestSnapshot: RuntimeFleetSnapshot,
   ): Promise<DeviceHealthStatusResult[]> {
-    const devices = latestSnapshot.devices ?? [latestSnapshot.device];
+    const devices = latestSnapshot.devices;
     const diagnostics = await Promise.all(
       devices.map((device) => fetchDeviceDiagnostics(device.id).catch(() => null)),
     );
     return diagnostics.filter((value): value is DeviceHealthStatusResult => Boolean(value));
   }
 
-  async function fetchLatestWorkStateSnapshot(): Promise<RuntimeWorkStateSnapshot | null> {
-    let cursor: string | undefined;
-    let snapshot: RuntimeWorkStateSnapshot | null = null;
-    for (let page = 0; page < 20; page += 1) {
-      const response = await fetch(createWorkItemsQueryUrl(window.location.origin, undefined, { cursor }));
-      if (!response.ok) throw new Error(`runtime work item query failed: ${response.status}`);
-      const queryPage = runtimeWorkItemsQueryPageFromResponse(await response.json());
-      if (!queryPage) throw new Error("runtime work item query returned an invalid payload");
-      snapshot = snapshot ? mergeWorkStateSnapshots(snapshot, queryPage.snapshot) : queryPage.snapshot;
-      cursor = queryPage.nextCursor;
-      if (!cursor) return snapshot;
-    }
-    throw new Error("runtime work item query returned too many pages");
-  }
-
   function applySnapshot(
-    latestSnapshot: RuntimeInventorySnapshot,
-    latestWorkState: RuntimeWorkStateSnapshot | null,
+    latestSnapshot: RuntimeFleetSnapshot,
     latestCollectionHealth: DeviceCollectionHealth[],
     latestDeviceDiagnostics: DeviceHealthStatusResult[],
   ) {
     setSnapshot(latestSnapshot);
-    setWorkStateSnapshot(latestWorkState);
     setCollectionHealth(latestCollectionHealth);
     setDeviceDiagnostics(latestDeviceDiagnostics);
     setLoadError("");
@@ -175,13 +141,12 @@ export function RuntimeFleetPage() {
       try {
         const latestSnapshot = await fetchLatestSnapshot();
         if (!latestSnapshot) return;
-        const [latestWorkState, latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
-          fetchLatestWorkStateSnapshot(),
+        const [latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
           fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
           fetchDeviceDiagnosticsForDevices(latestSnapshot).catch(() => []),
         ]);
         if (!cancelled) {
-          applySnapshot(latestSnapshot, latestWorkState, latestCollectionHealth, latestDeviceDiagnostics);
+          applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics);
         }
       } catch {
         if (!allowFixtureFallback && !cancelled) {
@@ -220,13 +185,12 @@ export function RuntimeFleetPage() {
     [lastSeenRange, query, runtimeKind],
   );
   const result = useMemo(() => filterRuntimeFleet(snapshot, filters), [filters, snapshot]);
-  const summary = useMemo(() => summarizeRuntimeFleet(snapshot, workStateSnapshot), [snapshot, workStateSnapshot]);
+  const summary = useMemo(() => summarizeRuntimeFleet(snapshot), [snapshot]);
   const detail = selection
     ? getRuntimeFleetDetail(
       snapshot,
       selection.kind,
       selection.id,
-      workStateSnapshot,
       collectionHealthByDeviceId,
       deviceDiagnosticsByDeviceId,
     )
@@ -333,7 +297,7 @@ export function RuntimeFleetPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索设备、Runtime、Agent 或渠道"
+              placeholder="搜索设备、Runtime、Agent 或任务"
             />
           </span>
         </label>
@@ -387,7 +351,6 @@ export function RuntimeFleetPage() {
           <RuntimeTable
             collectionHealthByDeviceId={collectionHealthByDeviceId}
             snapshot={snapshot}
-            workStateSnapshot={workStateSnapshot}
             runtimes={result.runtimes}
             selectedId={selection?.kind === "runtime" ? selection.id : undefined}
             onSelect={(runtime) => setSelection({ kind: "runtime", id: runtime.id })}
@@ -397,7 +360,6 @@ export function RuntimeFleetPage() {
             collectionHealthByDeviceId={collectionHealthByDeviceId}
             runtimes={snapshot.runtimes}
             snapshot={snapshot}
-            workStateSnapshot={workStateSnapshot}
             selectedId={selection?.kind === "agent" ? selection.id : undefined}
             onSelect={(agent) => setSelection({ kind: "agent", id: agent.id })}
             onShowSkillProbe={(agent) => {
@@ -406,7 +368,6 @@ export function RuntimeFleetPage() {
                 snapshot,
                 "agent",
                 agent.id,
-                workStateSnapshot,
                 collectionHealthByDeviceId,
               );
               if (agentDetail?.kind === "agent") void handleShowAgentSkillProbe(agentDetail);
@@ -425,32 +386,13 @@ export function RuntimeFleetPage() {
   );
 }
 
-function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeInventorySnapshot | null {
-  if (!isRuntimeFleetQueryResponse(value) || value.devices.length === 0) return null;
-  return {
-    observedAt: value.observedAt ?? value.devices[0].lastSeenAt ?? new Date().toISOString(),
-    collector: fixtureRuntimeSnapshot.collector,
-    device: value.devices[0],
-    devices: value.devices,
-    runtimes: value.runtimes,
-    agents: value.agents,
-    reports: [],
-  };
-}
-
-function createEmptyRuntimeInventorySnapshot(): RuntimeInventorySnapshot {
+function createEmptyRuntimeInventorySnapshot(): RuntimeFleetSnapshot {
   return {
     observedAt: new Date(0).toISOString(),
-    collector: { version: "unknown", status: "unknown" },
-    device: {
-      id: "backend",
-      hostname: "backend",
-      os: "unknown",
-    },
     devices: [],
     runtimes: [],
     agents: [],
-    reports: [],
+    tasks: [],
   };
 }
 
@@ -473,12 +415,6 @@ function formatBackendErrorMessage(message: string, fallback: string): string {
   }
   if (/^[a-z0-9_:-]+$/i.test(message)) return fallback;
   return message;
-}
-
-function isRuntimeFleetQueryResponse(value: unknown): value is RuntimeFleetQueryResponse {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<RuntimeFleetQueryResponse>;
-  return Array.isArray(candidate.devices) && Array.isArray(candidate.runtimes) && Array.isArray(candidate.agents);
 }
 
 function deviceCollectionHealthFromResponse(value: unknown): DeviceCollectionHealth | null {
@@ -520,8 +456,8 @@ function deviceHealthFromResponse(value: unknown): DeviceHealthStatusResult | nu
     deviceId: candidate.deviceId,
     label: candidate.label,
     lastHeartbeatAt: typeof candidate.lastHeartbeatAt === "string" ? candidate.lastHeartbeatAt : undefined,
-    lastInventoryFailureAt: typeof candidate.lastInventoryFailureAt === "string" ? candidate.lastInventoryFailureAt : undefined,
-    lastInventorySuccessAt: typeof candidate.lastInventorySuccessAt === "string" ? candidate.lastInventorySuccessAt : undefined,
+    lastDeviceStateFailureAt: typeof candidate.lastDeviceStateFailureAt === "string" ? candidate.lastDeviceStateFailureAt : undefined,
+    lastDeviceStateSuccessAt: typeof candidate.lastDeviceStateSuccessAt === "string" ? candidate.lastDeviceStateSuccessAt : undefined,
     message: candidate.message,
     reason: candidate.reason as DeviceHealthStatusResult["reason"],
     status: candidate.status,
@@ -540,7 +476,7 @@ function isCollectionHealthCheck(value: unknown): value is CollectionHealthCheck
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<CollectionHealthCheck>;
   return (
-    (candidate.id === "inventory" || candidate.id === "work_state")
+    candidate.id === "device_state"
     && typeof candidate.label === "string"
     && isCollectionHealthStatus(candidate.status)
     && typeof candidate.message === "string"
@@ -552,33 +488,6 @@ function isCollectionHealthCheck(value: unknown): value is CollectionHealthCheck
 
 function isCollectionHealthStatus(value: unknown): value is DeviceCollectionHealth["status"] {
   return value === "healthy" || value === "failed";
-}
-
-function mergeWorkStateSnapshots(
-  current: RuntimeWorkStateSnapshot,
-  next: RuntimeWorkStateSnapshot,
-): RuntimeWorkStateSnapshot {
-  return {
-    observedAt: next.observedAt > current.observedAt ? next.observedAt : current.observedAt,
-    deviceId: next.deviceId || current.deviceId,
-    workItems: mergeById(current.workItems, next.workItems),
-    conversations: mergeById(current.conversations, next.conversations),
-    executions: mergeById(current.executions, next.executions),
-    capabilities: mergeBySource(current.capabilities, next.capabilities),
-    warnings: [...(current.warnings ?? []), ...(next.warnings ?? [])],
-  };
-}
-
-function mergeById<T extends { id: string }>(current: T[], next: T[]): T[] {
-  const byId = new Map(current.map((item) => [item.id, item]));
-  for (const item of next) byId.set(item.id, item);
-  return Array.from(byId.values());
-}
-
-function mergeBySource<T extends { source: string }>(current: T[], next: T[]): T[] {
-  const bySource = new Map(current.map((item) => [item.source, item]));
-  for (const item of next) bySource.set(item.source, item);
-  return Array.from(bySource.values());
 }
 
 function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -600,8 +509,8 @@ function DevicePanel({
 }: {
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   deviceDiagnosticsByDeviceId: ReadonlyMap<string, Pick<DeviceHealthStatusResult, "label" | "status">>;
-  devices: RuntimeInventorySnapshot["device"][];
-  snapshot: RuntimeInventorySnapshot;
+  devices: RuntimeFleetSnapshot["devices"];
+  snapshot: RuntimeFleetSnapshot;
   selectedId?: string;
   onSelect: (deviceId: string) => void;
 }) {
@@ -652,19 +561,17 @@ function DevicePanel({
 function RuntimeTable({
   collectionHealthByDeviceId,
   snapshot,
-  workStateSnapshot,
   runtimes,
   selectedId,
   onSelect,
 }: {
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
-  snapshot: RuntimeInventorySnapshot;
-  workStateSnapshot: RuntimeWorkStateSnapshot | null;
-  runtimes: LorumeRuntime[];
+  snapshot: RuntimeFleetSnapshot;
+  runtimes: Runtime[];
   selectedId?: string;
-  onSelect: (runtime: LorumeRuntime) => void;
+  onSelect: (runtime: Runtime) => void;
 }) {
-  const deviceById = new Map((snapshot.devices ?? [snapshot.device]).map((device) => [device.id, device]));
+  const deviceById = new Map(snapshot.devices.map((device) => [device.id, device]));
   return (
     <section className="tablePanel runtimeAssetPanel" aria-label="Runtime 列表">
       <div className="runtimePanelHeader">
@@ -686,7 +593,7 @@ function RuntimeTable({
             <span role="columnheader">最近同步</span>
           </div>
           {runtimes.map((runtime) => {
-            const status = deriveRuntimeFleetStatus(snapshot, runtime, workStateSnapshot, collectionHealthByDeviceId);
+            const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
             return (
               <button
                 className={
@@ -729,19 +636,17 @@ function AgentTable({
   collectionHealthByDeviceId,
   runtimes,
   snapshot,
-  workStateSnapshot,
   selectedId,
   onSelect,
   onShowSkillProbe,
 }: {
-  agents: ManagedRuntimeAgent[];
+  agents: Agent[];
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
-  runtimes: LorumeRuntime[];
-  snapshot: RuntimeInventorySnapshot;
-  workStateSnapshot: RuntimeWorkStateSnapshot | null;
+  runtimes: Runtime[];
+  snapshot: RuntimeFleetSnapshot;
   selectedId?: string;
-  onSelect: (agent: ManagedRuntimeAgent) => void;
-  onShowSkillProbe: (agent: ManagedRuntimeAgent) => void;
+  onSelect: (agent: Agent) => void;
+  onShowSkillProbe: (agent: Agent) => void;
 }) {
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
@@ -761,13 +666,12 @@ function AgentTable({
           <div className="assetRow assetHeader agentTableRow" role="row">
             <span role="columnheader">名称</span>
             <span role="columnheader">归属 Runtime</span>
-            <span role="columnheader">关联渠道</span>
             <span role="columnheader">状态</span>
             <span role="columnheader">最近同步</span>
             <span role="columnheader">Skill</span>
           </div>
           {agents.map((agent) => {
-            const status = deriveAgentFleetStatus(snapshot, agent, workStateSnapshot, collectionHealthByDeviceId);
+            const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
             return (
               <div
                 className={
@@ -785,13 +689,6 @@ function AgentTable({
                 </button>
                 <span className="mutedAssetText" role="cell">
                   {runtimeById.get(agent.runtimeId)?.name ?? agent.runtimeId}
-                </span>
-                <span className="channelList" role="cell">
-                {agent.channelBindings.map((binding, index) => (
-                  <Badge key={`${agent.id}-${binding.kind}-${binding.externalId ?? index}`}>
-                    {binding.label || channelKindLabels[binding.kind]}
-                  </Badge>
-                ))}
                 </span>
                 <span role="cell">
                   <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />

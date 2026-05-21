@@ -159,8 +159,7 @@ runtime:collector:${deviceId}:${snapshotType}:failed
 
 Collector 上报失败进入统一通知模型：
 
-- Inventory 上报失败生成 `collector_inventory_failed`。
-- Work-state 上报失败生成 `collector_work_state_failed`。
+- Device-state 上报失败生成 `collector_device_state_failed`。
 - 事件由认证后的 device token 解析组织，接收人为该组织 active owner / admin。
 - 事件关联 `resourceType=device` 和上报 payload 中的 `deviceId`；如果 payload 无法解析设备 ID，使用 `unknown` 作为可排查占位。
 - 摘要只包含设备 ID、采集类型和截断后的错误摘要，不包含原始 payload、token、外部平台返回体或调试-only 字段。
@@ -277,7 +276,7 @@ Operation 集成 API：
 业务集成：
 
 - Agent Skill 探测请求、成功、失败、不支持和设备未连接事件进入 runtime notification；重复失败按 dedupe/cooldown 聚合。
-- 认证后的 Collector inventory / work-state 上报失败会聚合为 runtime warning 通知，并按 `30min` 邮件冷却投递给组织 owner / admin。
+- 认证后的 Collector `device_state` 上报失败会聚合为 runtime warning 通知，并按 `30min` 邮件冷却投递给组织 owner / admin。
 - Device 离线持续发生时只按阈值升级通知。
 - Approval 待处理会通知审批人，通过或拒绝会通知申请人。
 - 通知工具抽屉能展示未读/已读状态；选择未读 Thread 后只标记当前用户的站内投递为已读。

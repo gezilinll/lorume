@@ -22,7 +22,7 @@ for (const file of requiredFiles) {
 const nginxConfig = read("nginx.lorume.conf");
 assert(nginxConfig.includes("proxy_pass http://backend:4173"), "nginx must proxy backend API traffic");
 assert(nginxConfig.includes("proxy_set_header Upgrade $http_upgrade"), "nginx must proxy WebSocket upgrades");
-assert(nginxConfig.includes("client_max_body_size 50m"), "nginx must allow collector work-state payloads");
+assert(nginxConfig.includes("client_max_body_size 50m"), "nginx must allow collector device-state payloads");
 
 const backendDockerfile = read("Dockerfile.backend");
 assert(backendDockerfile.includes("node scripts/db-migrate.mjs"), "backend container must run migrations before start");

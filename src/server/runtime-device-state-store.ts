@@ -4,7 +4,29 @@ import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
-import type { RuntimeInventorySnapshot } from "../runtime";
+
+export interface RuntimeDeviceStateSnapshot {
+  observedAt: string;
+  device: {
+    id: string;
+    hostname: string;
+    os: string;
+  };
+  runtimes: Array<{
+    id: string;
+    deviceId: string;
+    kind: string;
+    name: string;
+    collectionStatus: string;
+  }>;
+  agents: Array<{
+    id: string;
+    runtimeId: string;
+    name: string;
+    collectionStatus: string;
+  }>;
+  tasks: unknown[];
+}
 
 /** Device connection state tracked by the local control plane. */
 export type RuntimeDeviceConnectionStatus = "online" | "stale" | "offline";
@@ -31,22 +53,22 @@ export interface RuntimeDeviceConnection {
   lastError?: string;
 }
 
-/** Runtime inventory persistence options for the local Lorume backend. */
-export interface RuntimeInventoryStoreOptions {
-  /** Absolute or repository-relative path for the latest snapshot JSON file. */
+/** Device-state persistence options for the local Lorume backend fallback path. */
+export interface RuntimeDeviceStateStoreOptions {
+  /** Absolute or repository-relative path for the latest device_state snapshot JSON file. */
   snapshotPath?: string;
   /** Milliseconds after which an online connection is considered stale without heartbeat. */
   staleAfterMs?: number;
 }
 
 /** Minimal persistence surface used by the dev backend and tests. */
-export interface RuntimeInventoryStore {
+export interface RuntimeDeviceStateStore {
   /** Absolute path where the latest snapshot is stored. */
   snapshotPath: string;
-  /** Read the latest snapshot, or null when no device has posted yet. */
-  readLatestSnapshot: () => RuntimeInventorySnapshot | null;
-  /** Validate and persist the latest snapshot. */
-  writeLatestSnapshot: (snapshot: unknown) => RuntimeInventorySnapshot;
+  /** Read the latest device_state snapshot, or null when no device has posted yet. */
+  readLatestSnapshot: () => RuntimeDeviceStateSnapshot | null;
+  /** Validate and persist the latest device_state snapshot. */
+  writeLatestSnapshot: (snapshot: unknown) => RuntimeDeviceStateSnapshot;
   /** Read device control connection state, or null when the device has never connected. */
   readDeviceConnection: (deviceId: string, now?: Date) => RuntimeDeviceConnection | null;
   /** Upsert device control connection state. */
@@ -59,15 +81,15 @@ export interface RuntimeInventoryStore {
   writeAgentSkillProbeSnapshot: (snapshot: unknown) => AgentSkillProbeSnapshot;
 }
 
-const defaultSnapshotPath = path.resolve(".lorume", "runtime-inventory", "latest.json");
+const defaultSnapshotPath = path.resolve(".lorume", "runtime-device-state", "latest.json");
 const defaultStaleAfterMs = 90_000;
 
-/** Create a file-backed store for the latest runtime inventory snapshot. */
-export function createRuntimeInventoryStore(
-  options: RuntimeInventoryStoreOptions = {},
-): RuntimeInventoryStore {
+/** Create a file-backed store for connection state, Skill probe snapshots, and latest device_state fallback data. */
+export function createRuntimeDeviceStateStore(
+  options: RuntimeDeviceStateStoreOptions = {},
+): RuntimeDeviceStateStore {
   const snapshotPath = path.resolve(
-    options.snapshotPath || process.env.LORUME_RUNTIME_INVENTORY_PATH || defaultSnapshotPath,
+    options.snapshotPath || process.env.LORUME_RUNTIME_DEVICE_STATE_PATH || defaultSnapshotPath,
   );
   const staleAfterMs = options.staleAfterMs ?? defaultStaleAfterMs;
   const deviceConnections = new Map<string, RuntimeDeviceConnection>();
@@ -78,14 +100,14 @@ export function createRuntimeInventoryStore(
     readLatestSnapshot() {
       if (!existsSync(snapshotPath)) return null;
       const parsed = JSON.parse(readFileSync(snapshotPath, "utf8")) as unknown;
-      if (!validateRuntimeInventorySnapshot(parsed)) {
-        throw new Error(`invalid runtime inventory snapshot at ${snapshotPath}`);
+      if (!validateRuntimeDeviceStateSnapshot(parsed)) {
+        throw new Error(`invalid device_state snapshot at ${snapshotPath}`);
       }
       return parsed;
     },
     writeLatestSnapshot(snapshot) {
-      if (!validateRuntimeInventorySnapshot(snapshot)) {
-        throw new Error("invalid runtime inventory snapshot");
+      if (!validateRuntimeDeviceStateSnapshot(snapshot)) {
+        throw new Error("invalid device_state snapshot");
       }
 
       mkdirSync(path.dirname(snapshotPath), { recursive: true });
@@ -129,11 +151,10 @@ export function createRuntimeInventoryStore(
   };
 }
 
-/** Validate the small contract Lorume needs before accepting a collector snapshot. */
-export function validateRuntimeInventorySnapshot(value: unknown): value is RuntimeInventorySnapshot {
+/** Validate the small current contract Lorume needs before accepting a device_state snapshot. */
+export function validateRuntimeDeviceStateSnapshot(value: unknown): value is RuntimeDeviceStateSnapshot {
   if (!isRecord(value)) return false;
   if (typeof value.observedAt !== "string") return false;
-  if (!isRecord(value.collector) || typeof value.collector.version !== "string") return false;
   if (
     !isRecord(value.device) ||
     typeof value.device.id !== "string" ||
@@ -145,7 +166,7 @@ export function validateRuntimeInventorySnapshot(value: unknown): value is Runti
   if (
     !Array.isArray(value.runtimes) ||
     !Array.isArray(value.agents) ||
-    !Array.isArray(value.reports)
+    !Array.isArray(value.tasks)
   ) {
     return false;
   }
@@ -160,9 +181,7 @@ function isRuntimeLike(value: unknown): boolean {
     typeof value.deviceId === "string" &&
     typeof value.kind === "string" &&
     typeof value.name === "string" &&
-    typeof value.status === "string" &&
-    Array.isArray(value.capabilities) &&
-    Array.isArray(value.sourceRefs)
+    typeof value.collectionStatus === "string"
   );
 }
 
@@ -172,10 +191,7 @@ function isAgentLike(value: unknown): boolean {
     typeof value.id === "string" &&
     typeof value.runtimeId === "string" &&
     typeof value.name === "string" &&
-    typeof value.origin === "string" &&
-    typeof value.status === "string" &&
-    Array.isArray(value.channelBindings) &&
-    Array.isArray(value.sourceRefs)
+    typeof value.collectionStatus === "string"
   );
 }
 

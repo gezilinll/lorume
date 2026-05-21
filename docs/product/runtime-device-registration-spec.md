@@ -1,295 +1,266 @@
 # Runtime & Device Registration Spec
 
-版本：TinySpec v0.5
+版本：TinySpec v0.6
 
-Lorume 需要把分散在多台设备、多个 runtime、多个外部平台上的 Agent 资产识别出来，并建立最小设备控制面。当前不做聊天入口，不做中控 Agent，不通过 Lorume 接管消息路由，也不依赖 SSH 作为产品连接方式。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化 device state snapshot。当前阶段采用 OpenClaw-first：只把 OpenClaw 迁移到新的统一模型，其他 Runtime adapter 默认不采集、不执行命令、不读目录。
 
 ## 目标
 
 - 通过一条本地安装命令在设备上安装 Lorume Device Collector。
-- Collector 可以作为设备侧常驻 Device Agent 运行，设备主动连接 Lorume。
-- Collector 以只读方式识别本机 runtime、agent、channel binding、最近同步、Agent 工作负载统计和健康状态。
-- Collector 主动向 Lorume 上报 snapshot；在没有服务端域名的开发期，可以本地路径安装并以 `--once` 输出 snapshot。
-- 本地开发后端接收 collector 上报，维护设备连接状态，并提供 Runtime Fleet / Runs 页面读取的正式查询 API。
-- Lorume 统一消费标准化后的 Device、Runtime、ManagedAgent、ChannelBinding、DeviceConnection 对象。
-- WebSocket 控制面只支持设备主动注册、心跳和连接健康判定；不下发采集、探测、调度或任意命令。
-- Collector 常驻模式必须周期性上报 inventory snapshot 和 work-state snapshot，不能只刷新资产清单。
-- 为任务看板和 Agent 调度定义 WorkItem、Conversation、Execution 三层工作态模型，但 Runtime Fleet 不直接接管调度。
+- Collector 作为设备侧常驻 Device Agent 运行，设备主动连接 Lorume。
+- Collector 只读采集本机事实和 OpenClaw 运行资产。
+- 后端接收设备主动上报的 device state snapshot，并提供 Runtime Fleet / Runs 查询 API。
+- Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
+- WebSocket 控制面只支持设备主动 `hello`、`heartbeat` 和连接健康判定；不下发采集、探测、调度或任意命令。
 
 ## 非目标
 
-- 不处理中控 Agent、附属 Agent 自动路由或跨平台消息分配。
-- 不创建或编辑 Slock、Multica、OpenClaw 等外部平台里的 Agent。
+- 不处理中控 Agent、跨平台消息路由或外部平台 Agent 创建/编辑。
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
-- 不采集和展示所有网卡、所有 MAC 地址或所有临时端口。
-- SSH 只允许作为开发者把安装命令投递到远端设备的测试通道，不进入产品架构。
-- 用户 session、组织成员和设备 token 的鉴权边界由 `docs/product/auth-and-access-spec.md` 定义；本规格只描述设备注册、采集和控制面，不重复定义权限模型。
+- 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
+- 不在本阶段采集 Slock、Multica、Codex 或 Claude Code。Codex 仍可作为未来 Runtime kind 保留；Claude Code 从当前支持列表移除。
+- 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
 
 ```mermaid
 flowchart LR
   UI["Lorume UI"]
-  Registry["Lorume Registry"]
-  Control["Device Connection Channel"]
-  Collector["Device Agent / Collector"]
-  Adapters["Runtime Adapters"]
+  Backend["Lorume Backend"]
+  Control["Device WebSocket<br/>hello + heartbeat"]
+  Collector["Device Collector"]
+  CLI["lorume CLI"]
+  OpenClawAdapter["OpenClaw adapter"]
   OpenClaw["OpenClaw"]
-  Slock["Slock"]
-  Multica["Multica"]
-  CLIRuntime["Codex / Claude Code"]
 
-  UI --> Registry
-  UI --> Control
-  Collector --> Registry
+  UI --> Backend
+  Collector --> Backend
   Collector <--> Control
-  Collector --> Adapters
-  Adapters --> OpenClaw
-  Adapters --> Slock
-  Adapters --> Multica
-  Adapters --> CLIRuntime
+  Collector --> CLI
+  CLI --> OpenClawAdapter
+  OpenClawAdapter --> OpenClaw
 ```
 
-## 对象边界
+## 四大对象
 
-- Device：一台可注册设备，只记录稳定 device id、hostname、OS、架构、last seen、本地用户、本地 IP / 后端观测公网 IP 和 collector 元信息。
-- DeviceConnection：设备侧 Lorume collector 与后端之间的连接状态，记录在线、失联、最后心跳、collector version 和最近错误。
-- Runtime：设备上的可识别运行或平台入口。`kind` 用于表达 OpenClaw、Codex、Claude Code、Slock、Multica 等具象来源。
-- ManagedAgent：Lorume 管理视角下的 Agent。它可以来源于 OpenClaw 本机 Agent、Slock 平台 Agent、Multica 平台 Agent 或手动注册对象。
-- ChannelBinding：Agent 被哪些用户触达渠道或外部入口暴露，例如 DingTalk、Telegram、Slack；Slock、Multica、OpenClaw、Codex 在 Runs 语义中属于 Runtime / 平台入口，不作为 Channel 筛选项。
-- RuntimeSnapshot：Collector 单次采集结果，是 UI 和后续 Registry 写入的输入。
-- Runtime endpoint 不作为当前的一等对象。Adapter 可以保留必要诊断字段，但 Runtime Fleet 页面不展示运行入口，除非出现明确管理动作。
-- RuntimeWorkItem：业务工作项，例如 Slock board card、Multica issue、外部任务或需求卡片。
-- RuntimeConversation：会话或线程，例如 channel thread、DM、OpenClaw session、Multica chat session。
-- RuntimeExecution：一次具体运行，例如 OpenClaw run、Multica task/run、Slock agent activity。
-- RuntimeObservationCapability：adapter 对 WorkItem、Conversation、Execution 三层数据满足度和采集策略的声明。
+### Device
 
-分层原则：
+Device 表示一台已注册设备。它只记录机器事实、collector 元信息和采集状态。
 
-- Device 是连接和承载层，只回答这台机器是谁、collector 是否连着、有哪些 Runtime 注册在这台设备上；Device 不拥有任务、会话或泳道，Device 事实对象不保存由 Runtime 或 Agent 推导出来的状态。
-- Runtime 是执行环境层，只回答执行环境是否可用、离线、空闲或工作中；Runtime 可以作为采集入口，但不拥有项目管理级任务或泳道。Adapter 内部可以保留可用性与工作态两个维度，Runtime Fleet 展示层必须折叠为统一对象状态，避免让用户同时理解两套近似标签。
-- ManagedAgent 是工作主体层，负责承接用户请求和任务；待处理、处理中、待验收、已关闭、需关注等项目管理级阶段只归 Agent。
-- WorkItem、Conversation、Execution 是 Agent 工作态证据。它们可以通过 Runtime adapter 采集，但必须在 adapter / query 层关联回 ManagedAgent。
-- OpenClaw CLI、Slock task board / activity、Multica issue / run 等都是采集策略，不是 Lorume 产品语义。UI 只能消费 Lorume 统一模型。
+```ts
+export interface Device {
+  id: string;
+  hostname: string;
+  os: string;
+  architecture?: string;
+  collectionStatus: CollectionStatus;
+  lastSeenAt?: string;
+  user?: { username?: string };
+  network?: {
+    publicIp?: string;
+    localIps?: string[];
+  };
+  collector?: {
+    version: string;
+    installPath?: string;
+    lastError?: string;
+  };
+}
+```
 
-## 统一状态与统计语义
+Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含额外 display name、connection mode 或工作忙闲。
 
-Adapter 必须把外部平台字段转换成 Lorume 自己的统一模型，不能把 OpenClaw、Slock、Multica 的原始状态直接漏到 UI。
+### Runtime
 
-`lastSeenAt` 表示 Lorume 最近一次从对象来源采集到该对象状态的时间。Device、Runtime、ManagedAgent 都使用同一语义。外部 `updated_at`、`last_seen_at`、snapshot observed time 等字段只能在 adapter 中转换为 `lastSeenAt`。
+Runtime 表示设备上的可识别运行环境。当前支持类型为 `openclaw`、`slock`、`multica`、`codex`，但 OpenClaw-first 阶段默认只采集 `openclaw`。
 
-Device 事实字段：
+```ts
+export type RuntimeKind = "openclaw" | "slock" | "multica" | "codex";
 
-- `id`：Lorume 稳定 device id，来自安装配置或 hostname fallback。
-- `hostname`：设备系统 hostname。
-- `os`：设备操作系统。
-- `architecture`：CPU 架构。
-- `lastSeenAt`：最近一次 inventory snapshot 观察时间。
-- `user.username`：可读取时的本地 OS 用户名。
-- `network.localIps`：本地非 internal 网卡地址。
-- `network.publicIp`：后端从可信转发头或连接 remote address 观测到的公网 / 出口地址。
-- `collector`：collector version、状态、安装路径和最近错误。
+export interface Runtime {
+  id: string;
+  deviceId: string;
+  kind: RuntimeKind;
+  name: string;
+  version?: string;
+  collectionStatus: CollectionStatus;
+  lastSeenAt?: string;
+  diagnostics?: {
+    paths?: Array<{ label: string; path: string }>;
+    lastError?: string;
+  };
+}
+```
 
-Device 不包含 `name`、存储状态或连接模式字段。Runtime 和 ManagedAgent 状态必须独立归一，不得 roll up 写回 Device 事实对象。
+Runtime 不包含 `endpoint`、`capabilities` 或 `sourceRefs`。这些信息如有排障价值，只能进入 diagnostics、结构化日志或 DB raw。
 
-Runtime 运行状态：
+### Agent
 
-- `offline`：Runtime 明确不可达。
-- `working`：Runtime 可达，且关联 Agent 有 `processing` 工作项，或存在 `queued/running` execution。Slock 以 task board `in_progress` 作为工作中依据，不要求实时 activity。
-- `idle`：Runtime 可达，adapter 能判断没有处理中工作项或运行中 execution。
-- `unknown`：仅允许作为 adapter 内部原始归一结果。进入 Runtime Fleet 展示前必须折叠为 `异常`，不得向用户展示未知状态。
+Agent 表示某个 Runtime 下的工作主体。Agent 只通过 `runtimeId` 归属 Runtime；平台来源由关联 Runtime 查询得到。
 
-ManagedAgent 状态：
+```ts
+export interface Agent {
+  id: string;
+  runtimeId: string;
+  name: string;
+  collectionStatus: CollectionStatus;
+  lastSeenAt?: string;
+  diagnostics?: {
+    paths?: Array<{ label: string; path: string }>;
+    lastError?: string;
+  };
+}
+```
 
-- `active`：当前有任务或会话正在执行，Runtime Fleet 展示为 `工作中`。
-- `idle`：当前无任务或会话执行，但 Agent 可识别且可用。
-- `inactive`：已停用或不可接收任务。
-- `degraded`：可识别但状态异常。
-- `unknown`：仅允许作为 adapter 内部原始归一结果。进入 Runtime Fleet 展示前必须折叠为 `异常`，不得向用户展示未知状态。
+Agent 不包含 `origin`、`sourceRefs` 或 `load`。任务数量、进行中数量等运行负载从 `Task.agentId` 聚合得到。
 
-Agent 工作负载统计：
+### Task
 
-- `activeTasks`：当前执行中的任务数。
-- `queuedTasks`：当前排队任务数。
-- `activeSessions`：当前活跃会话数。
-- `historicalSessions`：历史或累计会话数。
-- `maxConcurrency`：配置的并发容量。
+Task 表示 Agent 承接的一项工作。Task 只关联 Agent，不直接关联 Runtime；需要 Runtime 或 Device 时通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 查询。
 
-这些统计属于 Agent 工作负载或诊断信息。Runtime 可以用它们汇总出粗粒度忙闲状态，但 Runtime 详情不展示任务/会话明细。Adapter 拿不到某个统计字段时不伪造数据，由 UI 展示为不支持采集。
+```ts
+export type TaskStatus =
+  | "todo"
+  | "in_progress"
+  | "review"
+  | "done"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "unknown";
 
-## 识别与网络字段策略
+export interface Task {
+  id: string;
+  agentId: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  source?: { externalId?: string };
+  channel?: {
+    kind: "dingtalk" | "telegram" | "slack" | "slock" | "multica" | "openclaw" | "other";
+    name?: string;
+    externalId?: string;
+  };
+  conversation?: {
+    title?: string;
+    externalId?: string;
+    lastActivityAt?: string;
+  };
+  assignee?: { name?: string };
+  creator?: { name?: string };
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastSeenAt?: string;
+}
+```
 
-Lorume 只展示对识别设备、排查连接和理解 runtime 来源有用的字段。
+Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
 
-- 设备身份：展示 Lorume `deviceId` 和系统上报的 hostname，不维护额外设备显示名。
-- 平台身份：可以记录 Slock machine/server 标识、Multica daemon id、OpenClaw gateway id 等平台标识。
-- IP 地址：保留本地非 internal IP 列表和后端观测到的公网 / 出口 IP。公网 / 出口 IP 优先由后端从可信转发头或连接 remote address 推导，CLI 不主动访问第三方探测服务。
-- MAC 地址：默认不展示。确有设备识别需求时，只允许采集主网卡 MAC 并脱敏展示。
-- 端口：只在有明确管理动作时作为 runtime 诊断字段保留，不作为 Device 的通用字段。设备侧采用 outbound 连接时，不要求开放入站端口。
+## 状态规则
 
-## 本地开发 API
+### CollectionStatus
 
-本地开发阶段使用独立 backend 服务承载最小 API 闭环；Vite 只负责前端开发并把 `/api` 代理到 backend：
+```ts
+export type CollectionStatus = "syncing" | "online" | "offline" | "error";
+```
 
-- `GET /api/device-collector/install.sh`：返回无密钥的远程安装入口脚本，用于前端生成一行设备注册命令。
-- `GET /api/device-collector/files/:fileName`：只允许下载 `install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs` 和 `lorume.mjs` 这几个白名单设备包文件。
-- `POST /api/device-snapshots`：Collector 上报一次 `RuntimeInventorySnapshot`，服务端做最小结构校验并写入 Postgres 查询表。
-- `GET /api/runtime-fleet`：Runtime Fleet 页面读取的正式查询 API。
-- `WS /api/device-control/ws`：设备侧 collector 建立 outbound WebSocket，用于 `hello`、`heartbeat`、连接断开和 stale 判定。后端不得通过该通道下发 `inventory.refresh`、`agent.skill_probe`、任务调度或任意命令。
-- `POST /api/runtime-work-state-snapshots`：Collector 上报一次 `RuntimeWorkStateSnapshot`，服务端做最小结构校验并写入 Postgres 查询表。
-- `GET /api/runtime-work-items`：Runs / Work Board 页面读取的正式查询 API。
-- `GET /api/runtime-work-items/:id`：读取单个工作项详情。
-- `GET /api/devices/:deviceId/ingestions`：读取设备最近采集记录，用于解释数据新鲜度和缺口。
-- `GET /api/devices/:deviceId/collection-health`：读取设备采集诊断摘要，区分 inventory 与 work-state 最近是否成功、是否有 adapter warning 或失败。该接口服务于状态折叠、排查和通知，不要求 Runtime Fleet 渲染独立采集健康区块。
-
-`runtime-inventory-store` 和 `runtime-work-state-store` 仍可作为内部校验、连接状态和测试辅助使用，但不暴露 latest GET API，也不是 Runtime Fleet / Runs 的正式读取路径。
-
-Installer package 文件必须用仓库相对路径声明。当前 package manifest：
-
-| Package file | Repository source |
+| 状态 | 含义 |
 |---|---|
-| `install-device-collector.sh` | `scripts/install-device-collector.sh` |
-| `lorume-device-collector.mjs` | `scripts/lorume-device-collector.mjs` |
-| `lorume-runtime-adapters.mjs` | `scripts/lorume-runtime-adapters.mjs` |
-| `lorume.mjs` | `scripts/lorume.mjs` |
+| `syncing` | 已注册或已连接，但还没有形成可用采集结果。 |
+| `online` | 最近一次成功采集中出现，且数据仍处于新鲜窗口内。 |
+| `offline` | 曾经成功采集过，但连接或采集结果已过期。 |
+| `error` | 最近一次采集、结构校验或入库失败。 |
 
-自动化 installer 测试必须从本地 source path 和临时 install directory 运行，证明 manifest path 存在、安装结果与仓库源文件内容一致、配置不写入 legacy 字段。自动化测试不得把已部署域名或真实服务端 HTTP 返回作为本地 installer 文件正确性的证据。
+Runtime 和 Agent 的 `collectionStatus` 只表达采集可用性，不表达工作忙闲。工作中、空闲、任务数量等信息由 Task 聚合得到。
 
-## WebSocket 控制面
+### TaskStatus
 
-WebSocket 是设备控制面，不是聊天入口。设备永远主动连接 Lorume，避免要求内网设备暴露公网入口。
+| OpenClaw / 外部证据 | Lorume `TaskStatus` |
+|---|---|
+| queued, pending, todo | `todo` |
+| running, active, in_progress | `in_progress` |
+| review, in_review | `review` |
+| succeeded, completed, done | `done` |
+| blocked, waiting_on_dependency | `blocked` |
+| failed, error | `failed` |
+| cancelled, canceled | `cancelled` |
+| 不能可靠判断 | `unknown` |
 
-启用 device token 鉴权时，第一条有效消息必须是带 `deviceToken` 的 `hello`。后端在校验 token 的异步窗口内必须暂存后续控制消息，鉴权成功后再按接收顺序处理；不能因为 collector 紧随 `hello` 发送 `heartbeat` 就关闭连接，也不能在 socket 已关闭后登记为在线控制连接。
+## Device State Snapshot
 
-消息 envelope：
+Collector 最终上报一份统一 snapshot。它是传输 envelope，不是产品实体。
 
-- `hello`：设备连接后声明 `deviceId`、collector version 和 hostname。
-- `hello.ack`：后端确认连接已登记。
-- `heartbeat`：设备周期性上报 collector 状态、负载摘要和最近错误。
-- `error`：任何一方回传可解释错误。
+```ts
+export interface DeviceStateSnapshot {
+  observedAt: string;
+  device: Device;
+  runtimes: Runtime[];
+  agents: Agent[];
+  tasks: Task[];
+  diagnostics?: {
+    warnings?: string[];
+  };
+}
+```
 
-设备采集由 collector 自己的启动、周期调度或本机显式 `--once` 命令触发。后端只维护连接健康和数据入库，不通过 WebSocket 请求设备立即采集。
+上报是全量 snapshot。后端以当前 snapshot 为准 upsert 对象，并清理同一设备下本次没有出现的 Runtime、Agent 和 Task。
 
-连接状态分层：
+## API
 
-- Device connection：Lorume device agent 是否在线。
-- Runtime health：OpenClaw、Codex、Multica、Slock 等 runtime 是否可用。
-- Agent availability：某个 managed agent 是否可接收任务或可见。
-- Channel binding：DingTalk、Telegram、Slack 等触达渠道或外部入口绑定是否存在且启用；Runs 页面只把用户触达渠道作为 Channel 筛选项。
+- `GET /api/device-collector/install.sh`：返回无密钥远程安装入口脚本。
+- `GET /api/device-collector/files/:fileName`：只允许下载白名单设备包文件。
+- `POST /api/device-state-snapshots`：Collector 上报 `DeviceStateSnapshot`，使用 device token 鉴权。
+- `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
+- `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
+- `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
+- `WS /api/device-control/ws`：只处理 `hello`、`heartbeat`、断开和 stale 判定。
 
-Device 只有四个用户可见状态：
+## OpenClaw Adapter
 
-- `同步中`：尚未收到成功 inventory，且没有明确错误。
-- `在线`：heartbeat 新鲜，且最近一次 inventory 成功并处于新鲜窗口内。
-- `离线`：历史上至少有一次成功 inventory，但 heartbeat 或 inventory 新鲜度过期，且没有更新的明确错误。
-- `异常`：token 被拒绝、payload 结构非法、后端入库失败、最近一次 inventory 失败，或设备连接后超过首次同步窗口仍没有成功 inventory。
+OpenClaw 是本阶段唯一默认启用的 runtime adapter。
 
-Device 状态必须独立于 Runtime 和 Agent 状态推导；Runtime / Agent 工作状态不得向上卷成 Device 状态。
+| Lorume 对象 | OpenClaw 来源 | 规则 |
+|---|---|---|
+| Device | collector host facts | 使用现有本机事实采集逻辑。 |
+| Runtime | OpenClaw config、`openclaw health --json`、`openclaw status --json` | 生成一个 `OpenClaw Gateway` runtime，kind 为 `openclaw`。 |
+| Agent | OpenClaw health/status agent 列表和 config agent 列表 | 每个真实 OpenClaw agent id 生成一个 Agent。 |
+| Task | OpenClaw task/message/run 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
 
-采集状态判定：
+稳定 ID：
 
-- 采集成功且数据完整度符合当前 adapter 预期时，后端记录为成功；完整、局部增量或空结果都可以是符合预期的数据形态。
-- 最近同步时间表达数据新鲜度，并作为 Device 四态判定输入之一；UI 对用户只展示 `同步中`、`在线`、`离线`、`异常` 四类状态，不额外暴露 stale 等内部状态。
-- 采集失败、adapter 异常、JSON 结构不可用、token 无效或后端入库失败时，必须产出规范化错误码和用户可读 message；Runtime Fleet 展示层将相关对象折叠为 `异常`。
-- 后端和 collector 日志必须使用结构化 JSON，不记录 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- 当前低成本本地方案使用 collector 侧 JSONL 日志和后端结构化日志；后续接入 SLS 时复用同一 error code / message 语义。
+| 对象 | 规则 |
+|---|---|
+| Device | 配置中的 device id，否则 sanitized hostname。 |
+| Runtime | `${deviceId}:runtime:openclaw` |
+| Agent | `${runtimeId}:agent:${openClawAgentId}` |
+| Task | `${agentId}:task:${openClawTaskExternalId}` |
 
-真实设备清理约束：
+## Adapter Allowlist
 
-- 真实设备验收时，agent 可以运行 Lorume stop、uninstall、install 命令，也可以读取日志、服务状态和文件状态。
-- agent 不能手动删除残留的 Lorume 文件、launchd plist、systemd unit 或进程状态来掩盖卸载缺陷。
-- 如果 uninstall 后仍有残留，必须停止真实设备流程，分析卸载能力缺陷，在项目中修复并重新执行 uninstall 验证。
-
-## Runtime Adapter
-
-每个 adapter 只做只读采集，并返回统一的 adapter report。Adapter 归属 `lorume` CLI 内部实现；collector / daemon 不直接读 OpenClaw、Multica、Slock、Codex 或 Claude Code 的私有目录、内部 token、内部 API 或进程语义。
-
-- OpenClaw Adapter：在 `lorume` CLI 内读取 `openclaw health --json`、`openclaw status --json`、`openclaw tasks list --json`、`openclaw tasks audit --json` 的摘要。OpenClaw 命令常见为 Node shim，CLI 必须用增强后的 probe `PATH` 启动子进程，让 shim 能找到同目录或 Node 安装目录中的解释器。OpenClaw 命令输出可能超过 Node 默认同步子进程 buffer，CLI 必须使用受控的大 buffer 读取 JSON，不能把大输出截断误判为不可用。
-- Slock Adapter：在 `lorume` CLI 内识别 `~/.slock/agents` 下的 agent workspace，以及本机 daemon/agent 进程摘要。不调用私有 Web API 创建 Agent。task-board internal API 出现临时 5xx、网络抖动或超时时，CLI adapter 应做小次数重试；重试成功不记录 channel probe warning。同一个 channel 被多个本地 Slock agent context 探测时，只要任一 context 成功采到该 channel，就不记录该 channel 的失败 warning。
-- Multica Adapter：读取 `multica daemon status --output json`、`multica runtime list --output json`、`multica agent list --output json`。
-- Codex / Claude Adapter：识别 CLI 可用性、版本与基础 session 目录摘要。
-
-当前转换规则：
-
-- OpenClaw `sessionsCount` / `totalSessions` 映射为 `historicalSessions`，不能映射为 `activeSessions`。没有当前执行证据时 Agent 状态为 `idle`。
-- Multica agent `status` 按 Lorume 状态枚举转换，`max_concurrent_tasks` 映射为 `maxConcurrency`，`updated_at` / `last_seen_at` 映射为 `lastSeenAt`。
-- Slock 本地 workspace 只能证明 Agent 被识别，不能证明正在执行；没有 task board 或其他工作态证据时 adapter 可以内部归一为 `unknown`，进入 Runtime Fleet 后展示为 `异常`。当 Slock task board 已可观测时，assignee + `in_progress` 可把对应 Agent 展示为 `工作中`，没有处理中任务的已识别 Agent 可展示为 `空闲`。Collector 默认使用 `https://api.slock.ai` 加本地 agent token 做只读 task-board 探测；自托管或测试环境可通过 `slockServerUrl` / `SLOCK_SERVER_URL` 覆盖。
-
-## 工作态模型
-
-Lorume 把业务任务、会话线程和真实运行执行分开建模。TypeScript source of truth 是 `src/runtime/runtime-work-state.ts`，当前平台探测和满足度记录在 [runtime-work-state-probe.md](./runtime-work-state-probe.md)。
-
-- `RuntimeWorkItem.status` 表达业务生命周期，例如 `todo`、`in_progress`、`in_review`、`done`、`blocked`、`cancelled`、`unknown`。
-- `RuntimeConversation.status` 表达会话生命周期，例如 `open`、`active`、`idle`、`closed`、`unknown`。
-- `RuntimeExecution.status` 表达运行生命周期，例如 `queued`、`running`、`succeeded`、`failed`、`cancelled`、`unknown`。
-- `RuntimeWorkStage` 表达统一管理阶段，例如 `pending`、`processing`、`review`、`closed`、`attention`。
-
-约束：
-
-- 看板中的 `in_progress` 不等于真实 execution running，不能直接映射为 `RuntimeExecution.status=running`；但它可以作为 Agent 正在承接工作和 Runtime 粗粒度 `working` 的业务证据。
-- 平台的在线状态不等于执行态。比如 Slock server info 的 agent `active` 只能证明可用或在线，不能证明正在工作。
-- 平台没有的阶段不能伪造。比如 OpenClaw 没有 review 概念，成功 execution 直接进入 `closed`，失败、取消或未知进入 `attention`；OpenClaw 的 `pending` 必须来自上游 WorkItem。
-- 同一个 WorkStage 必须带 `confidence`，区分直接证据、部分推断和平台不支持。
-- Adapter 可以使用不同策略采集不同平台，例如 CLI、native API、local state、process、network proxy 或 managed launcher，但必须在 adapter 内转换成 Lorume-owned semantics。
-- Adapter 拿不到的字段不伪造，由能力声明和 UI 展示为不支持、部分支持或未知。
-
-## 安装方式
-
-组织 owner / admin 可以在组织设置中生成 device token，并得到一条包含 server URL、device id 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
-
-当前远程安装命令形态：
+Collector / CLI 必须支持 runtime adapter allowlist：
 
 ```sh
-curl -fsSL https://lorume.example/api/device-collector/install.sh | bash -s -- \
-  --server-url https://lorume.example \
-  --device-id <device-id> \
-  --device-token <device-token>
+LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ```
+
+OpenClaw-first 阶段默认 allowlist 为 `openclaw`。被禁用的 adapter 不得执行命令、读取目录或生成对象。
+
+## 安装与卸载
+
+组织 owner / admin 可以生成 device token，并得到一条包含 server URL、device id 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
 
 远程安装入口不包含密钥。它只从同一个 Lorume backend 下载白名单设备包文件到临时目录，再调用 `scripts/install-device-collector.sh --source-dir <temp-dir>` 完成本机安装、配置写入和 launchd / systemd 服务注册。
 
-开发期也可以通过本地路径安装：
-
-```sh
-bash scripts/install-device-collector.sh \
-  --source-dir /path/to/lorume \
-  --install-dir ~/.lorume/collector \
-  --device-id gezilinll-claw \
-  --server-url http://127.0.0.1:4173 \
-  --slock-server-url https://api.slock.ai \
-  --once \
-  --no-service
-```
-
-服务模式用于真实设备注册和持续连接：
-
-```sh
-bash scripts/install-device-collector.sh \
-  --source-dir /path/to/lorume \
-  --install-dir ~/.lorume/collector \
-  --device-id gezilinll-claw \
-  --server-url http://lorume.local \
-  --slock-server-url https://api.slock.ai
-```
+真实设备验收时，agent 可以运行 Lorume stop、uninstall、install 命令，也可以读取日志、服务状态和文件状态。agent 不能手动删除残留的 Lorume 文件、launchd plist、systemd unit 或进程状态来掩盖卸载缺陷；如果 uninstall 后仍有残留，必须停止真实设备流程，在项目中修复卸载能力并重新验证。
 
 ## 验收
 
-- 能通过 TypeScript harness 验证 adapter report 可以标准化成 Device、Runtime、ManagedAgent、ChannelBinding。
-- 能通过脚本 harness 验证 collector 在 fixture 模式下输出 RuntimeSnapshot。
-- 能通过脚本 harness 验证 collector 可把 RuntimeSnapshot POST 到 Lorume 后端。
-- 能通过后端 harness 验证 collector POST 写入、查询 API、最小结构校验和不暴露 legacy latest GET API。
-- 能通过 backend API E2E 验证一行安装命令引用的 installer endpoint 和设备包文件可下载。
-- 能通过 backend API E2E 启动真实 collector 进程，验证它通过 CLI 采集 inventory / work-state 并上报到正式 backend 查询 API。
-- 能通过后端 harness 验证 device WebSocket 连接、heartbeat、断连和 stale 判定。
-- 能通过 collector harness 验证 daemon 启动和周期刷新都会同时上报 inventory snapshot 与 work-state snapshot。
-- 能通过安装脚本 harness 验证本地路径安装、配置写入、一次性采集运行。
-- 能通过安装脚本 harness 验证 stop / uninstall 幂等，并且卸载只通过 Lorume 产品能力完成服务停止、服务定义移除和安装目录清理。
-- 能通过 Runtime harness 验证 adapter 把平台字段转换成 Lorume 状态、`lastSeenAt` 和 Agent 工作负载统计语义。
-- 能通过前端 harness 验证 Runtime Fleet 当前不展示 `请求设备刷新` 入口。
-- 能通过前端 harness 验证页面自动读取后端查询 API，且不展示原始 UTC ISO 时间。
-- 能通过 Runs / Work Board harness 验证页面只消费统一 WorkStage / confidence，不直接解释平台原始状态。
-- 能通过 Runs / Work Board harness 验证 Slock `in_progress` 显示为 `processing + partial`，OpenClaw 成功 execution 直接进入 closed，失败 execution 进入 attention。
-- 能通过 collector harness 验证 OpenClaw Node shim 在 launchd / ssh 的最小 `PATH` 下仍可运行、OpenClaw 大 JSON 输出不会被截断成不可用，Slock task-board transient failure 会重试并在成功后不产生误报 warning，同 channel 被其他 context 成功采集时不产生误报 warning。
-- 能通过真实远端设备执行一次安装脚本，完成只读 snapshot 输出。
-- `./scripts/verify.sh` 通过。
+- `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出 `DeviceStateSnapshot`。
+- 默认采集只执行 OpenClaw adapter，不执行 Slock、Multica、Codex 或 Claude 命令。
+- 后端能接收 `POST /api/device-state-snapshots`，并写入 Device、Runtime、Agent、Task。
+- Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
+- Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。
+- 自动化测试只使用本地 isolated backend/Postgres，不写真实生产后端。
+- 真实设备验收采用观察者方式：发现产品能力残留或采集缺口时修代码和测试，不手动清理掩盖问题。

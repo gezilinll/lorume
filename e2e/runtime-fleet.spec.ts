@@ -1,42 +1,27 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RuntimeInventorySnapshot, RuntimeWorkStateSnapshot } from "../src/runtime";
+import type { DeviceStateSnapshot } from "../src/runtime/runtime-model";
 import { resetE2eDatabase } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const fixtureSnapshot = JSON.parse(
-  readFileSync(path.join(repoRoot, "fixtures", "runtime", "collector-snapshot.sample.json"), "utf8"),
-) as RuntimeInventorySnapshot;
-
-const backendSnapshot: RuntimeInventorySnapshot = {
-  ...fixtureSnapshot,
-  agents: fixtureSnapshot.agents.map((agent) => {
-    if (agent.id !== "fixture-mac:slock:slock-daemon:agent:tester") return agent;
-    const { lastSeenAt, ...agentWithoutLastSeenAt } = agent;
-    void lastSeenAt;
-    return agentWithoutLastSeenAt;
-  }),
+const fixture = JSON.parse(
+  readFileSync(path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json"), "utf8"),
+) as {
+  agents: DeviceStateSnapshot["agents"];
+  devices: DeviceStateSnapshot["device"][];
+  observedAt: string;
+  runtimes: DeviceStateSnapshot["runtimes"];
+  tasks: DeviceStateSnapshot["tasks"];
 };
 
-const backendWorkState: RuntimeWorkStateSnapshot = {
-  observedAt: "2026-05-09T08:00:00.000Z",
-  deviceId: backendSnapshot.device.id,
-  workItems: [
-    {
-      id: "fixture-slock-task-1",
-      source: "slock",
-      externalId: "fixture-slock-task-1",
-      title: "Example in progress card",
-      status: "in_progress",
-      runtimeId: "fixture-mac:slock:slock-daemon",
-      agentId: "fixture-mac:slock:slock-daemon:agent:tester",
-    },
-  ],
-  conversations: [],
-  executions: [],
-  capabilities: [],
+const backendDeviceState: DeviceStateSnapshot = {
+  agents: fixture.agents,
+  device: fixture.devices[0],
+  observedAt: fixture.observedAt,
+  runtimes: fixture.runtimes,
+  tasks: fixture.tasks,
 };
 
 test.describe("Runtime Fleet", () => {
@@ -45,17 +30,14 @@ test.describe("Runtime Fleet", () => {
   });
 
   test("filters agents, opens details, and stays responsive", async ({ page, request }) => {
-    const seedResponse = await request.post("/api/device-snapshots", { data: backendSnapshot });
-    expect(seedResponse.ok()).toBe(true);
-    const workStateSeedResponse = await request.post("/api/runtime-work-state-snapshots", { data: backendWorkState });
-    expect(workStateSeedResponse.ok()).toBe(true);
+    await seedRuntimeFleetData(request);
     const skillProbeResponse = await request.post("/api/agent-skill-probe-snapshots", {
       data: {
-        targetAgentId: "fixture-mac:slock:slock-daemon:agent:tester",
-        targetAgentName: "tester",
+        targetAgentId: "fixture-mac:runtime:openclaw:agent:main",
+        targetAgentName: "main",
         deviceId: "fixture-mac",
-        runtimeId: "fixture-mac:slock:slock-daemon",
-        runtimeName: "Slock daemon",
+        runtimeId: "fixture-mac:runtime:openclaw",
+        runtimeName: "OpenClaw Gateway",
         status: "succeeded",
         observedAt: "2026-05-18T10:00:00.000Z",
         skills: [{
@@ -92,15 +74,16 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ })).toBeVisible();
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
-    await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("工作中");
-    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("tester");
-    await expect(page.getByRole("row", { name: /tester/ })).toContainText("工作中");
+    await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("在线");
+    await expect(page.getByRole("table", { name: "Runtime 列表" })).not.toContainText("工作中");
+    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("main");
+    await expect(page.getByRole("row", { name: /main/ })).toContainText("在线");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("所属设备");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("归属 Runtime");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("最近同步");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("Skill");
     await expect(page.getByLabel("Channel")).toHaveCount(0);
-    await expect(page.getByLabel("Runtime").locator("option")).toHaveText(["全部", "OpenClaw", "Slock"]);
+    await expect(page.getByLabel("Runtime").locator("option")).toHaveText(["全部", "OpenClaw"]);
     await expect(page.getByLabel("可用性")).toHaveCount(0);
     await expect(page.getByLabel("同步时间").locator("option")).toHaveText([
       "全部时间",
@@ -109,17 +92,18 @@ test.describe("Runtime Fleet", () => {
       "最近 30 天",
     ]);
 
-    await page.getByPlaceholder("搜索设备、Runtime、Agent 或渠道").fill("tester");
-    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("tester");
-    await expect(page.getByRole("table", { name: "Agent 列表" })).not.toContainText("main");
+    await page.getByPlaceholder("搜索设备、Runtime、Agent 或任务").fill("main");
+    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("main");
 
-    await page.getByRole("row", { name: /tester/ }).click();
+    await page.getByRole("row", { name: /main/ }).click();
     const detail = page.getByRole("complementary", { name: "运行资产详情" });
     await expect(detail).toHaveCSS("position", "sticky");
     await expect(detail).toContainText("归属关系");
-    await expect(detail).toContainText("状态: 工作中");
-    await expect(detail).toContainText("所属 Runtime: Slock daemon");
-    await expect(detail).toContainText("关联渠道");
+    await expect(detail).toContainText("状态: 在线");
+    await expect(detail).toContainText("所属 Runtime: OpenClaw Gateway");
+    await expect(detail).toContainText("任务统计");
+    await expect(detail).toContainText("全部任务: 2");
+    await expect(detail).not.toContainText("关联渠道");
     await expect(detail).toContainText(`最近同步: ${new Intl.DateTimeFormat("zh-CN", {
       year: "numeric",
       month: "2-digit",
@@ -128,9 +112,8 @@ test.describe("Runtime Fleet", () => {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-    }).format(new Date("2026-05-08T08:00:01.000Z"))}`);
-    await expect(detail).not.toContainText("slock: tester");
-    await page.getByRole("button", { name: "tester Skill 探测" }).click();
+    }).format(new Date("2026-05-21T10:00:00.000Z"))}`);
+    await page.getByRole("button", { name: "main Skill 探测" }).click();
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("reviewer");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("references/guide.md");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("scripts/probe.sh");
@@ -153,8 +136,7 @@ test.describe("Runtime Fleet", () => {
   });
 
   test("keeps the Runtime Fleet toolbar within the viewport on laptop widths", async ({ page, request }) => {
-    const seedResponse = await request.post("/api/device-snapshots", { data: backendSnapshot });
-    expect(seedResponse.ok()).toBe(true);
+    await seedRuntimeFleetData(request);
 
     await page.setViewportSize({ width: 1185, height: 900 });
     await page.goto("/");
@@ -167,3 +149,8 @@ test.describe("Runtime Fleet", () => {
     expect(pageOverflows).toBe(false);
   });
 });
+
+async function seedRuntimeFleetData(request: APIRequestContext): Promise<void> {
+  const seedResponse = await request.post("/api/device-state-snapshots", { data: backendDeviceState });
+  expect(seedResponse.ok()).toBe(true);
+}

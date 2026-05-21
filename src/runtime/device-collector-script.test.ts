@@ -1,11 +1,12 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { describe, expect, it } from "vitest";
+import { deviceInstallerRuntimeFiles } from "../backend/device-installer-manifest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const collectorScript = path.join(repoRoot, "scripts", "lorume-device-collector.mjs");
@@ -198,6 +199,52 @@ console.log(JSON.stringify({
 
     expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
     rmSync(homeDir, { force: true, recursive: true });
+  });
+
+  it("installs runtime files from local manifest paths with matching content", () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "lorume-local-installer-home-"));
+    const installDir = path.join(homeDir, "collector");
+
+    try {
+      execFileSync("bash", [
+        installerScript,
+        "--source-dir",
+        repoRoot,
+        "--install-dir",
+        installDir,
+        "--server-url",
+        "http://127.0.0.1:4184",
+        "--device-id",
+        "manifest-device",
+        "--device-token",
+        "local-test-token",
+        "--interval-ms",
+        "60000",
+        "--no-service",
+      ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+      for (const file of deviceInstallerRuntimeFiles) {
+        const source = readFileSync(path.join(repoRoot, file.sourcePath), "utf8");
+        const installedPath = path.join(installDir, file.fileName);
+        expect(readFileSync(installedPath, "utf8")).toBe(source);
+        const mode = (statSync(installedPath).mode & 0o777).toString(8).padStart(4, "0");
+        expect(mode).toBe(file.mode);
+      }
+
+      const config = JSON.parse(readFileSync(path.join(installDir, "config.json"), "utf8"));
+      expect(config).toMatchObject({
+        installDir,
+        serverUrl: "http://127.0.0.1:4184",
+        deviceId: "manifest-device",
+        intervalMs: 60000,
+      });
+      expect(config.deviceToken).toBe("local-test-token");
+      expect(config).not.toHaveProperty("deviceName");
+      expect(config).not.toHaveProperty("name");
+      expect(config).not.toHaveProperty("connectionMode");
+    } finally {
+      rmSync(homeDir, { force: true, recursive: true });
+    }
   });
 
   it("posts during installer once mode when a server url is configured", async () => {

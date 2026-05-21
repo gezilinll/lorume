@@ -24,6 +24,7 @@ export const runtimeKindLabels: Record<RuntimeKind, string> = {
 /** Channel labels used when a Task includes user-facing channel context. */
 export const channelKindLabels: Record<NonNullable<Task["channel"]>["kind"], string> = {
   dingtalk: "DingTalk",
+  webchat: "Web Chat",
   telegram: "Telegram",
   slack: "Slack",
   other: "Other",

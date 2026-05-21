@@ -35,6 +35,7 @@ const longTask: Task = {
   id: `${defaultAgentId}:task:merge-request-184`,
   lastSeenAt: "2026-05-09T15:55:00.000Z",
   status: "done",
+  taskType: "conversation",
   title: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复",
 };
 

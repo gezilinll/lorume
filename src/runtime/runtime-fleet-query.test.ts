@@ -50,6 +50,7 @@ const snapshot: RuntimeFleetSnapshot = {
     {
       id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
       agentId: "fixture-mac:runtime:openclaw:agent:main",
+      taskType: "conversation",
       title: "Review DingTalk request",
       description: "PMO asked OpenClaw to inspect the handoff.",
       status: "todo",
@@ -62,6 +63,7 @@ const snapshot: RuntimeFleetSnapshot = {
     {
       id: "fixture-mac:runtime:openclaw:agent:main:task:running-1",
       agentId: "fixture-mac:runtime:openclaw:agent:main",
+      taskType: "conversation",
       title: "Execute OpenClaw run",
       status: "in_progress",
       channel: { kind: "dingtalk", name: "DingTalk 群聊" },

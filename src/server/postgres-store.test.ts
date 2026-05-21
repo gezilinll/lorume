@@ -108,6 +108,60 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
+  it("persists task type for conversation and scheduled task queries", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runMigrationsScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        await store.upsertDeviceStateSnapshot({
+          ...snapshot,
+          tasks: [
+            {
+              ...snapshot.tasks[0],
+              id: `${snapshot.agents[0].id}:task:conversation-1`,
+              raw: { openclaw: { sessionId: "conversation-session", status: "success", statusSource: "session" } },
+              status: "done",
+              taskType: "conversation",
+              title: "Conversation request",
+            },
+            {
+              ...snapshot.tasks[0],
+              id: `${snapshot.agents[0].id}:task:scheduled-1`,
+              raw: { openclaw: { sessionId: "cron-session", status: "success", statusSource: "session" } },
+              source: { kind: "openclaw", externalId: "cron:daily-summary" },
+              status: "done",
+              taskType: "scheduled",
+              title: "Daily summary cron",
+            },
+          ],
+        });
+
+        const scheduled = await store.listRuntimeTasks({ taskType: "scheduled" });
+        const conversation = await store.listRuntimeTasks({ taskType: "conversation" });
+
+        expect(scheduled).toMatchObject({
+          items: [expect.objectContaining({
+            id: `${snapshot.agents[0].id}:task:scheduled-1`,
+            raw: expect.objectContaining({
+              openclaw: expect.objectContaining({ status: "success", statusSource: "session" }),
+            }),
+            status: "done",
+            taskType: "scheduled",
+          })],
+          total: 1,
+        });
+        expect(conversation.items.map((item) => item.taskType)).toEqual(["conversation"]);
+        expect(conversation.total).toBe(1);
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("stores latest read-only Agent Skill probe metadata", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

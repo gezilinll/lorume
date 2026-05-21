@@ -58,6 +58,9 @@ describeDb("database migrations", () => {
           "load",
           "source_refs",
         ]));
+        await expect(listPublicColumnNames(client, "tasks")).resolves.toEqual(expect.arrayContaining([
+          "task_type",
+        ]));
         expect(await listMigrationVersions(client)).toEqual([
           "0001_backend_core",
           "0002_auth_access",
@@ -67,6 +70,7 @@ describeDb("database migrations", () => {
           "0010_narrow_device_facts",
           "0011_device_state_tasks",
           "0012_remove_legacy_inventory_work_state",
+          "0013_task_type",
         ]);
       } finally {
         await client.end();

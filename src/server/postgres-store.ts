@@ -76,6 +76,7 @@ export interface PostgresRuntimeFleetResult {
 
 /** Backend query filters for unified Task rows. */
 export interface PostgresRuntimeTaskFilters {
+  taskType?: string | null;
   status?: string | null;
   channelKind?: string | null;
   startAt?: string | null;
@@ -468,16 +469,17 @@ async function deleteExistingTasksForDevice(client: pg.PoolClient, deviceId: str
 async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): Promise<void> {
   await client.query(`
     INSERT INTO tasks (
-      id, device_id, agent_id, title, description, status, source_external_id, channel, conversation,
+      id, device_id, agent_id, task_type, title, description, status, source_external_id, channel, conversation,
       creator, assignee, error, created_source_at, updated_source_at, last_seen_at, raw, updated_at
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb,
-      $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16::jsonb, now()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
+      $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17::jsonb, now()
     )
     ON CONFLICT (id) DO UPDATE SET
       device_id = excluded.device_id,
       agent_id = excluded.agent_id,
+      task_type = excluded.task_type,
       title = excluded.title,
       description = excluded.description,
       status = excluded.status,
@@ -496,6 +498,7 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): 
     task.id,
     deviceId,
     task.agentId,
+    task.taskType,
     task.title,
     task.description ?? null,
     task.status,
@@ -578,6 +581,7 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
   const values: unknown[] = [];
 
   addTextFilter(conditions, values, "t.status", filters.status);
+  addTextFilter(conditions, values, "t.task_type", filters.taskType);
   addTextFilter(conditions, values, "t.channel->>'kind'", filters.channelKind);
 
   const cursor = decodeTaskCursor(filters.cursor);

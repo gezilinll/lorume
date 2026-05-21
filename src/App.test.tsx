@@ -103,6 +103,7 @@ function task(overrides: Partial<Task> & Pick<Task, "id" | "title">): Task {
   return {
     agentId: defaultAgentId,
     status: "todo",
+    taskType: "conversation",
     ...overrides,
   };
 }

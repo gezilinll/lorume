@@ -79,6 +79,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         const counts = await postgresStore.readEntityCounts();
         const fleetResponse = await fetch(`${baseUrl}/api/runtime-fleet`);
         const tasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?status=in_progress&channelKind=dingtalk`);
+        const scheduledTasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?taskType=scheduled`);
         const ingestionsResponse = await fetch(`${baseUrl}/api/devices/openclaw-device/ingestions`);
         const healthResponse = await fetch(`${baseUrl}/api/devices/openclaw-device/collection-health`);
 
@@ -122,6 +123,10 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         expect(tasksBody.items[0]).not.toHaveProperty("runtimeId");
         expect(tasksBody.items[0]).not.toHaveProperty("lastRun");
+        await expect(scheduledTasksResponse.json()).resolves.toMatchObject({
+          items: [],
+          total: 0,
+        });
         await expect(ingestionsResponse.json()).resolves.toMatchObject({
           ingestions: [
             expect.objectContaining({

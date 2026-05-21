@@ -109,6 +109,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         search: requestUrl.searchParams.get("search"),
         status: requestUrl.searchParams.get("status"),
         startAt: requestUrl.searchParams.get("startAt"),
+        taskType: requestUrl.searchParams.get("taskType"),
       }));
       return;
     }

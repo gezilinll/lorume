@@ -314,6 +314,7 @@ exit 91
     const warning = output.diagnostics.items.find((item: { code?: string }) => item.code === "openclaw_missing_agent_reply");
     expect(warning).toMatchObject({
       count: 1,
+      message: "1 条 OpenClaw 会话/定时任务缺少 Agent 回复，已按不完整任务入库。",
       sampleRefs: ["task-done-missing-reply"],
       severity: "warning",
     });

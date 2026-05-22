@@ -201,7 +201,7 @@ function formatDiagnosticMessage(item) {
     openclaw_missing_agent_link: `${count} 条 OpenClaw 任务缺少 Agent 归属，已跳过。`,
     openclaw_missing_dingtalk_inbound_context: `${count} 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。`,
     openclaw_missing_prompt_ignored: `${count} 条 OpenClaw 非任务记录缺少 prompt，已过滤。`,
-    openclaw_missing_agent_reply: `${count} 条 OpenClaw 会话任务缺少 Agent 回复，已按不完整任务入库。`,
+    openclaw_missing_agent_reply: `${count} 条 OpenClaw 会话/定时任务缺少 Agent 回复，已按不完整任务入库。`,
     openclaw_task_missing_user_message: `${count} 条 OpenClaw 任务缺少用户消息，已跳过。`,
     openclaw_uncollected_agent_link: `${count} 条 OpenClaw 任务归属到未采集 Agent，已跳过。`,
     openclaw_unsupported_task_type_ignored: `${count} 条 OpenClaw 非产品任务类型已过滤。`,

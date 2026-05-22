@@ -127,6 +127,7 @@ describeDb("database migrations", () => {
           "0009_agent_skill_probing",
           "0011_device_state_tasks",
           "0012_runtime_task_batch_sync",
+          "0013_devices_collected_at",
         ]);
       } finally {
         await client.end();
@@ -153,6 +154,23 @@ describeDb("database migrations", () => {
           ('0008_notification_read_state'),
           ('0009_agent_skill_probing'),
           ('0011_device_state_tasks');
+
+        CREATE TABLE devices (
+          id text PRIMARY KEY,
+          hostname text NOT NULL,
+          os text NOT NULL,
+          architecture text,
+          collection_status text NOT NULL DEFAULT 'syncing',
+          collector jsonb NOT NULL DEFAULT '{}'::jsonb,
+          last_seen_at timestamptz,
+          observed_at timestamptz NOT NULL,
+          raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        INSERT INTO devices(id, hostname, os, observed_at)
+        VALUES ('device-1', 'fixture.local', 'darwin', '2026-05-22T08:00:00Z');
 
         CREATE TABLE collector_ingestions (
           id bigserial PRIMARY KEY,
@@ -199,6 +217,8 @@ describeDb("database migrations", () => {
 
       const migratedClient = await connectWithRetry(database.url);
       try {
+        await expect(listPublicColumnNames(migratedClient, "devices")).resolves.toContain("collected_at");
+        await expect(listPublicColumnNames(migratedClient, "devices")).resolves.not.toContain("observed_at");
         await expect(listPublicColumnNames(migratedClient, "collector_ingestions")).resolves.toContain("collected_at");
         await expect(listPublicColumnNames(migratedClient, "collector_ingestions")).resolves.not.toContain("observed_at");
         await expect(listPublicColumnNames(migratedClient, "tasks")).resolves.toEqual([
@@ -226,7 +246,68 @@ describeDb("database migrations", () => {
           "SELECT user_message FROM tasks WHERE id = 'task-1'",
         );
         expect(result.rows[0]?.user_message).toBe("Legacy description");
-        expect(await listMigrationVersions(migratedClient)).toContain("0012_runtime_task_batch_sync");
+        const deviceResult = await migratedClient.query<{ collected_at: Date | null }>(
+          "SELECT collected_at FROM devices WHERE id = 'device-1'",
+        );
+        expect(deviceResult.rows[0]?.collected_at?.toISOString()).toBe("2026-05-22T08:00:00.000Z");
+        expect(await listMigrationVersions(migratedClient)).toContain("0013_devices_collected_at");
+      } finally {
+        await migratedClient.end();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("upgrades production databases that applied task sync before device collected_at existed", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    const client = await connectWithRetry(database.url);
+
+    try {
+      await client.query(`
+        CREATE TABLE schema_migrations (
+          version text PRIMARY KEY,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        );
+        INSERT INTO schema_migrations(version) VALUES
+          ('0001_backend_core'),
+          ('0002_auth_access'),
+          ('0005_operations_notifications'),
+          ('0008_notification_read_state'),
+          ('0009_agent_skill_probing'),
+          ('0011_device_state_tasks'),
+          ('0012_runtime_task_batch_sync');
+
+        CREATE TABLE devices (
+          id text PRIMARY KEY,
+          hostname text NOT NULL,
+          os text NOT NULL,
+          architecture text,
+          collection_status text NOT NULL DEFAULT 'syncing',
+          collector jsonb NOT NULL DEFAULT '{}'::jsonb,
+          last_seen_at timestamptz,
+          observed_at timestamptz NOT NULL,
+          raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        INSERT INTO devices(id, hostname, os, observed_at)
+        VALUES ('device-1', 'fixture.local', 'darwin', '2026-05-22T08:00:00Z');
+      `);
+      await client.end();
+
+      runMigrationsScript(database.url);
+
+      const migratedClient = await connectWithRetry(database.url);
+      try {
+        await expect(listPublicColumnNames(migratedClient, "devices")).resolves.toContain("collected_at");
+        await expect(listPublicColumnNames(migratedClient, "devices")).resolves.not.toContain("observed_at");
+        const deviceResult = await migratedClient.query<{ collected_at: Date | null }>(
+          "SELECT collected_at FROM devices WHERE id = 'device-1'",
+        );
+        expect(deviceResult.rows[0]?.collected_at?.toISOString()).toBe("2026-05-22T08:00:00.000Z");
+        expect(await listMigrationVersions(migratedClient)).toContain("0013_devices_collected_at");
       } finally {
         await migratedClient.end();
       }

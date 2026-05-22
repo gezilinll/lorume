@@ -110,7 +110,9 @@ console.log(JSON.stringify({
 
   it("uninstalls the collector through the installer without manual file removal", () => {
     const homeDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-home-"));
-    const installDir = path.join(homeDir, "collector");
+    const installDir = path.join(homeDir, ".lorume", "collector");
+    const logDir = path.join(homeDir, ".lorume", "logs");
+    const taskSyncCachePath = path.join(homeDir, ".lorume", "task-sync-cache.json");
 
     execFileSync("bash", [
       installerScript,
@@ -125,6 +127,9 @@ console.log(JSON.stringify({
 
     expect(existsSync(path.join(installDir, "install-device-collector.sh"))).toBe(true);
     expect(existsSync(path.join(installDir, "lorume-device-collector.mjs"))).toBe(true);
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(path.join(logDir, "collector.jsonl"), "{}\n");
+    writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
 
     execFileSync(process.execPath, [
       path.join(installDir, "lorume.mjs"),
@@ -136,6 +141,9 @@ console.log(JSON.stringify({
     ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
 
     expect(existsSync(installDir)).toBe(false);
+    expect(existsSync(logDir)).toBe(false);
+    expect(existsSync(taskSyncCachePath)).toBe(false);
+    expect(existsSync(path.join(homeDir, ".lorume"))).toBe(false);
     rmSync(homeDir, { force: true, recursive: true });
   });
 

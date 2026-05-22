@@ -146,6 +146,9 @@ if [[ "$ACTION" == "uninstall" ]]; then
   fi
   remove_collector_service
   rm -rf "$INSTALL_DIR"
+  rm -rf "$HOME/.lorume/logs"
+  rm -f "$HOME/.lorume/task-sync-cache.json"
+  rmdir "$HOME/.lorume" >/dev/null 2>&1 || true
   exit 0
 fi
 

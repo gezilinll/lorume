@@ -288,7 +288,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 远程安装入口不包含密钥。它只从同一个 Lorume backend 下载白名单设备包文件到临时目录，再调用 `scripts/install-device-collector.sh --source-dir <temp-dir>` 完成本机安装、配置写入和 launchd / systemd 服务注册。
 
-安装目录必须包含后续生命周期命令需要的完整设备包文件：`install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs`、`lorume.mjs` 和 `config.json`。已安装的 `lorume.mjs collector stop/uninstall` 必须能通过同目录的 `install-device-collector.sh` 完成停止或卸载，不能依赖仓库源码目录仍然存在。
+安装目录必须包含后续生命周期命令需要的完整设备包文件：`install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs`、`lorume.mjs` 和 `config.json`。已安装的 `lorume.mjs collector stop/uninstall` 必须能通过同目录的 `install-device-collector.sh` 完成停止或卸载，不能依赖仓库源码目录仍然存在。`uninstall` 必须移除 collector 安装目录、服务定义、collector 日志目录和 task sync cache；如果 `$HOME/.lorume` 已为空，也应一并移除。
 
 真实设备验收时，agent 可以运行 Lorume stop、uninstall、install 命令，也可以读取日志、服务状态和文件状态。agent 不能手动删除残留的 Lorume 文件、launchd plist、systemd unit 或进程状态来掩盖卸载缺陷；如果 uninstall 后仍有残留，必须停止真实设备流程，在项目中修复卸载能力并重新验证。
 

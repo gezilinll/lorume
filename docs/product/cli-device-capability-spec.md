@@ -71,7 +71,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 ### `lorume collector uninstall --json --install-dir <path>`
 
-停止本机 Lorume collector 服务、移除 launchd / systemd 服务定义，并删除指定安装目录。该命令必须幂等：服务定义或安装目录不存在时仍返回成功状态。命令不得输出 device token、collector config 明文或平台 token。
+停止本机 Lorume collector 服务、移除 launchd / systemd 服务定义，并删除指定安装目录、collector 日志目录和 task sync cache。该命令必须幂等：服务定义、安装目录或本地 collector state 不存在时仍返回成功状态。命令不得输出 device token、collector config 明文或平台 token。
 
 ### `lorume agent skill-probe --json --agent-id <id>`
 

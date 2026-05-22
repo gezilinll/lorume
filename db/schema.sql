@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_source_at timestamptz,
   updated_source_at timestamptz,
   sync_hash text,
+  stale_at timestamptz,
   raw jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -166,6 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated_source_at ON tasks(updated_source_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_sync_hash ON tasks(sync_hash);
+CREATE INDEX IF NOT EXISTS idx_tasks_stale_at ON tasks(stale_at);
 
 CREATE TABLE IF NOT EXISTS collector_ingestions (
   id bigserial PRIMARY KEY,

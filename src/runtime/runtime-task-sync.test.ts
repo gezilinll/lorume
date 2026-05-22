@@ -112,4 +112,28 @@ describe("runtime task sync", () => {
     expect(batch?.tasks[0].task).not.toHaveProperty("description");
     expect(batch?.tasks[0].task).not.toHaveProperty("lastSeenAt");
   });
+
+  it("normalizes removed task ids in runtime task batches", () => {
+    const batch = normalizeRuntimeTaskBatch({
+      schemaVersion: "device-state-v2",
+      deviceId: "device-1",
+      collectedAt: "2026-05-22T00:00:10.000Z",
+      batchId: "batch-removed-1",
+      batchIndex: 0,
+      batchCount: 1,
+      tasks: [],
+      removedTaskIds: [
+        "agent-1:task:old-1",
+        " agent-1:task:old-2 ",
+        "",
+        "agent-1:task:old-1",
+      ],
+    });
+
+    expect(batch).toMatchObject({
+      batchId: "batch-removed-1",
+      removedTaskIds: ["agent-1:task:old-1", "agent-1:task:old-2"],
+      tasks: [],
+    });
+  });
 });

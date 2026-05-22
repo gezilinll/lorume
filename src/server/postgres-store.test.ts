@@ -49,7 +49,7 @@ describeDb("Postgres runtime store", () => {
             status: "succeeded",
           }),
           expect.objectContaining({
-            counts: { batches: 1, tasks: 2 },
+            counts: { batches: 1, removedTasks: 0, tasks: 2 },
             deviceId: "fixture-mac",
             snapshotType: "task_batch",
             status: "succeeded",
@@ -116,6 +116,52 @@ describeDb("Postgres runtime store", () => {
           runtimes: 1,
           tasks: 2,
         });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("soft tombstones removed task ids and restores them when they reappear", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        const removedTaskId = snapshot.tasks[0].id;
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch(snapshot));
+
+        const removalResult = await store.upsertRuntimeTaskBatch({
+          schemaVersion: "device-state-v2",
+          deviceId: snapshot.device.id,
+          collectedAt: "2026-05-22T00:10:00.000Z",
+          batchId: "remove-one-task",
+          batchIndex: 0,
+          batchCount: 1,
+          tasks: [],
+          removedTaskIds: [removedTaskId],
+        });
+
+        expect(removalResult).toMatchObject({
+          batchId: "remove-one-task",
+          counts: { batches: 1, removedTasks: 1, tasks: 0 },
+          removed: [{ id: removedTaskId }],
+        });
+        await expect(store.listRuntimeTasks()).resolves.toMatchObject({ total: 1 });
+        expect((await store.readRuntimeFleet()).summary.taskCount).toBe(1);
+        await expect(store.readEntityCounts()).resolves.toMatchObject({ tasks: 2 });
+
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...snapshot,
+          tasks: [snapshot.tasks[0]],
+        }));
+
+        await expect(store.listRuntimeTasks()).resolves.toMatchObject({ total: 2 });
+        expect((await store.readRuntimeFleet()).summary.taskCount).toBe(2);
       } finally {
         await store.close();
       }

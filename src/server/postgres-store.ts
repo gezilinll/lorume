@@ -43,6 +43,7 @@ export interface PostgresTaskBatchResult {
   deviceId: string;
   batchId: string;
   acked: Array<{ id: string; hash: string }>;
+  removed: Array<{ id: string }>;
   counts: Record<string, number>;
 }
 
@@ -210,8 +211,10 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           await upsertTask(client, batch.deviceId, entry.task, entry.hash);
           acked.push({ id: entry.task.id, hash: entry.hash });
         }
+        const removed = await markTasksStale(client, batch.deviceId, batch.removedTaskIds, batch.collectedAt);
         const counts = {
           batches: 1,
+          removedTasks: removed.length,
           tasks: acked.length,
         };
         await insertCollectorIngestion(client, {
@@ -223,7 +226,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           status: "succeeded",
           diagnostics: [],
         });
-        return { acked, batchId: batch.batchId, counts, deviceId: batch.deviceId };
+        return { acked, batchId: batch.batchId, counts, deviceId: batch.deviceId, removed };
       });
     },
     async recordFailedCollectorIngestion(input) {
@@ -262,7 +265,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         ),
         pool.query<{ raw: Runtime }>("SELECT raw FROM runtimes ORDER BY name"),
         pool.query<{ raw: Agent }>("SELECT raw FROM agents ORDER BY name"),
-        pool.query<{ raw: Task }>(`SELECT t.raw FROM tasks t ORDER BY ${taskOrderExpression} DESC, t.id DESC`),
+        pool.query<{ raw: Task }>(`SELECT t.raw FROM tasks t WHERE t.stale_at IS NULL ORDER BY ${taskOrderExpression} DESC, t.id DESC`),
       ]);
       const collectedAt = deviceResult.rows
         .map((row) => row.collected_at?.toISOString() ?? null)
@@ -504,11 +507,11 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, s
   await client.query(`
     INSERT INTO tasks (
       id, device_id, agent_id, task_type, user_message, agent_reply, status, source_external_id, channel, conversation,
-      creator, assignee, error, created_source_at, updated_source_at, sync_hash, raw, updated_at
+      creator, assignee, error, created_source_at, updated_source_at, sync_hash, stale_at, raw, updated_at
     )
     VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
-      $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17::jsonb, now()
+      $11::jsonb, $12::jsonb, $13, $14, $15, $16, NULL, $17::jsonb, now()
     )
     ON CONFLICT (id) DO UPDATE SET
       device_id = excluded.device_id,
@@ -526,6 +529,7 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, s
       created_source_at = excluded.created_source_at,
       updated_source_at = excluded.updated_source_at,
       sync_hash = excluded.sync_hash,
+      stale_at = NULL,
       raw = excluded.raw,
       updated_at = now()
   `, [
@@ -547,6 +551,24 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, s
     syncHash,
     toJson(task),
   ]);
+}
+
+async function markTasksStale(
+  client: pg.PoolClient,
+  deviceId: string,
+  taskIds: string[],
+  staleAt: string,
+): Promise<Array<{ id: string }>> {
+  const ids = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+  await client.query(`
+    UPDATE tasks
+    SET stale_at = $3,
+        updated_at = now()
+    WHERE device_id = $1
+      AND id = ANY($2::text[])
+  `, [deviceId, ids, toDate(staleAt)]);
+  return ids.map((id) => ({ id }));
 }
 
 function toCollectionHealthIngestions(rows: PostgresCollectorIngestion[]): CollectionHealthIngestion[] {
@@ -611,7 +633,7 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
   clause: string;
   values: unknown[];
 } {
-  const conditions: string[] = [];
+  const conditions: string[] = ["t.stale_at IS NULL"];
   const values: unknown[] = [];
 
   addTextFilter(conditions, values, "t.status", filters.status);

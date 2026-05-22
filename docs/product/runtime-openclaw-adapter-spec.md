@@ -1,8 +1,8 @@
-# Runtime Task Probe Spec
+# Runtime OpenClaw Adapter Spec
 
 版本：TinySpec v1.1
 
-本文定义 Runtime adapter 如何把平台侧只读证据转换成 Lorume 当前正式模型中的 `Task`。当前阶段是 OpenClaw-first：默认只启用 OpenClaw adapter，Slock、Multica、Codex 不执行命令、不读目录、不生成对象。
+本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent` 和 `Task`。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 adapter 是否启用由各自 spec 和 harness 决定。
 
 ## 模型边界
 
@@ -67,7 +67,7 @@ export interface Task {
 
 不允许在 Task 上保存 `runtimeId`、`run`、`execution` 或 `lastRun`。任务的当前状态只看 `Task.status`。
 
-`toolCalls` 是 Task 内嵌证据，不是独立产品实体。P0 不新增 first-class `ToolCall`、`Conversation`、`Execution`、`Evidence` 或 `Run` 表。后端可以把完整 Task JSON 存入 `tasks.raw`，但产品查询只应暴露经过权限和字段策略确认的字段。
+`toolCalls` 是 Task 内嵌证据，不是独立产品实体。当前模型不新增 first-class `ToolCall`、`Conversation`、`Execution`、`Evidence` 或 `Run` 表。后端可以把完整 Task JSON 存入 `tasks.raw`，但产品查询只应暴露经过权限和字段策略确认的字段。
 
 ## 状态映射
 
@@ -107,7 +107,7 @@ OpenClaw adapter 输出当前 `DeviceStateSnapshot` 内的 `runtimes`、`agents`
 
 ### OpenClaw 数据源优先级
 
-真实设备 profiling 显示，`openclaw tasks list` 主要是内部任务注册/近期状态视角，且其 `runId` 与 session/trajectory 的运行实例 id 不稳定重合。P0 不从 `openclaw tasks list` 生成产品 Task。
+真实设备 profiling 显示，`openclaw tasks list` 主要是内部任务注册/近期状态视角，且其 `runId` 与 session/trajectory 的运行实例 id 不稳定重合。当前实现不从 `openclaw tasks list` 生成产品 Task。
 
 | 用途 | 首选来源 | 说明 |
 |---|---|---|
@@ -135,7 +135,7 @@ OpenClaw session / trajectory 是本机历史日志，不能无限制塞进每�
 |---|---|---|
 | `conversation` | `sessionKey` 包含 `:dingtalk:` / `:webchat:`，或存在用户触达渠道 + conversation 证据 | 入库。 |
 | `scheduled` | `sessionKey` 包含 `:cron:`，或用户 prompt 以 `[cron:` 开头 | 入库。 |
-| manual / background / unknown | explicit、subagent、Multica workspace prompt、无法稳定分类 | P0 不入产品 Task，写 diagnostics。 |
+| manual / background / unknown | explicit、subagent、Multica workspace prompt、无法稳定分类 | 当前不入产品 Task，写 diagnostics。 |
 
 ### OpenClaw Agent 映射
 
@@ -154,16 +154,16 @@ Task 必须映射到本次采集到的 Agent。
 | `taskType` | adapter 分类 | `conversation` |
 | `id` | `${agentId}:task:${messageId 或 trajectoryRunId}` | `...:task:581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `agentId` | `sessionKey` + 本次采集到的 Agent | `...:runtime:openclaw:agent:main` |
-| `title` | 用户消息或 cron 标题摘要 | `帮我查一下如果我要查 Seedance...` |
-| `description` | 用户消息全文或 cron prompt | `帮我查一下如果我要查 Seedance 模型的调用次数...` |
+| `title` | 用户消息或 cron 标题摘要 | `帮我查询示例模型的调用成功率...` |
+| `description` | 用户消息全文或 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
 | `status` | adapter 映射后的 Lorume 状态 | `done` |
 | `source.kind` | adapter 固定值 | `openclaw` |
 | `source.externalId` | message id 或 trajectory run id | `581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `channel.kind` | `sessionKey` 或 DingTalk state | `dingtalk` |
-| `conversation.title` | sessions index、runtime context、DingTalk target | `日常工作提醒助手` |
-| `conversation.externalId` | DingTalk conversation id | `cid+hovty24irglegwfww0kjw==` |
-| `creator.name` | runtime context、origin label | `张良` |
-| `creator.externalId` | runtime context sender id | `100854680226406967` |
+| `conversation.title` | sessions index、runtime context、DingTalk target | `示例工作群` |
+| `conversation.externalId` | DingTalk conversation id | `cid+example` |
+| `creator.name` | runtime context、origin label | `示例用户` |
+| `creator.externalId` | runtime context sender id | `user-example-001` |
 | `toolCalls[]` | session JSONL toolCall/toolResult pair | 见下表。 |
 | `raw.openclaw.status` | session/trajectory/tool 原始状态 | `done` / `success` / `error` |
 | `raw.openclaw.sessionId` | session file name 或 sessions index | `09fe1f68-d410-4dd6-a79c-14dc33c92ad9` |
@@ -195,7 +195,7 @@ ToolCall 内嵌字段：
 - 不展示 `cid...`、手机号、open conversation id 或其他不可读外部 id 作为会话名。
 - 没有标题或摘要的外部对象不能伪造成任务卡；保留在 diagnostics 或日志中。
 - 未关联 Agent 的 OpenClaw execution、内部 heartbeat、恢复任务、approval followup 等系统事件不进入 Runs。
-- P0 不展示 tool call 明细；后端可先入库，前端展示另行设计。
+- 当前 Runs / Work Board 不展示 tool call 明细；后端可先入库，前端展示另行设计。
 
 ## Collector 边界
 

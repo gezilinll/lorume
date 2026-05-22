@@ -2,7 +2,7 @@
 
 版本：TinySpec v0.5
 
-Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前阶段已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及 `lorume.com` ECS 部署。
+Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及 ECS 部署形态。
 
 ## 目标
 
@@ -19,9 +19,9 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 ## 非目标
 
 - 不引入云数据库、复杂 secret manager 或完整审计系统。
-- 本阶段不做中控 Agent、聊天入口、任务调度、消息代理或外部平台写操作。
-- 本阶段不保留 file-backed latest JSON 作为正式后端路径；fixture 只允许作为开发期离线预览和测试辅助。
-- 本阶段不拆微服务，不引入外部消息队列，不做跨机调度。
+- 当前版本不做中控 Agent、聊天入口、任务调度、消息代理或外部平台写操作。
+- 当前版本不保留 file-backed latest JSON 作为正式后端路径；fixture 只允许作为开发期离线预览和测试辅助。
+- 当前版本不拆微服务，不引入外部消息队列，不做跨机调度。
 
 ## 环境依赖
 
@@ -103,7 +103,7 @@ Collector 保持主动上报：
 - `POST /api/device-state-snapshots`
 - `WS /api/device-control/ws`
 
-Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于 P0 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
+Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
 
 正式查询 API：
 
@@ -160,15 +160,14 @@ Production-like 本地验收形态：
 - `nginx.lorume.conf` 反代 `/api`、`/healthz`、`/readyz` 和 WebSocket upgrade 到 backend。
 - `docker-compose.prod-like.yml` 编排 Postgres、backend、frontend，用于 ECS 前的本地生产形态 smoke。
 
-ECS 部署形态：
+生产部署形态：
 
-- 域名：`lorume.com`。
+- 生产域名、ICP备案、DNS、TLS 证书和公网可达性属于部署/运维验证，不作为项目 harness 的必需条件。
 - 系统 Nginx 负责公网 `80/443`、HTTP 到 HTTPS 跳转、TLS 证书、静态前端反代、`/api`、`/healthz`、`/readyz` 和 WebSocket upgrade。
 - Docker Compose 运行 Postgres、backend 和 frontend 容器；frontend 绑定 `127.0.0.1:8080`，backend 绑定 `127.0.0.1:4173`，Postgres 不暴露宿主端口。
 - Nginx 必须配置足够的 `client_max_body_size`，当前为 `50m`，否则 collector 的 `device_state` 快照可能被 413 拒绝。
-- 证书由 certbot 管理，`lorume.com` 当前使用独立证书；`/.well-known/acme-challenge/` 保留给续签。
 
-后续以当前 ECS 形态为基线补齐生产鉴权、备份、监控和告警。
+后续以当前生产部署形态为基线补齐生产鉴权、备份、监控和告警。
 
 ## Harness
 

@@ -44,7 +44,7 @@ OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task
 
 - `conversation` Tasks 来自 OpenClaw session JSONL、trajectory JSONL、sessions index 和 DingTalk state。
 - `scheduled` Tasks 来自 OpenClaw cron session JSONL 和 trajectory JSONL。
-- `openclaw tasks list` 不得在 P0 创建产品 Task；它只能作为 diagnostics/raw 对照。
+- `openclaw tasks list` 不得在当前实现中创建产品 Task；它只能作为 diagnostics/raw 对照。
 - 有明确 task id / message id / trajectory id 时生成稳定 `Task.id`。
 - 能识别发起人时写入 `creator.name`。
 - 能识别群聊或私聊时写入可读 `conversation.title`。
@@ -62,7 +62,7 @@ OpenClaw DingTalk 兜底：
 
 ## 维护规则
 
-- Adapter 策略变化时，同步更新本 spec、`docs/product/runtime-task-probe.md` 和对应 harness。
+- Adapter 策略变化时，同步更新本 spec、`docs/product/runtime-openclaw-adapter-spec.md` 和对应 harness。
 - 真实设备验证结果只能沉淀为当前字段约束、脱敏 fixture 或可执行测试，不保留个人机器路径、原始 token 或临时 checklist。
 - 如果验收发现测试金字塔漏掉真实行为，先把缺口归类为 unit、script、backend API、DB integration 或 Playwright E2E，再补最小 harness。
 - 后端 WebSocket 只验证连接健康，不作为采集触发器。

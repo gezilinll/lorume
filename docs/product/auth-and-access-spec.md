@@ -194,4 +194,4 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 - 有待接受邀请的用户可以在登录后通过邀请链接加入组织。
 - 登录用户可以查看 Console；logout 后不能继续访问 Console API。
 - 设备 token 明文不入库，失效 token 无法上报。
-- 所有新规则进入 spec、AGENTS 和 harness；没有过程性 mockup 或临时调研文件残留。
+- Auth/access 规则变化必须同步更新本 spec、对应后端/前端实现和 auth harness。

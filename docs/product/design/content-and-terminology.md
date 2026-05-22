@@ -15,7 +15,7 @@ Lorume 文案应像生产工具：准确、短、可操作。不要把调试信�
 | Catalog | 对象目录 |
 | Last Seen / Last Sync | 最近同步 |
 
-Runtime 是 OpenClaw、Multica、Slock、Codex、Claude Code 等运行来源。Channel 是 DingTalk、Telegram、Slack 或默认渠道等用户触点。二者不能混用。
+Runtime 是 OpenClaw、Multica、Slock、Codex 等运行来源。Channel 是 DingTalk、Telegram、Slack 或默认渠道等用户触点。二者不能混用。
 
 ## Action Labels
 

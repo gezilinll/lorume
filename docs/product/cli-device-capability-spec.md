@@ -57,7 +57,7 @@
 - `tasks`
 - `diagnostics`
 
-OpenClaw-first 阶段默认只启用 OpenClaw adapter。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
+当前默认 runtime adapter allowlist 只启用 OpenClaw adapter。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
 
 ```sh
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw

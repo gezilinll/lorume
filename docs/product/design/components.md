@@ -36,7 +36,7 @@ The following primitives keep their current filenames during this redesign:
 
 - Badge copy is short and semantic.
 - Status badges use semantic color.
-- Runtime Fleet asset status badges use only `工作中`、`空闲`、`离线`、`异常`; `未知` stays out of asset status UI.
+- Runtime Fleet asset status badges use only `同步中`、`在线`、`离线`、`异常`; `未知` stays out of asset status UI.
 - Runtime/source/channel badges use neutral or info color unless expressing state.
 - A row should not accumulate badges that repeat the same fact.
 

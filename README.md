@@ -82,7 +82,7 @@ A single Run may contain multiple Tasks. For example, one Workflow Run may creat
 
 Lorume is in product definition and early engineering. The first implemented surfaces are a public homepage, email-code login with organization membership, Runtime Fleet with read-only Agent Skill probing, a read-only Runs / Work Board for Task visibility, organization settings, and top-right Operations / Notifications utility drawers. These surfaces are backed by the initial TypeScript Catalog Object model, the current `Device / Runtime / Agent / Task` runtime model, target-local Skill probe metadata, a device collector, Postgres-backed Operations and Notifications, a standalone local backend with Postgres-backed query APIs, and an outbound WebSocket device control channel for device connection health.
 
-Runtime and device registration can now complete a development and ECS loop against the OpenClaw-first collector path. The backend has a Postgres-backed service shape, production-like local deployment path, organization-based access, and an initial ECS deployment at `lorume.com`; backups, monitoring, multi-device orchestration, and execution control are still being built.
+Runtime and device registration can now complete a development and ECS loop against the current device collector path. The backend has a Postgres-backed service shape, production-like local deployment path, organization-based access, and an initial ECS deployment; backups, monitoring, multi-device orchestration, and execution control are still being built.
 
 The first product design package is available here:
 
@@ -90,7 +90,7 @@ The first product design package is available here:
 - [Design Specs](docs/product/design/README.md)
 - [Runtime & Device Registration Spec](docs/product/runtime-device-registration-spec.md)
 - [Runtime Fleet Page Spec](docs/product/runtime-fleet-page-spec.md)
-- [Runtime Task Probe Spec](docs/product/runtime-task-probe.md)
+- [Runtime OpenClaw Adapter Spec](docs/product/runtime-openclaw-adapter-spec.md)
 - [Runtime Task Acceptance Spec](docs/product/runtime-task-acceptance-spec.md)
 - [Backend Service Spec](docs/product/backend-service-spec.md)
 - [CLI Device Capability Spec](docs/product/cli-device-capability-spec.md)

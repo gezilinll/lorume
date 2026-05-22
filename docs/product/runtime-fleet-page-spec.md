@@ -2,7 +2,7 @@
 
 版本：TinySpec v1.1
 
-Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。OpenClaw-first 阶段页面只应展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
+Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。页面只展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
 
 ## 分层原则
 
@@ -16,7 +16,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 ## 目标
 
 - 展示设备的 device id、hostname、OS、架构、最近同步、本地 / 出口 IP 和 collector 元信息。
-- 展示设备上的 Runtime，当前 OpenClaw-first 默认只采集 OpenClaw。
+- 展示设备上的 Runtime；Runtime kind 候选项来自后端真实返回的数据。
 - 展示 Runtime 下的 Agent、归属 Runtime、采集状态、最近同步和派生 Task 数量。
 - 支持按关键词、Runtime kind、同步时间过滤。
 - Runtime kind 候选项必须来自当前后端数据中真实存在的 Runtime。
@@ -32,7 +32,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - 不把 Task 直接塞进 Runtime 详情作为任务看板。
 - 不提供 Runtime/Agent 的 working/idle 状态 badge。
 - 不展示 `Conversation`、`Execution`、`Capability`、`SourceRef` 作为一等对象。
-- 不在 OpenClaw-first 阶段展示 Slock、Multica、Codex 或 Claude Code 的采集结果。
+- 不展示后端没有返回、当前 adapter 未采集或缺少 harness 覆盖的 Runtime 结果。
 
 ## 数据源
 
@@ -100,7 +100,7 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 
 - 主导航可以进入 Runtime Fleet 页面。
 - 顶部统计显示设备、Runtime、Agent 数量；不显示独立异常统计卡。
-- Runtime 筛选项来自当前后端数据；OpenClaw-only 数据只显示 `全部 / OpenClaw`。
+- Runtime 筛选项来自当前后端数据；如果当前数据只有 OpenClaw，就只显示 `全部 / OpenClaw`。
 - Device、Runtime、Agent 状态只显示 `同步中 / 在线 / 离线 / 异常`。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
 - Agent 任务数量由 `Task.agentId` 聚合。

@@ -241,6 +241,9 @@ Runs / Run Trace、Governance Center、Agent Studio。
 Purpose:
 管理分布式执行设备，包括 M1、ECS、Browser Worker 和 OpenClaw Worker。它属于 Runtime / Execution Fabric，不负责语义编排。
 
+Note:
+这是未来 Runtime / Execution Fabric 的产品方向，不是当前 Runtime Fleet 页面。当前已实现的设备注册、collector 和 `Device / Runtime / Agent / Task` 数据规则以 Runtime 相关 TinySpec 为准。
+
 Primary users:
 平台管理员、OpenClaw 运维者、值班运营者。
 

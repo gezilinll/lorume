@@ -63,7 +63,7 @@ Rules:
 
 - Runtime and Channel are separate concepts.
 - Runtime Fleet does not provide Channel filtering.
-- Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `工作中`、`空闲`、`离线`、`异常`.
+- Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `同步中`、`在线`、`离线`、`异常`.
 - The layout should expose compact summary, Runtime/Agent lists, and a sticky detail inspector without feeling like stacked cards.
 - The left navigation stays fixed and keeps the identity entry at the bottom of the viewport.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.

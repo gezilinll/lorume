@@ -141,8 +141,8 @@ runtime:collector:${deviceId}:${snapshotType}:failed
 - Device 离线。
 - Device 恢复在线。
 - Collector 版本过旧。
-- Inventory 采集失败。
-- Work-state 采集失败。
+- Device-state 上报失败。
+- Task 采集或映射异常。
 - 数据同步完成。
 - 数据同步失败。
 - Runtime 探测异常。
@@ -153,7 +153,7 @@ runtime:collector:${deviceId}:${snapshotType}:failed
 - Runtime owner。
 - 组织 owner / admin，限采集失败、持续失败或 critical 场景。
 
-普通数据同步完成默认只进入 in-app，不主动发 email。人工触发的刷新、迁移或下发完成可以发 email 给申请人。
+普通数据同步完成默认只进入 in-app，不主动发 email。当前没有后端触发的设备刷新、采集下发或探测完成通知。
 
 最近同步时间过旧可以作为排查线索进入诊断视图或后续运维报告，但不单独生成“采集过期”通知；只有采集失败、adapter 异常、payload 结构不可用或持续失败升级才进入通知模型。
 
@@ -275,7 +275,7 @@ Operation 集成 API：
 
 业务集成：
 
-- Agent Skill 探测请求、成功、失败、不支持和设备未连接事件进入 runtime notification；重复失败按 dedupe/cooldown 聚合。
+- 设备上报的 Agent Skill probe snapshot 失败或不支持事件进入 runtime notification；重复失败按 dedupe/cooldown 聚合。当前不创建后端触发式探测请求通知。
 - 认证后的 Collector `device_state` 上报失败会聚合为 runtime warning 通知，并按 `30min` 邮件冷却投递给组织 owner / admin。
 - Device 离线持续发生时只按阈值升级通知。
 - Approval 待处理会通知审批人，通过或拒绝会通知申请人。

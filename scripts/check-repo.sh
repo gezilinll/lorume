@@ -26,12 +26,14 @@ required_paths=(
   "docs/product/design/review-and-harness.md"
   "docs/product/runtime-device-registration-spec.md"
   "docs/product/runtime-fleet-page-spec.md"
-  "docs/product/runtime-task-probe.md"
+  "docs/product/runtime-openclaw-adapter-spec.md"
   "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
   "docs/product/cli-device-capability-spec.md"
   "docs/product/agent-skill-probing-spec.md"
   "docs/product/auth-and-access-spec.md"
+  "docs/product/operation-job-runner-spec.md"
+  "docs/product/notification-spec.md"
   "playwright.config.ts"
   "e2e/db.ts"
   "e2e/runtime-fleet.spec.ts"
@@ -104,12 +106,14 @@ markdown_files = [
     Path("docs/product/design/review-and-harness.md"),
     Path("docs/product/runtime-device-registration-spec.md"),
     Path("docs/product/runtime-fleet-page-spec.md"),
-    Path("docs/product/runtime-task-probe.md"),
+    Path("docs/product/runtime-openclaw-adapter-spec.md"),
     Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
     Path("docs/product/agent-skill-probing-spec.md"),
     Path("docs/product/auth-and-access-spec.md"),
+    Path("docs/product/operation-job-runner-spec.md"),
+    Path("docs/product/notification-spec.md"),
 ]
 
 problems = []
@@ -120,7 +124,29 @@ forbidden_phrases = [
     ("docs/product/runtime-device-registration-spec.md", "展示名", "Device must not document a collected display name"),
     ("docs/product/runtime-device-registration-spec.md", "connectionMode", "Device must not document collected connectionMode"),
     ("docs/product/runtime-device-registration-spec.md", "Runtime 不可达或设备", "Device status must not roll up runtime health"),
+    ("AGENTS.md", "OpenClaw-first", "OpenClaw-first is an implementation phase, not a durable root rule"),
+    ("README.md", "OpenClaw-first", "README should stay business-facing and avoid temporary phase labels"),
+    ("docs/product/runtime-fleet-page-spec.md", "OpenClaw-first", "page specs should describe backend data consumption, not temporary adapter phases"),
+    ("docs/product/runtime-device-registration-spec.md", "OpenClaw-first", "device registration should document adapter allowlists, not temporary phase labels"),
+    ("docs/product/cli-device-capability-spec.md", "OpenClaw-first", "CLI spec should document adapter allowlists, not temporary phase labels"),
+    ("docs/product/notification-spec.md", "Inventory 采集失败", "notifications must use current device_state terminology"),
+    ("docs/product/notification-spec.md", "Work-state 采集失败", "notifications must use current Task/device_state terminology"),
+    ("docs/product/notification-spec.md", "人工触发的刷新、迁移或下发完成", "backend-triggered device refresh/downlink is not current behavior"),
+    ("docs/product/notification-spec.md", "Agent Skill 探测请求", "backend-triggered probe requests are not current behavior"),
+    ("docs/product/auth-and-access-spec.md", "所有新规则进入 spec、AGENTS 和 harness", "repo-wide rule placement belongs in AGENTS.md, not auth spec"),
+    ("docs/product/design/components.md", "Runtime Fleet asset status badges use only `工作中`", "Runtime Fleet asset statuses must be syncing/online/offline/error"),
+    ("docs/product/design/page-patterns.md", "object status: `工作中`", "Runtime Fleet object statuses must be syncing/online/offline/error"),
 ]
+
+if Path("docs/product/runtime-task-probe.md").exists():
+    problems.append("docs/product/runtime-task-probe.md: stale filename; use docs/product/runtime-openclaw-adapter-spec.md")
+
+plan_docs = sorted(path.as_posix() for path in Path("docs/superpowers/plans").glob("*.md"))
+if plan_docs:
+    problems.append(
+        "docs/superpowers/plans: process plans must not be committed as durable docs: "
+        + ", ".join(plan_docs)
+    )
 
 for md_path in markdown_files:
     text = md_path.read_text(encoding="utf-8")

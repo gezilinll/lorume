@@ -4,7 +4,7 @@ Agent Skill probing is Lorume's current read-only view of Skill metadata that al
 
 ## Boundaries
 
-- Lorume may store device-reported target-local probe metadata snapshots and display the latest read-only status through Runtime Fleet. P0 does not request target devices to run a probe.
+- Lorume may store device-reported target-local probe metadata snapshots and display the latest read-only status through Runtime Fleet. The current contract does not request target devices to run a probe.
 - The target device/agent remains the source of truth for local Skill directories.
 - Lorume does not import, edit, publish, assign, sync, migrate, install, or analyze Skill content.
 - The `lorume` CLI remains deterministic and does not decide how a Skill should be interpreted or installed.
@@ -40,7 +40,7 @@ Probe status values are:
 - `GET /api/agents/:agentId/skill-probe` returns the latest read-only probe snapshot for an Agent. If no snapshot exists, it returns an `unknown` snapshot rather than inventing Skill data.
 - `POST /api/agent-skill-probe-snapshots` accepts collector/device reported probe snapshots and stores normalized metadata only.
 
-Backend-triggered probe requests and device-disconnected request states are not part of P0. Notification copy for stored probe failures must avoid raw tokens, file contents, full logs, and external private payloads.
+Backend-triggered probe requests and device-disconnected request states are not part of the current contract. Notification copy for stored probe failures must avoid raw tokens, file contents, full logs, and external private payloads.
 
 ## Runtime Fleet Display
 

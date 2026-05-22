@@ -2,7 +2,7 @@
 
 版本：TinySpec v0.6
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化 device state snapshot。当前阶段采用 OpenClaw-first：只把 OpenClaw 迁移到新的统一模型，其他 Runtime adapter 默认不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化 device state snapshot。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
@@ -19,7 +19,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
 - 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
-- 不在本阶段采集 Slock、Multica、Codex 或 Claude Code。Codex 仍可作为未来 Runtime kind 保留；Claude Code 从当前支持列表移除。
+- 默认不采集 Slock、Multica 或 Codex。Codex 仍可作为未来 Runtime kind 保留；Claude Code 从当前支持列表移除。
 - 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
@@ -73,7 +73,7 @@ Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含�
 
 ### Runtime
 
-Runtime 表示设备上的可识别运行环境。当前支持类型为 `openclaw`、`slock`、`multica`、`codex`，但 OpenClaw-first 阶段默认只采集 `openclaw`。
+Runtime 表示设备上的可识别运行环境。当前支持类型为 `openclaw`、`slock`、`multica`、`codex`，但默认 adapter allowlist 只采集 `openclaw`。
 
 ```ts
 export type RuntimeKind = "openclaw" | "slock" | "multica" | "codex";
@@ -239,7 +239,7 @@ export interface DeviceStateSnapshot {
 
 ## OpenClaw Adapter
 
-OpenClaw 是本阶段唯一默认启用的 runtime adapter。
+OpenClaw 是当前唯一默认启用的 runtime adapter。详细字段映射见 `docs/product/runtime-openclaw-adapter-spec.md`。
 
 | Lorume 对象 | OpenClaw 来源 | 规则 |
 |---|---|---|
@@ -272,7 +272,7 @@ Collector / CLI 必须支持 runtime adapter allowlist：
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ```
 
-OpenClaw-first 阶段默认 allowlist 为 `openclaw`。被禁用的 adapter 不得执行命令、读取目录或生成对象。
+当前默认 allowlist 为 `openclaw`。被禁用的 adapter 不得执行命令、读取目录或生成对象。
 
 ## 安装与卸载
 
@@ -287,7 +287,7 @@ OpenClaw-first 阶段默认 allowlist 为 `openclaw`。被禁用的 adapter 不�
 ## 验收
 
 - `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出 `DeviceStateSnapshot`。
-- 默认采集只执行 OpenClaw adapter，不执行 Slock、Multica、Codex 或 Claude 命令。
+- 默认采集 allowlist 只执行 OpenClaw adapter，不执行 Slock、Multica 或 Codex 命令。
 - 后端能接收 `POST /api/device-state-snapshots`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。

@@ -25,7 +25,7 @@ assert(nginxConfig.includes("proxy_set_header Upgrade $http_upgrade"), "nginx mu
 assert(nginxConfig.includes("client_max_body_size 50m"), "nginx must allow collector device-state payloads");
 
 const backendDockerfile = read("Dockerfile.backend");
-assert(backendDockerfile.includes("node scripts/db-migrate.mjs"), "backend container must run migrations before start");
+assert(backendDockerfile.includes("node scripts/db-setup.mjs"), "backend container must apply the current schema baseline before start");
 assert(backendDockerfile.includes("node dist/backend/backend-server.mjs"), "backend container must start bundled backend");
 for (const installerFile of [
   "scripts/install-device-collector.sh",

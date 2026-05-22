@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createPostgresAuthStore } from "../auth/auth-store";
 import {
   createTemporaryPostgresDatabase,
-  runMigrationsScript,
+  runDatabaseSchemaScript,
   shouldRunPostgresTests,
 } from "../test/postgres";
 import { createPostgresOperationStore } from "./operation-store";
@@ -13,7 +13,7 @@ describeDb("Postgres operation store", () => {
   it("lists operations by organization and exposes recent jobs for details", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {
@@ -83,7 +83,7 @@ describeDb("Postgres operation store", () => {
   it("claims one due job with a lease and completes the owning operation", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {
@@ -149,7 +149,7 @@ describeDb("Postgres operation store", () => {
   it("lets a job move the owning operation into a manual-step state", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {
@@ -208,7 +208,7 @@ describeDb("Postgres operation store", () => {
   it("updates notification operations without an executable job", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {
@@ -259,7 +259,7 @@ describeDb("Postgres operation store", () => {
   it("requeues failed jobs until max attempts and then fails the operation", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       try {

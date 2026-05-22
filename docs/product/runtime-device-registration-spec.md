@@ -256,12 +256,12 @@ OpenClaw 是当前唯一默认启用的 runtime adapter。详细字段映射见 
 | Agent | OpenClaw health/status agent 列表和 config agent 列表 | 每个真实 OpenClaw agent id 生成一个 Agent。 |
 | Task | OpenClaw session / trajectory / DingTalk state 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
 
-Task 上报窗口：
+Task 上报范围：
 
-- 默认最多保留最近 `200` 个 OpenClaw Task。
-- 默认 Task 数组 JSON 预算为 `8MiB`，再交由 collector 按 `512KiB / 1000 tasks` 拆 batch。
+- Adapter 必须输出所有符合产品标准的 OpenClaw Task，不按数量或字节窗口丢弃已识别任务。
 - 排序使用 `updatedAt -> createdAt` 的最近时间优先。
-- 当前不上传 `toolCalls`。如果窗口超限，丢弃更旧 Task，而不是改写被保留 Task。
+- 当前不上传 `toolCalls`。
+- 体积控制由 collector 按 `512KiB / 1000 tasks` 拆分 `/api/device-task-batches`，并通过本地 ACK cache 与 Task hash 控制重传。
 
 稳定 ID：
 

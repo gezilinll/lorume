@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import deviceStateFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import { createDeviceStateSnapshot, type DeviceStateSnapshot } from "../runtime/runtime-model";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
-import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
+import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createPostgresStore } from "./postgres-store";
 
 const describeDb = shouldRunPostgresTests() ? describe : describe.skip;
@@ -11,7 +11,7 @@ describeDb("Postgres runtime store", () => {
   it("upserts device-state snapshots into current Device Runtime Agent Task tables", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
@@ -92,7 +92,7 @@ describeDb("Postgres runtime store", () => {
   it("keeps metadata aligned without deleting already acknowledged Tasks", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
@@ -127,7 +127,7 @@ describeDb("Postgres runtime store", () => {
   it("persists task type for conversation and scheduled task queries", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
@@ -182,7 +182,7 @@ describeDb("Postgres runtime store", () => {
   it("stores latest read-only Agent Skill probe metadata", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = {
@@ -231,7 +231,7 @@ describeDb("Postgres runtime store", () => {
   it("searches and paginates tasks with stable current-model cursors", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();

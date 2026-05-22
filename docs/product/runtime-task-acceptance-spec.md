@@ -54,7 +54,7 @@ OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task
 - Adapter 映射 raw OpenClaw status 到 Lorume `Task.status`，并保留 raw status 到 `raw.openclaw.status`。
 - 无法归属 Agent、缺少 `userMessage` 或只有内部运行证据时跳过，并写 diagnostic warning。
 - `done` conversation 缺少 `agentReply` 可以入库，但必须写 diagnostic warning。
-- OpenClaw session / trajectory 历史数据长期累积时，adapter 只输出最近任务有界窗口，collector 再分批上报；不得通过扩大后端请求体上限来掩盖设备侧数据失控。
+- OpenClaw session / trajectory 历史数据长期累积时，adapter 仍输出所有符合产品标准的 Task；collector 负责分批上报、ACK cache 和 hash-based 重传，不通过 adapter 窗口丢弃数据。
 
 OpenClaw DingTalk 兜底：
 

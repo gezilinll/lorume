@@ -458,6 +458,11 @@ exit 91
       prompt: "[cron:daily-summary] 汇总今天的项目风险",
       sessionKey: "agent:main:cron:daily-summary",
     });
+    writeOpenClawTrajectoryFile(sessionDir, "cron-interrupted", {
+      finalStatus: "interrupted",
+      prompt: "[cron:weekly-report 工具产研团队昨日日报文档-工具能力合伙人] 生成昨天的团队日报",
+      sessionKey: "agent:main:cron:weekly-report",
+    });
 
     const output = runCli([
       "collect",
@@ -473,14 +478,16 @@ exit 91
       },
     });
 
-    expect(output.tasks).toHaveLength(1);
-    expect(output.tasks[0]).toMatchObject({
+    expect(output.tasks).toHaveLength(2);
+    expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-daily-summary"))).toMatchObject({
       id: "test-device:runtime:openclaw:agent:main:task:cron-daily-summary",
       agentId: "test-device:runtime:openclaw:agent:main",
       taskType: "scheduled",
       userMessage: "[cron:daily-summary] 汇总今天的项目风险",
       status: "done",
       source: { kind: "openclaw", externalId: "cron-daily-summary" },
+      channel: { kind: "other", name: "OpenClaw Cron", externalId: "daily-summary" },
+      conversation: { title: "daily-summary", externalId: "daily-summary", lastActivityAt: "2026-05-21T04:03:00.000Z" },
       assignee: { name: "main", externalId: "main" },
       raw: {
         openclaw: {
@@ -491,8 +498,18 @@ exit 91
         },
       },
     });
-    expect(output.tasks[0]).not.toHaveProperty("channel");
-    expect(output.tasks[0]).not.toHaveProperty("conversation");
+    expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-interrupted"))).toMatchObject({
+      taskType: "scheduled",
+      userMessage: "[cron:weekly-report 工具产研团队昨日日报文档-工具能力合伙人] 生成昨天的团队日报",
+      status: "cancelled",
+      channel: { kind: "other", name: "OpenClaw Cron", externalId: "weekly-report" },
+      conversation: {
+        title: "工具产研团队昨日日报文档-工具能力合伙人",
+        externalId: "weekly-report",
+        lastActivityAt: "2026-05-21T04:03:00.000Z",
+      },
+      raw: { openclaw: { status: "interrupted" } },
+    });
     expect(output.tasks[0]).not.toHaveProperty("title");
     expect(output.tasks[0]).not.toHaveProperty("description");
   });
@@ -594,7 +611,7 @@ exit 91
     ]));
   });
 
-  it("limits OpenClaw trajectory tasks to the most recent snapshot window", () => {
+  it("does not cap OpenClaw trajectory tasks by count", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-window-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "window");
@@ -646,8 +663,6 @@ exit 91
       env: {
         LORUME_COLLECTOR_HOME: root,
         LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
-        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS: "3",
-        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES: "100000",
         PATH: binDir,
       },
     });
@@ -656,11 +671,12 @@ exit 91
       "test-device:runtime:openclaw:agent:main:task:run-window-5",
       "test-device:runtime:openclaw:agent:main:task:run-window-4",
       "test-device:runtime:openclaw:agent:main:task:run-window-3",
+      "test-device:runtime:openclaw:agent:main:task:run-window-2",
+      "test-device:runtime:openclaw:agent:main:task:run-window-1",
     ]);
-    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 5 to 3"));
   });
 
-  it("keeps OpenClaw task snapshots inside the byte budget without uploading tool call payloads", () => {
+  it("does not drop large OpenClaw tasks while omitting tool call payloads", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-bytes-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "bytes");
@@ -718,18 +734,17 @@ exit 91
       env: {
         LORUME_COLLECTOR_HOME: root,
         LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
-        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_TASKS: "10",
-        LORUME_OPENCLAW_TASK_SNAPSHOT_MAX_BYTES: "5000",
         PATH: binDir,
       },
     });
 
-    expect(output.tasks).toHaveLength(1);
-    expect(output.tasks[0].id).toBe("test-device:runtime:openclaw:agent:main:task:run-large-3");
+    expect(output.tasks.map((task: { id: string }) => task.id)).toEqual([
+      "test-device:runtime:openclaw:agent:main:task:run-large-3",
+      "test-device:runtime:openclaw:agent:main:task:run-large-2",
+      "test-device:runtime:openclaw:agent:main:task:run-large-1",
+    ]);
     expect(output.tasks[0].userMessage).toContain("大参数任务 3");
     expect(output.tasks[0]).not.toHaveProperty("toolCalls");
-    expect(Buffer.byteLength(JSON.stringify(output.tasks), "utf8")).toBeLessThanOrEqual(5000);
-    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 3 to 1"));
   });
 
   it("probes read-only Agent Skill metadata from explicit local roots", () => {
@@ -930,7 +945,7 @@ function writeOpenClawTrajectoryFile(
   sessionDir: string,
   runId: string,
   options: {
-    finalStatus: "success" | "error";
+    finalStatus: "success" | "error" | "interrupted";
     prompt: string;
     sessionKey?: string;
     traceError?: string;

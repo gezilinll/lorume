@@ -63,7 +63,7 @@
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ```
 
-`DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须使用最近任务有界窗口，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
+`DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须输出所有符合产品标准的 Task，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
 ### `lorume collector stop --json --install-dir <path>`
 

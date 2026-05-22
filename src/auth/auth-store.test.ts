@@ -3,7 +3,7 @@ import { hashSecret } from "./auth-crypto";
 import { createPostgresAuthStore } from "./auth-store";
 import {
   createTemporaryPostgresDatabase,
-  runMigrationsScript,
+  runDatabaseSchemaScript,
   shouldRunPostgresTests,
 } from "../test/postgres";
 
@@ -15,7 +15,7 @@ describeDb("Postgres auth store", () => {
     const now = new Date("2026-05-12T10:00:00.000Z");
 
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const store = createPostgresAuthStore({ connectionString: database.url });
 
       try {

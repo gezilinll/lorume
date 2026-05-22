@@ -10,7 +10,7 @@ import { createPostgresNotificationStore } from "../notifications/notification-s
 import { createPostgresOperationStore } from "../operations/operation-store";
 import { createDeviceStateSnapshot } from "../runtime/runtime-model";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
-import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
+import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createLorumeBackendServer, type LorumeBackendServer } from "./backend-server";
 import {
   deviceInstallerPackageManifest,
@@ -175,7 +175,7 @@ describeDb("standalone Lorume backend server with Postgres", () => {
     const database = await createTemporaryPostgresDatabase();
     let backend: LorumeBackendServer | null = null;
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       backend = await startBackend({ databaseUrl: database.url });
       const snapshot = createDeviceStateSnapshot({
         ...deviceStateFixture,
@@ -211,7 +211,7 @@ describeDb("standalone Lorume backend server with Postgres", () => {
     const database = await createTemporaryPostgresDatabase();
     let backend: LorumeBackendServer | null = null;
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const operationStore = createPostgresOperationStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });

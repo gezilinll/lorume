@@ -110,14 +110,7 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 
 ### OpenClaw Task Snapshot 窗口
 
-OpenClaw session / trajectory 是本机历史日志，不能无限制塞进每分钟上报。Adapter 在生成产品 Task 后必须先按最近活动时间排序，再应用当前窗口：
-
-| 约束 | 默认值 | 说明 |
-|---|---:|---|
-| 最大 Task 数 | `200` | 保留最近 Task，丢弃更旧 Task。 |
-| Task 数组最大 JSON 字节 | `8MiB` | 先在 adapter 侧避免本地历史日志失控，再由 collector 拆成更小的 Task batch。 |
-
-排序时间使用 `updatedAt`，缺失时使用 `createdAt`。被窗口裁掉的 Task 不进入本次采集输出，并写 diagnostics warning。需要降低体积时优先丢弃更旧 Task，不改写被保留 Task。
+OpenClaw adapter 不按数量或字节窗口裁剪符合产品标准的 Task。Adapter 在生成产品 Task 后只按最近活动时间排序，排序时间使用 `updatedAt`，缺失时使用 `createdAt`；所有符合标准的 Task 交给 collector 的 Task batch/hash ACK 机制分批上报。体积控制属于 collector 传输层分批问题，不允许 adapter 静默丢弃已识别的产品 Task。
 
 ### OpenClaw Task 类型
 

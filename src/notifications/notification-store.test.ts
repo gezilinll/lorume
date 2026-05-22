@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createPostgresAuthStore } from "../auth/auth-store";
 import {
   createTemporaryPostgresDatabase,
-  runMigrationsScript,
+  runDatabaseSchemaScript,
   shouldRunPostgresTests,
 } from "../test/postgres";
 import { createPostgresNotificationStore } from "./notification-store";
@@ -13,7 +13,7 @@ describeDb("Postgres notification store", () => {
   it("reads a notification thread and its deliveries for an in-app detail view", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });
       try {
@@ -63,7 +63,7 @@ describeDb("Postgres notification store", () => {
   it("tracks in-app read state per notification recipient", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });
       try {
@@ -116,7 +116,7 @@ describeDb("Postgres notification store", () => {
   it("aggregates duplicate events and always records in-app delivery", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });
       try {
@@ -181,7 +181,7 @@ describeDb("Postgres notification store", () => {
   it("rate limits duplicate email deliveries by thread cooldown", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });
       try {

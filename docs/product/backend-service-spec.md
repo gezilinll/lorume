@@ -33,7 +33,7 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 - Docker Compose v2。
 - Postgres 15 及以上。默认通过 Docker 容器运行，不要求本机安装 `psql`。
 
-开发机可以通过 `npm run db:up` 启动 Postgres，通过 `npm run db:migrate` 应用 schema。Docker 镜像拉取失败属于环境问题，不改变代码路径或正式验收规则。
+开发机可以通过 `npm run db:up` 启动 Postgres，通过 `npm run db:setup` 应用 schema。Docker 镜像拉取失败属于环境问题，不改变代码路径或正式验收规则。
 
 ## 架构
 
@@ -159,7 +159,7 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
 Production-like 本地验收形态：
 
 - `npm run build:backend` 使用 `vite.backend.config.ts` 生成 `dist/backend/backend-server.mjs`。
-- `Dockerfile.backend` 构建 backend image，并在启动前执行 migration。
+- `Dockerfile.backend` 构建 backend image，并在启动前执行 schema setup。
 - `Dockerfile.frontend` 构建 Vite 静态前端，并通过 Nginx 提供静态资源。
 - `nginx.lorume.conf` 反代 `/api`、`/healthz`、`/readyz` 和 WebSocket upgrade 到 backend。
 - `docker-compose.prod-like.yml` 编排 Postgres、backend、frontend，用于 ECS 前的本地生产形态 smoke。
@@ -177,7 +177,7 @@ Production-like 本地验收形态：
 
 后端正式化必须补齐以下检查：
 
-- migration harness：迁移能在空 Postgres 上创建 schema，重复执行有可解释结果。
+- schema harness：当前 `db/schema.sql` 能在空 Postgres 上创建最新 schema，重复执行保持同一 schema 结果。
 - repository harness：`device_state` snapshot 能 upsert 并查询 Device / Runtime / Agent / Task。
 - HTTP API harness：collector POST、runtime fleet query、runtime task query、ingestion query。
 - readiness harness：`/healthz` 和 `/readyz` 能区分进程存活与数据库可用。

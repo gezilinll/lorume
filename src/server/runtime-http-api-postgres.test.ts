@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createPostgresAuthStore } from "../auth/auth-store";
 import { createPostgresNotificationStore } from "../notifications/notification-store";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
-import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
+import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createPostgresStore, type PostgresStore } from "./postgres-store";
 import { createRuntimeControlChannel } from "./runtime-control-channel";
 import { createRuntimeHttpApiHandler } from "./runtime-http-api";
@@ -24,7 +24,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("serves readiness when Postgres is available", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const postgresStore = createPostgresStore({ connectionString: database.url });
       try {
         const { baseUrl } = await startRuntimeApi(postgresStore);
@@ -44,7 +44,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("persists unified device-state snapshots and serves current query endpoints", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const postgresStore = createPostgresStore({ connectionString: database.url });
       try {
         const { baseUrl } = await startRuntimeApi(postgresStore);
@@ -136,7 +136,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("records failed collector ingestions for invalid device-state snapshots", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const postgresStore = createPostgresStore({ connectionString: database.url });
       try {
         const { baseUrl } = await startRuntimeApi(postgresStore);
@@ -177,7 +177,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("derives device diagnostics from local connection and device-state ingestion", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const postgresStore = createPostgresStore({ connectionString: database.url });
       try {
         const { baseUrl, store } = await startRuntimeApi(postgresStore);
@@ -217,7 +217,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("marks diagnostics abnormal after invalid device-state ingestion", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const postgresStore = createPostgresStore({ connectionString: database.url });
       try {
         const { baseUrl, store } = await startRuntimeApi(postgresStore);
@@ -253,7 +253,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
   it("creates a runtime notification when authenticated device-state ingestion fails", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
-      runMigrationsScript(database.url);
+      runDatabaseSchemaScript(database.url);
       const authStore = createPostgresAuthStore({ connectionString: database.url });
       const notificationStore = createPostgresNotificationStore({ connectionString: database.url });
       const postgresStore = createPostgresStore({ connectionString: database.url });

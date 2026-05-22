@@ -41,9 +41,9 @@ export async function createTemporaryPostgresDatabase(): Promise<TemporaryPostgr
   };
 }
 
-/** Run the production migration script against a database URL. */
-export function runMigrationsScript(databaseUrl: string): void {
-  execFileSync(process.execPath, [path.join(repoRoot, "scripts/db-migrate.mjs")], {
+/** Apply the current database schema baseline against a database URL. */
+export function runDatabaseSchemaScript(databaseUrl: string): void {
+  execFileSync(process.execPath, [path.join(repoRoot, "scripts/db-setup.mjs")], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "pipe",

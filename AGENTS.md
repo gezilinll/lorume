@@ -48,8 +48,8 @@ Current source of truth:
 - `src/backend/device-installer-http-api.ts`: public secret-free installer and device package download API used by one-line device registration commands.
 - `src/ui/PixelLogo.tsx` and `public/favicon.svg`: shared brand mark source for app chrome and browser tab metadata.
 - `vite.backend.config.ts`: backend bundle entry for production-like Node execution.
-- `db/migrations/`: Postgres schema migrations for the formal backend service.
-- `scripts/db-migrate.mjs`: local Postgres migration runner.
+- `db/schema.sql`: current Postgres schema baseline for the formal backend service.
+- `scripts/db-setup.mjs`: local Postgres schema setup script.
 - `scripts/check-deploy-config.mjs`: production-like deploy config smoke check.
 - `scripts/smoke-production.mjs`: deployed environment smoke check for public health, readiness, installer assets, and optional authenticated Runtime / Runs read paths.
 - `scripts/lorume.mjs`: deterministic local CLI for device identity, snapshot-backed runtime listing, authorized connector status, and safe explicit file copy.
@@ -92,7 +92,7 @@ Current source of truth:
 - Collector HTTP writes are split by concern: `/api/device-state-snapshots` accepts Device / Runtime / Agent metadata with `tasks: []`, and `/api/device-task-batches` accepts changed Task batches with hash ACKs. Do not restore full Task payloads inside metadata snapshots.
 - Do not expose Runtime `endpoint`, Runtime `capabilities`, Runtime/Agent `sourceRefs`, Agent `origin`, or Agent `load` in the product API/UI model. Adapter commands, external ids, raw evidence, and path details belong in adapter internals, diagnostics, logs, or DB raw fields.
 - Runtime adapters may execute only when enabled by the current documented adapter allowlist and covered by harness. Disabled adapters must not execute commands, read local directories, or emit objects.
-- Runtime adapter snapshots must stay bounded before upload: keep emitted Task windows under the documented count and byte budgets, write diagnostics when truncating, and do not raise backend request limits as a substitute for fixing runaway device snapshots.
+- Runtime adapters must emit every Task that meets the product standard. Adapter-level count or byte caps must not silently drop recognized Task data; volume control belongs to collector task batching, local ACK cache, and hash-based resend rules.
 - Keep Runtime and Channel separate in UI and query models. OpenClaw, Multica, Slock, and Codex are Runtime / platform sources; Runs Channel filters are only user-facing touchpoints such as DingTalk, Telegram, Slack, or future detected message channels.
 - Runs / Work Board must stay task-context first: do not render unlinked runtime executions, listening status, capability gaps, adapter evidence, raw limitations, command names, or debugging notes as user-facing task cards. If a platform cannot provide creator, assignee, group/channel, message excerpt, or execution state for a real work item, show a concise unsupported/unknown/user-facing fallback and keep details in logs/spec/harness. Do not display raw DingTalk `cid...`, phone numbers, open conversation ids, or other opaque external ids as conversation names. For DingTalk direct chats without a readable person name, show `DingTalk 私聊`; for groups without a readable name, show `DingTalk 群聊`. A real work item with no linked execution should say `未关联执行`, not `不支持采集`.
 - Use the repository commit convention for all new commits: `type(scope): subject` or `type: subject`, with `type` in `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `build`, `ci`, `perf`, `style`, or `revert`. Keep subjects concise and scannable; Chinese subjects are allowed when clearer. Run `npm run setup:git-hooks` once per checkout so `.githooks/commit-msg` blocks future untyped commits.
@@ -123,10 +123,10 @@ Current spec and harness mapping:
 | Runtime Fleet page | `docs/product/runtime-fleet-page-spec.md`, `src/runtime/runtime-fleet-query.ts`, `src/runtime/runtime-collection-health.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/runtime-fleet-query.test.ts`, `src/runtime/runtime-collection-health.test.ts`, `src/App.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:quick`, `npm run check:e2e` |
 | Normalized errors and structured logs | `src/errors/error-catalog.ts`, `src/logging/structured-logger.ts`, `docs/product/backend-service-spec.md`, `docs/product/runtime-device-registration-spec.md` | `src/errors/error-catalog.test.ts`, `src/logging/structured-logger.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `npm run check:backend`, `npm run check:runtime`, `npm run check:quick` |
 | Runtime snapshot and control backend | `docs/product/runtime-device-registration-spec.md`, `src/runtime/runtime-collection-health.ts`, `src/server/runtime-device-state-store.ts`, `src/server/runtime-control-channel.ts`, `src/server/runtime-http-api.ts`, `src/backend/backend-server.ts` | `src/runtime/runtime-collection-health.test.ts`, `src/server/runtime-device-state-store.test.ts`, `src/server/runtime-control-channel.test.ts`, `src/server/runtime-http-api.test.ts`, `src/runtime/device-collector-script.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:backend`, `npm run check:backend:e2e` |
-| Backend service formalization | `docs/product/backend-service-spec.md`, `src/backend/backend-server.ts`, `src/server/postgres-store.ts`, `db/migrations/`, `scripts/db-migrate.mjs`, `scripts/dev-e2e.ts`, `scripts/dev-backend-e2e.ts`, `scripts/smoke-production.mjs`, `vite.backend.config.ts`, `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml` | `src/backend/backend-server.test.ts`, `src/backend/dev-e2e-config.test.ts`, `src/server/db-migrate.test.ts`, `src/server/postgres-store.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `e2e/runtime-backend-api.spec.ts`, `scripts/check-deploy-config.mjs`, `npm run check:backend:standalone`, `npm run check:db`, `npm run check:backend`, `npm run check:backend:e2e`, `npm run check:deploy`, `npm run smoke:production` |
-| Auth and access | `docs/product/auth-and-access-spec.md`, `src/auth/`, `db/migrations/` | `src/auth/auth-crypto.test.ts`, `src/auth/auth-store.test.ts`, `src/auth/auth-http-api.test.ts`, `src/server/runtime-http-api.test.ts`, `npm run check:backend`, `npm run check:db`, `npm run check:quick` |
-| Operation and Job Runner persistence/API | `docs/product/operation-job-runner-spec.md`, `db/migrations/0005_operations_notifications.sql`, `db/migrations/0009_agent_skill_probing.sql`, `src/operations/operation-store.ts`, `src/operations/operation-http-api.ts`, `src/operations/job-runner.ts` | `src/operations/operation-store.test.ts`, `src/operations/operation-http-api.test.ts`, `src/operations/job-runner.test.ts`, `src/backend/backend-server.test.ts`, `src/server/db-migrate.test.ts`, `npm run check:backend`, `npm run check:db` |
-| Notification persistence, dedupe, runtime ingestion alerts, Agent Skill probe lifecycle, and in-app API | `docs/product/notification-spec.md`, `db/migrations/0005_operations_notifications.sql`, `db/migrations/0009_agent_skill_probing.sql`, `src/notifications/notification-store.ts`, `src/notifications/notification-http-api.ts`, `src/operations/job-runner.ts`, `src/server/runtime-http-api.ts` | `src/notifications/notification-store.test.ts`, `src/notifications/notification-http-api.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `src/operations/job-runner.test.ts`, `src/backend/backend-server.test.ts`, `src/server/db-migrate.test.ts`, `npm run check:backend`, `npm run check:db` |
+| Backend service formalization | `docs/product/backend-service-spec.md`, `src/backend/backend-server.ts`, `src/server/postgres-store.ts`, `db/schema.sql`, `scripts/db-setup.mjs`, `scripts/dev-e2e.ts`, `scripts/dev-backend-e2e.ts`, `scripts/smoke-production.mjs`, `vite.backend.config.ts`, `Dockerfile.backend`, `Dockerfile.frontend`, `nginx.lorume.conf`, `docker-compose.prod-like.yml` | `src/backend/backend-server.test.ts`, `src/backend/dev-e2e-config.test.ts`, `src/server/db-schema.test.ts`, `src/server/postgres-store.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `e2e/runtime-backend-api.spec.ts`, `scripts/check-deploy-config.mjs`, `npm run check:backend:standalone`, `npm run check:db`, `npm run check:backend`, `npm run check:backend:e2e`, `npm run check:deploy`, `npm run smoke:production` |
+| Auth and access | `docs/product/auth-and-access-spec.md`, `src/auth/`, `db/schema.sql` | `src/auth/auth-crypto.test.ts`, `src/auth/auth-store.test.ts`, `src/auth/auth-http-api.test.ts`, `src/server/runtime-http-api.test.ts`, `npm run check:backend`, `npm run check:db`, `npm run check:quick` |
+| Operation and Job Runner persistence/API | `docs/product/operation-job-runner-spec.md`, `db/schema.sql`, `src/operations/operation-store.ts`, `src/operations/operation-http-api.ts`, `src/operations/job-runner.ts` | `src/operations/operation-store.test.ts`, `src/operations/operation-http-api.test.ts`, `src/operations/job-runner.test.ts`, `src/backend/backend-server.test.ts`, `src/server/db-schema.test.ts`, `npm run check:backend`, `npm run check:db` |
+| Notification persistence, dedupe, runtime ingestion alerts, Agent Skill probe lifecycle, and in-app API | `docs/product/notification-spec.md`, `db/schema.sql`, `src/notifications/notification-store.ts`, `src/notifications/notification-http-api.ts`, `src/operations/job-runner.ts`, `src/server/runtime-http-api.ts` | `src/notifications/notification-store.test.ts`, `src/notifications/notification-http-api.test.ts`, `src/server/runtime-http-api-postgres.test.ts`, `src/operations/job-runner.test.ts`, `src/backend/backend-server.test.ts`, `src/server/db-schema.test.ts`, `npm run check:backend`, `npm run check:db` |
 | Operations utility drawer | `docs/product/operation-job-runner-spec.md`, `src/console/ConsoleUtilityDrawer.tsx`, `src/App.tsx` | `src/console/ConsoleUtilityDrawer.test.tsx`, `src/App.test.tsx`, `npm run check:quick` |
 | Notifications utility drawer | `docs/product/notification-spec.md`, `src/console/ConsoleUtilityDrawer.tsx`, `src/App.tsx`, `src/notifications/notification-http-api.ts` | `src/console/ConsoleUtilityDrawer.test.tsx`, `src/App.test.tsx`, `src/notifications/notification-http-api.test.ts`, `src/notifications/notification-store.test.ts`, `npm run check:quick`, `npm run check:backend`, `npm run check:db` |
 | Organization Settings page | `docs/product/auth-and-access-spec.md`, `src/settings/OrganizationSettingsPage.tsx`, `src/App.tsx` | `src/settings/OrganizationSettingsPage.test.tsx`, `src/App.test.tsx`, `npm run check:quick` |
@@ -162,7 +162,7 @@ Lorume should become agent-ready by growing only the infrastructure the project 
 Extend this guide and `./scripts/verify.sh` only when a real project surface appears:
 
 - Frontend code: add frontend commands and checks; keep browser layout checks in Playwright when jsdom cannot prove behavior.
-- Backend service: add API, schema, migration, and contract checks.
+- Backend service: add API, schema and contract checks.
 - Catalog object models: document the schema source of truth and generated-file policy if any.
 - Runtime / Execution Fabric: add worker setup, collector registration, runtime adapter, sandbox, queue, health-check, and artifact rules.
 - PR or release flow: add the smallest useful gates for owner review, approval boundary, audit evidence, and rollback notes.
@@ -177,7 +177,7 @@ Run the full repository harness before handing off changes:
 ./scripts/verify.sh
 ```
 
-Equivalent package entry points are `npm run verify`, `npm run check`, and `npm run harness`. If the local agent runtime has Node but no `npm` binary, `./scripts/verify.sh` falls back to `scripts/run-package-script.mjs` so the same harness still runs. The full harness verifies required product documents/assets, local Markdown links, Postgres migration checks, backend store/control/API checks, backend API-only E2E, backend bundle and deploy config checks, collector script behavior, TypeScript typecheck, unit/component tests, production build, and the Playwright responsive layout harness.
+Equivalent package entry points are `npm run verify`, `npm run check`, and `npm run harness`. If the local agent runtime has Node but no `npm` binary, `./scripts/verify.sh` falls back to `scripts/run-package-script.mjs` so the same harness still runs. The full harness verifies required product documents/assets, local Markdown links, Postgres schema checks, backend store/control/API checks, backend API-only E2E, backend bundle and deploy config checks, collector script behavior, TypeScript typecheck, unit/component tests, production build, and the Playwright responsive layout harness.
 
 If the local Playwright browser is missing, install the current test browser once:
 
@@ -191,14 +191,14 @@ Current harness scripts:
 |---|---|---|
 | `npm run setup:e2e` | Install the current Playwright Chromium browser. | Once per local machine, or when Playwright asks for browser installation. |
 | `npm run setup:git-hooks` | Point Git at `.githooks/` so commit messages are checked locally. | Once per checkout, before making local commits. |
-| `npm run db:up` | Start local Postgres through Docker Compose. | Before local backend DB development or manual migration checks. |
-| `npm run db:migrate` | Apply pending Postgres migrations to `DATABASE_URL`, defaulting to local compose Postgres. | Schema changes, local DB setup, or backend service development. |
+| `npm run db:up` | Start local Postgres through Docker Compose. | Before local backend DB development or manual schema checks. |
+| `npm run db:setup` | Apply the current Postgres schema baseline to `DATABASE_URL`, defaulting to local compose Postgres. | Schema changes, local DB setup, or backend service development. |
 | `npm run check:commit-message` | Unit-check the commit message validator used by `.githooks/commit-msg`. | Commit convention, git hook, repo workflow, or package script changes. |
 | `npm run check:cli` | Deterministic local `lorume` CLI command and safety checks. | CLI command contract, file-copy safety, connector context, or package `bin` changes. |
 | `npm run check:repo` | Required source-of-truth paths and local Markdown links. | Docs, assets, agent context, or product spec changes. |
 | `npm run check:backend:standalone` | Standalone backend HTTP and WebSocket smoke tests. | Backend server composition, local backend entrypoint, or server lifecycle changes. |
 | `npm run check:backend:e2e` | Playwright API-only backend harness using isolated Postgres, authenticated user APIs, installer assets, device-token collector ingestion, real collector-process upload, backend query APIs, and heartbeat-only device WebSocket. | Backend auth/API contracts, device registration token flow, installer command assets, collector ingestion/query wiring, or device WebSocket connection-health changes. |
-| `npm run check:db` | Starts local Postgres, runs migration/repository integration tests against temporary databases, and drops them. | Database schema, migration runner, Postgres repository, Docker Compose, or Postgres dependency changes. |
+| `npm run check:db` | Starts local Postgres, runs schema/repository integration tests against temporary databases, and drops them. | Database schema, schema setup runner, Postgres repository, Docker Compose, or Postgres dependency changes. |
 | `npm run check:backend` | Focused local backend store, control channel, HTTP API, Agent Skill probe API, and collector POST / WebSocket harness. | Runtime snapshot API, backend API handler, Agent Skill probe snapshot paths, collector posting, device WebSocket heartbeat lifecycle, or backend persistence changes. |
 | `npm run check:runtime` | Focused Runtime / Device Registration and `device_state` unit/script harness. | Device / Runtime / Agent / Task model, collector, installer, fixture, OpenClaw adapter, or query changes. |
 | `npm run check:quick` | TypeScript typecheck plus Vitest unit/component tests. | Catalog model, Runtime Fleet query logic, React behavior, labels, or seed data changes. |
@@ -216,7 +216,7 @@ Local frontend development:
 npm install
 npm run setup:e2e
 npm run db:up
-npm run db:migrate
+npm run db:setup
 ```
 
 Then run these in separate terminals:
@@ -230,7 +230,7 @@ Local backend development:
 
 ```sh
 npm run db:up
-npm run db:migrate
+npm run db:setup
 npm run dev:backend
 ```
 

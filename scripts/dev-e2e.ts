@@ -73,7 +73,7 @@ async function prepareDatabase(connectionString: string): Promise<void> {
     stdio: "inherit",
   });
   await recreateIsolatedDatabase(connectionString);
-  execFileSync(process.execPath, [path.join(repoRoot, "scripts", "db-migrate.mjs")], {
+  execFileSync(process.execPath, [path.join(repoRoot, "scripts", "db-setup.mjs")], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: connectionString },
     stdio: "inherit",

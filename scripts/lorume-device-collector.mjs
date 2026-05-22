@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,9 @@ const POST_RETRY_DELAYS_MS = [0, 500, 1500];
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LORUME_CLI_PATH = path.join(SCRIPT_DIR, "lorume.mjs");
 const DEFAULT_COLLECTOR_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_TASK_BATCH_MAX_BYTES = 512 * 1024;
+const DEFAULT_TASK_BATCH_MAX_TASKS = 1000;
+const TASK_SYNC_SCHEMA_VERSION = "device-state-v2";
 const COLLECTOR_LOG_SECRET_KEYS = new Set([
   "authorization",
   "bearertoken",
@@ -258,6 +261,11 @@ async function postSnapshot(serverUrl, snapshot, deviceToken = "") {
   await postJsonWithRetry(url, snapshot, "Device state snapshot", deviceToken);
 }
 
+async function postTaskBatch(serverUrl, batch, deviceToken = "") {
+  const url = new URL("/api/device-task-batches", serverUrl);
+  return postJsonWithRetry(url, batch, "Runtime task batch", deviceToken);
+}
+
 async function postJsonWithRetry(url, payload, label, deviceToken = "") {
   let lastError;
   for (const [attempt, delayMs] of POST_RETRY_DELAYS_MS.entries()) {
@@ -270,7 +278,7 @@ async function postJsonWithRetry(url, payload, label, deviceToken = "") {
         headers,
         body: JSON.stringify(payload),
       });
-      if (response.ok) return;
+      if (response.ok) return response.json().catch(() => ({}));
       lastError = new Error(`${label} post failed: HTTP ${response.status}`);
       if (response.status < 500 || attempt === POST_RETRY_DELAYS_MS.length - 1) break;
     } catch (error) {
@@ -287,6 +295,204 @@ function sleep(milliseconds) {
   });
 }
 
+function metadataSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    tasks: [],
+  };
+}
+
+async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger) {
+  const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+  if (tasks.length === 0) return;
+  const cachePath = resolveTaskSyncCachePath(config);
+  const cache = readTaskSyncCache(cachePath);
+  const entries = tasks
+    .map((task) => ({ task, hash: createRuntimeTaskHash(task) }))
+    .filter((entry) => cache.tasks[entry.task.id]?.hash !== entry.hash);
+  if (entries.length === 0) {
+    logger.info({ deviceId: snapshot.device.id, event: "task_batch_upload_skipped", tasks: tasks.length }, "No changed tasks to upload.");
+    return;
+  }
+  const batches = createRuntimeTaskBatches(entries, {
+    batchMaxBytes: positiveInteger(config.taskBatchMaxBytes, DEFAULT_TASK_BATCH_MAX_BYTES),
+    batchMaxTasks: positiveInteger(config.taskBatchMaxTasks, DEFAULT_TASK_BATCH_MAX_TASKS),
+    collectedAt: snapshot.collectedAt,
+    deviceId: snapshot.device.id,
+  });
+
+  for (const batch of batches) {
+    const response = await postTaskBatch(serverUrl, batch, deviceToken);
+    applyTaskBatchAck(cache, response?.acked, batch);
+    writeTaskSyncCache(cachePath, cache);
+  }
+  logger.info({
+    deviceId: snapshot.device.id,
+    event: "task_batch_upload_succeeded",
+    batches: batches.length,
+    tasks: entries.length,
+  });
+}
+
+function resolveTaskSyncCachePath(config = {}) {
+  return process.env.LORUME_TASK_SYNC_CACHE_PATH || config.taskSyncCachePath || path.join(homeDir(), ".lorume", "task-sync-cache.json");
+}
+
+function readTaskSyncCache(cachePath) {
+  try {
+    const parsed = JSON.parse(readFileSync(cachePath, "utf8"));
+    if (parsed && typeof parsed === "object" && parsed.tasks && typeof parsed.tasks === "object") return parsed;
+  } catch {
+    // Missing or malformed cache starts empty.
+  }
+  return { tasks: {} };
+}
+
+function writeTaskSyncCache(cachePath, cache) {
+  mkdirSync(path.dirname(cachePath), { recursive: true });
+  const tempPath = `${cachePath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  renameSync(tempPath, cachePath);
+}
+
+function applyTaskBatchAck(cache, acked, batch) {
+  const ackById = new Map((Array.isArray(acked) ? acked : []).map((entry) => [entry?.id, entry?.hash]));
+  const lastAckedAt = new Date().toISOString();
+  for (const entry of batch.tasks) {
+    if (ackById.get(entry.task.id) !== entry.hash) continue;
+    cache.tasks[entry.task.id] = { hash: entry.hash, lastAckedAt };
+  }
+}
+
+function createRuntimeTaskBatches(entries, options) {
+  const orderedEntries = [...entries].sort((left, right) => compareTasksBySyncOrder(left.task, right.task));
+  const batches = [];
+  let current = [];
+  for (const entry of orderedEntries) {
+    const next = [...current, entry];
+    if (
+      current.length > 0 &&
+      (next.length > options.batchMaxTasks || byteLength(taskBatchDraft(options, batches.length, next)) > options.batchMaxBytes)
+    ) {
+      batches.push(finalizeTaskBatch(options, batches.length, current));
+      current = [entry];
+    } else {
+      current = next;
+    }
+  }
+  if (current.length > 0) batches.push(finalizeTaskBatch(options, batches.length, current));
+  return batches.map((batch) => ({ ...batch, batchCount: batches.length }));
+}
+
+function finalizeTaskBatch(options, batchIndex, tasks) {
+  const draft = taskBatchDraft(options, batchIndex, tasks);
+  return {
+    ...draft,
+    batchId: createBatchId(options, batchIndex, tasks),
+  };
+}
+
+function taskBatchDraft(options, batchIndex, tasks) {
+  return {
+    batchCount: 0,
+    batchId: "",
+    batchIndex,
+    collectedAt: options.collectedAt,
+    deviceId: options.deviceId,
+    schemaVersion: TASK_SYNC_SCHEMA_VERSION,
+    tasks,
+  };
+}
+
+function createBatchId(options, batchIndex, tasks) {
+  return hashStableJson({
+    batchIndex,
+    collectedAt: options.collectedAt,
+    deviceId: options.deviceId,
+    tasks: tasks.map((entry) => ({ hash: entry.hash, id: entry.task.id })),
+  });
+}
+
+function createRuntimeTaskHash(task) {
+  return hashStableJson({
+    agentId: task.agentId,
+    agentReply: normalizeTaskHashText(task.agentReply),
+    assignee: stableObjectOrNull(task.assignee),
+    channel: stableObjectOrNull(task.channel),
+    conversation: stableObjectOrNull(task.conversation),
+    createdAt: task.createdAt ?? null,
+    creator: stableObjectOrNull(task.creator),
+    error: normalizeTaskHashText(task.error),
+    hashVersion: 1,
+    id: task.id,
+    source: stableObjectOrNull(task.source),
+    status: task.status,
+    taskType: task.taskType,
+    updatedAt: task.updatedAt ?? null,
+    userMessage: normalizeTaskHashText(task.userMessage),
+  });
+}
+
+function normalizeTaskHashText(value) {
+  const text = value?.replace(/\r\n/g, "\n").trim();
+  return text ? text : null;
+}
+
+function compareTasksBySyncOrder(left, right) {
+  const rightTime = taskSyncTimestamp(right);
+  const leftTime = taskSyncTimestamp(left);
+  if (rightTime !== leftTime) return rightTime - leftTime;
+  return String(left.id).localeCompare(String(right.id));
+}
+
+function taskSyncTimestamp(task) {
+  for (const value of [task.updatedAt, task.createdAt]) {
+    const timestamp = Date.parse(String(value || ""));
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return 0;
+}
+
+function byteLength(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+function stableObjectOrNull(value) {
+  if (!value || typeof value !== "object") return null;
+  return stableValue(value);
+}
+
+function hashStableJson(value) {
+  return fnv1a64(JSON.stringify(stableValue(value)));
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  const output = {};
+  for (const key of Object.keys(value).sort()) {
+    const child = value[key];
+    if (child !== undefined) output[key] = stableValue(child);
+  }
+  return output;
+}
+
+function fnv1a64(value) {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 async function runOnce(config, args) {
   const logger = createCollectorLogger(config);
   const snapshot = collectSnapshot(config, args);
@@ -301,7 +507,9 @@ async function runOnce(config, args) {
   });
   const serverUrl = args.serverUrl || config.serverUrl || "";
   if (serverUrl && !args.printOnly) {
-    await postSnapshot(serverUrl, snapshot, resolveDeviceToken(config, args));
+    const deviceToken = resolveDeviceToken(config, args);
+    await postSnapshot(serverUrl, metadataSnapshot(snapshot), deviceToken);
+    await postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger);
     logger.info({
       event: "device_state_upload_succeeded",
       deviceId: snapshot.device.id,

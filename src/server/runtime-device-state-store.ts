@@ -6,7 +6,7 @@ import {
 } from "../runtime/agent-skill-probe";
 
 export interface RuntimeDeviceStateSnapshot {
-  observedAt: string;
+  collectedAt: string;
   device: {
     id: string;
     hostname: string;
@@ -154,7 +154,7 @@ export function createRuntimeDeviceStateStore(
 /** Validate the small current contract Lorume needs before accepting a device_state snapshot. */
 export function validateRuntimeDeviceStateSnapshot(value: unknown): value is RuntimeDeviceStateSnapshot {
   if (!isRecord(value)) return false;
-  if (typeof value.observedAt !== "string") return false;
+  if (typeof value.collectedAt !== "string") return false;
   if (
     !isRecord(value.device) ||
     typeof value.device.id !== "string" ||

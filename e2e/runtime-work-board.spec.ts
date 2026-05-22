@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeviceStateSnapshot, Task } from "../src/runtime/runtime-model";
+import { createRuntimeTaskBatches } from "../src/runtime/runtime-task-sync";
 import { resetE2eDatabase } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -10,8 +11,8 @@ const fixture = JSON.parse(
   readFileSync(path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json"), "utf8"),
 ) as {
   agents: DeviceStateSnapshot["agents"];
+  collectedAt: string;
   devices: DeviceStateSnapshot["device"][];
-  observedAt: string;
   runtimes: DeviceStateSnapshot["runtimes"];
   tasks: DeviceStateSnapshot["tasks"];
 };
@@ -19,11 +20,11 @@ const fixture = JSON.parse(
 const defaultAgentId = fixture.agents[0].id;
 const reviewTask: Task = {
   ...fixture.tasks[0],
-  lastSeenAt: "2026-05-09T15:50:00.000Z",
+  updatedAt: "2026-05-09T15:50:00.000Z",
 };
 const runningTask: Task = {
   ...fixture.tasks[1],
-  lastSeenAt: "2026-05-09T15:59:00.000Z",
+  updatedAt: "2026-05-09T15:59:00.000Z",
 };
 const longTask: Task = {
   agentId: defaultAgentId,
@@ -31,18 +32,17 @@ const longTask: Task = {
   channel: { kind: "dingtalk", name: "DingTalk 群聊" },
   conversation: { title: "DingTalk 群聊", lastActivityAt: "2026-05-09T15:55:00.000Z" },
   creator: { name: "AjiHuang" },
-  description: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复并回报结果",
   id: `${defaultAgentId}:task:merge-request-184`,
-  lastSeenAt: "2026-05-09T15:55:00.000Z",
   status: "done",
   taskType: "conversation",
-  title: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复",
+  updatedAt: "2026-05-09T15:55:00.000Z",
+  userMessage: "https://git.intra.gaoding.com/gdesign/meta/-/merge_requests/184 让大卷执行review，如果有问题让codex继续修复并回报结果",
 };
 
 const backendDeviceState: DeviceStateSnapshot = {
   agents: fixture.agents,
+  collectedAt: "2026-05-09T16:00:00.000Z",
   device: fixture.devices[0],
-  observedAt: "2026-05-09T16:00:00.000Z",
   runtimes: fixture.runtimes,
   tasks: [reviewTask, runningTask, longTask],
 };
@@ -78,23 +78,23 @@ test.describe("Runs / Work Board", () => {
     expect(searchBox?.width ?? 0).toBeGreaterThan(300);
     expect(startBox?.x ?? 0).toBeGreaterThan(statusBox?.x ?? 0);
 
-    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
     await page.getByLabel("状态").selectOption("todo");
-    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Execute OpenClaw run/ })).not.toBeVisible();
     await page.getByLabel("状态").selectOption("all");
 
     await page.getByLabel("开始时间").fill("2026-05-08T00:00");
     await page.getByLabel("结束时间").fill("2026-05-10T23:59");
-    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
     await page.getByLabel("开始时间").fill("2026-05-10T00:00");
     await page.getByLabel("结束时间").fill("2026-05-10T23:59");
-    await expect(page.getByRole("button", { name: /Review DingTalk request/ })).not.toBeVisible();
+    await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).not.toBeVisible();
     await page.getByLabel("开始时间").fill("");
     await page.getByLabel("结束时间").fill("");
 
     await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("PMO");
-    const reviewCard = page.getByRole("button", { name: /Review DingTalk request/ });
+    const reviewCard = page.getByRole("button", { name: /PMO asked OpenClaw/ });
     await expect(reviewCard).toBeVisible();
     await expect(reviewCard).toContainText("待处理");
     await expect(page.getByText(/OpenClaw execution/)).not.toBeVisible();
@@ -169,6 +169,17 @@ async function seedWorkBoardData(
   request: APIRequestContext,
   deviceStateSnapshot: DeviceStateSnapshot,
 ): Promise<void> {
-  const response = await request.post("/api/device-state-snapshots", { data: deviceStateSnapshot });
+  const response = await request.post("/api/device-state-snapshots", {
+    data: { ...deviceStateSnapshot, tasks: [] },
+  });
   expect(response.ok()).toBe(true);
+  for (const batch of createRuntimeTaskBatches(deviceStateSnapshot.tasks, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: deviceStateSnapshot.collectedAt,
+    deviceId: deviceStateSnapshot.device.id,
+  })) {
+    const batchResponse = await request.post("/api/device-task-batches", { data: batch });
+    expect(batchResponse.ok()).toBe(true);
+  }
 }

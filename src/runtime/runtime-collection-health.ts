@@ -18,8 +18,8 @@ export interface CollectionHealthIngestion {
   snapshotType: CollectionHealthSnapshotType;
   /** Whether backend accepted this ingestion. */
   status: "succeeded" | "failed";
-  /** Device-side observation time when present. */
-  observedAt: string | Date | null;
+  /** Device-side collection completion time when present. */
+  collectedAt: string | Date | null;
   /** Backend receive time. */
   receivedAt: string | Date;
   /** Object counts written by the ingestion. */
@@ -38,8 +38,8 @@ export interface CollectionHealthCheck {
   label: string;
   /** Product-level status for this check. */
   status: CollectionHealthStatus;
-  /** Latest device observation time. */
-  lastObservedAt?: string;
+  /** Latest device collection completion time. */
+  lastCollectedAt?: string;
   /** Latest backend receive time. */
   lastReceivedAt?: string;
   /** Latest object counts for this snapshot type. */
@@ -60,8 +60,8 @@ export interface DeviceCollectionHealth {
   status: CollectionHealthStatus;
   /** User-facing summary for the whole device. */
   summary: string;
-  /** Most recent observation time across checks. */
-  lastObservedAt?: string;
+  /** Most recent device collection completion time across checks. */
+  lastCollectedAt?: string;
   /** Most recent backend receive time across checks. */
   lastReceivedAt?: string;
   /** Individual collection checks for the active collector contract. */
@@ -104,7 +104,7 @@ export function deriveDeviceCollectionHealth(
     deviceId,
     status,
     summary: createSummary(checks),
-    lastObservedAt: maxIso(checks.map((check) => check.lastObservedAt)),
+    lastCollectedAt: maxIso(checks.map((check) => check.lastCollectedAt)),
     lastReceivedAt: maxIso(checks.map((check) => check.lastReceivedAt)),
     checks,
   };
@@ -127,13 +127,13 @@ function deriveCheck(
   }
 
   const lastReceivedAt = toIso(ingestion.receivedAt);
-  const lastObservedAt = toIso(ingestion.observedAt);
+  const lastCollectedAt = toIso(ingestion.collectedAt);
   if (ingestion.status === "failed") {
     return {
       id: snapshotType,
       label,
       status: "failed",
-      lastObservedAt,
+      lastCollectedAt,
       lastReceivedAt,
       counts: ingestion.counts,
       warnings: ingestion.warnings,
@@ -147,7 +147,7 @@ function deriveCheck(
       id: snapshotType,
       label,
       status: "healthy",
-      lastObservedAt,
+      lastCollectedAt,
       lastReceivedAt,
       counts: ingestion.counts,
       warnings: ingestion.warnings,
@@ -160,7 +160,7 @@ function deriveCheck(
     id: snapshotType,
     label,
     status: "healthy",
-    lastObservedAt,
+    lastCollectedAt,
     lastReceivedAt,
     counts: ingestion.counts,
     warnings: [],

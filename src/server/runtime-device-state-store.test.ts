@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createRuntimeDeviceStateStore, validateRuntimeDeviceStateSnapshot, type RuntimeDeviceStateSnapshot } from "./runtime-device-state-store";
 
 const fixture: RuntimeDeviceStateSnapshot = {
-  observedAt: "2026-05-21T10:00:00.000Z",
+  collectedAt: "2026-05-21T10:00:00.000Z",
   device: {
     id: "fixture-mac",
     hostname: "fixture-mac.local",

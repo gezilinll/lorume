@@ -1,6 +1,6 @@
 # Backend Service Spec
 
-版本：TinySpec v0.5
+版本：TinySpec v0.6
 
 Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及 ECS 部署形态。
 
@@ -74,23 +74,26 @@ flowchart LR
 
 Collector 保持主动上报：
 
-- 当前唯一正式路径是 `device_state` 全量快照，包含 Device、Runtime、Agent 和 Task。后端按稳定 ID upsert 当前对象，并删除同一设备在新快照中已经消失的 Runtime、Agent 和 Task；历史只保留在 `collector_ingestions` 中。
+- 当前正式写入路径分为两类：`device_state` metadata snapshot 包含 Device、Runtime、Agent 和 diagnostics；`task_batch` 包含变化 Task。
+- `POST /api/device-state-snapshots` 的 `tasks` 必须为空数组。后端按稳定 ID upsert Device、Runtime 和 Agent。
+- `POST /api/device-task-batches` 按稳定 Task ID upsert Task，并返回 ACK 列表；collector 只有在 ACK 中看到当前 `{ id, hash }` 后才推进本地 task sync cache。
+- 第一版不做删除、不发 tombstone，不清理本轮没有出现的 Runtime、Agent 或 Task。后续如需删除语义，必须先补 spec 和 harness。
 - `inventory` 和 `work_state` 不作为兼容回退保留；对应旧 HTTP 入口、CLI 命令和 DB 表都不属于当前规则。
-- Task 必须引用当前快照中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录 warning，不能写成悬空任务。
-- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、规范化错误码、用户可读错误摘要和接收时间。
+- Task 必须引用当前数据库中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录 warning，不能写成悬空任务。
+- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、规范化错误码、用户可读错误摘要、`collectedAt` 和 `receivedAt`。
 - 认证后的 collector 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
-- Collector 上报 `device_state` 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
+- Collector 上报 `device_state` 或 `task_batch` 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
 - 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
 - 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- Collector 可以在后续演进为增量采集；当前 `device_state` 按全量 snapshot 入库，由后端通过 upsert、替换和删除 stale 对象保持当前态。
+- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报和批量 ACK。每天或 collector 升级后的 full reconcile 可以清空本地 task cache，让当前可见 Task 重新分批上报一次以修正漂移。
 
 建议节奏：
 
 - `10-30s`：heartbeat / 连接状态。
 - `30-60s`：`device_state` 变化采集。
-- `5-10min`：`device_state` 全量 reconcile。
-- 低频任务：全量 reconcile。
+- `5-10min`：Device / Runtime / Agent metadata full reconcile。
+- 低频任务：Task batch full reconcile（清空本地 ack cache 后重新按批次上报当前可见 Task）。
 
 ## API
 
@@ -101,9 +104,10 @@ Collector 保持主动上报：
 - `GET /api/device-collector/install.sh`
 - `GET /api/device-collector/files/:fileName`
 - `POST /api/device-state-snapshots`
+- `POST /api/device-task-batches`
 - `WS /api/device-control/ws`
 
-Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 snapshot ingestion 进入后端。
+Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 metadata snapshot 和 Task batch 进入后端。
 
 正式查询 API：
 
@@ -115,7 +119,7 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
   - 后端负责筛选、时间范围、稳定 cursor 分页和排序，返回 `total` 与 `nextCursor`。
   - 返回行是 Lorume `Task`。`Task.status` 是任务当前状态的唯一来源，Task 不包含 `runtimeId` 或 `lastRun`。
 - `GET /api/devices/:deviceId/ingestions`
-  - 返回最近采集记录，用于解释数据新鲜度和缺口；记录必须包含 `observedAt` 和 `receivedAt`，方便区分设备观测时间与后端接收时间。
+  - 返回最近采集记录，用于解释数据新鲜度和缺口；记录必须包含 `collectedAt` 和 `receivedAt`，方便区分设备采集完成时间与后端接收时间。
 - `GET /api/devices/:deviceId/collection-health`
   - 返回设备级采集诊断摘要，只返回 `device_state` 检查项。
   - `healthy`：最近一次上报成功；warnings 只进入诊断信息，不改变 Runtime Fleet 展示状态。

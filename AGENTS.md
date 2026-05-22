@@ -11,7 +11,7 @@ Current source of truth:
 - `README.md`: public project overview and operating model.
 - `docs/product/ui-design.md`: product object model, information architecture, pages, flows, and implementation priorities.
 - `docs/product/design/README.md`: design system source of truth for visual language, tokens, typography, color, layout, components, icons, interaction, content, responsive behavior, page patterns, and UI review harness.
-- `docs/product/runtime-device-registration-spec.md`: TinySpec for current device registration, collector, runtime adapters, and `device_state` snapshots.
+- `docs/product/runtime-device-registration-spec.md`: TinySpec for current device registration, collector, runtime adapters, metadata snapshots, and Task batch sync.
 - `docs/product/runtime-fleet-page-spec.md`: TinySpec for the first Runtime Fleet management page.
 - `docs/product/runtime-openclaw-adapter-spec.md`: TinySpec for current OpenClaw adapter source rules and adapter-to-Task mapping.
 - `docs/product/runtime-task-acceptance-spec.md`: TinySpec for Runs / Work Board Task acceptance.
@@ -32,6 +32,7 @@ Current source of truth:
 - `src/catalog/catalog-object.ts`: initial TypeScript source of truth for Catalog Object shape.
 - `src/catalog/catalog-seed.ts`: first reviewable Catalog Object seed data for future object directory work.
 - `src/runtime/runtime-model.ts`: TypeScript source of truth for the current `Device / Runtime / Agent / Task` model and `device_state` normalization.
+- `src/runtime/runtime-task-sync.ts`: TypeScript source of truth for Task hash, batch shape, and collector/backend Task batch normalization.
 - `src/runtime/runtime-work-query-api.ts`: frontend API adapter for backend Runs query responses and cursor pagination.
 - `src/runtime/runtime-data-source.ts`: source-of-truth helper for whether fixture fallback is allowed in a given build mode.
 - `src/runtime/runtime-collection-health.ts`: TypeScript source of truth for product-level collection diagnostics derived from collector ingestion records and folded into Runtime Fleet object status.
@@ -40,7 +41,7 @@ Current source of truth:
 - `src/runtime/agent-skill-probe.ts`: TypeScript source of truth for read-only Agent Skill probe metadata normalization and local file-entry parsing.
 - `src/runtime/runtime-fleet-query.ts`: query and detail model for the Runtime Fleet page.
 - `src/server/runtime-device-state-store.ts`: internal device_state fallback snapshot store plus device connection and Skill probe state for local tests/dev backend.
-- `src/server/postgres-store.ts`: Postgres-backed repository for normalized `device_state` ingestion and Device / Runtime / Agent / Task queries.
+- `src/server/postgres-store.ts`: Postgres-backed repository for normalized metadata snapshot ingestion, Task batch ingestion, and Device / Runtime / Agent / Task queries.
 - `src/server/runtime-control-channel.ts`: in-memory device control channel for connection and heartbeat lifecycle.
 - `src/server/runtime-http-api.ts`: backend HTTP API for collector ingestion, Runtime Fleet / Runs query endpoints, Agent Skill probe snapshot endpoints, and ingestion diagnostics.
 - `src/backend/backend-server.ts`: standalone local-first backend service that composes auth, Operation / Notification, Runtime / Runs HTTP APIs, in-process Operation runner, and the device WebSocket control channel outside Vite.
@@ -87,6 +88,8 @@ Current source of truth:
 - The runtime model uses exactly four top-level product objects: `Device`, `Runtime`, `Agent`, and `Task`. Do not add first-class Conversation, Execution, Capability, SourceRef, Channel, or Run entities unless a product spec and harness explicitly reintroduce them.
 - Keep runtime relationships linear: `Device -> Runtime -> Agent -> Task`. A `Task` references only `agentId`; Runtime and Device context must be resolved by joins or BFF composition. Do not add `task.runtimeId` to the product model.
 - Runtime and Agent product models use `collectionStatus` only. Do not store working/idle as Runtime or Agent status; derive task counts and activity labels from `Task.status`.
+- Task product models use `userMessage` and optional `agentReply`; do not reintroduce Task `title`, `description`, `toolCalls`, `lastSeenAt`, `lastRun`, or execution status without updating the product spec and harness first.
+- Collector HTTP writes are split by concern: `/api/device-state-snapshots` accepts Device / Runtime / Agent metadata with `tasks: []`, and `/api/device-task-batches` accepts changed Task batches with hash ACKs. Do not restore full Task payloads inside metadata snapshots.
 - Do not expose Runtime `endpoint`, Runtime `capabilities`, Runtime/Agent `sourceRefs`, Agent `origin`, or Agent `load` in the product API/UI model. Adapter commands, external ids, raw evidence, and path details belong in adapter internals, diagnostics, logs, or DB raw fields.
 - Runtime adapters may execute only when enabled by the current documented adapter allowlist and covered by harness. Disabled adapters must not execute commands, read local directories, or emit objects.
 - Runtime adapter snapshots must stay bounded before upload: keep emitted Task windows under the documented count and byte budgets, write diagnostics when truncating, and do not raise backend request limits as a substitute for fixing runaway device snapshots.
@@ -112,7 +115,7 @@ Current spec and harness mapping:
 | Surface | Spec / Intent | Harness |
 |---|---|---|
 | Catalog Object model | `src/catalog/catalog-object.ts` | `src/catalog/catalog-query.test.ts`, `npm run check:quick` |
-| Runtime device registration and `device_state` collector | `docs/product/runtime-device-registration-spec.md`, `docs/product/runtime-openclaw-adapter-spec.md`, `src/runtime/runtime-model.ts`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs`, `scripts/lorume-device-collector.mjs`, `scripts/install-device-collector.sh` | `src/runtime/device-collector-script.test.ts`, `src/cli/lorume-cli.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:backend:e2e` |
+| Runtime device registration and `device_state` collector | `docs/product/runtime-device-registration-spec.md`, `docs/product/runtime-openclaw-adapter-spec.md`, `src/runtime/runtime-model.ts`, `src/runtime/runtime-task-sync.ts`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs`, `scripts/lorume-device-collector.mjs`, `scripts/install-device-collector.sh` | `src/runtime/runtime-task-sync.test.ts`, `src/runtime/device-collector-script.test.ts`, `src/cli/lorume-cli.test.ts`, `e2e/runtime-backend-api.spec.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:backend:e2e` |
 | CLI device capability atoms | `docs/product/cli-device-capability-spec.md`, `scripts/lorume.mjs`, `scripts/lorume-runtime-adapters.mjs` | `src/cli/lorume-cli.test.ts`, `npm run check:cli`, `npm run check:runtime`, `npm run check:backend`, `npm run check:quick` |
 | Agent Skill probing | `docs/product/agent-skill-probing-spec.md`, `src/runtime/agent-skill-probe.ts`, `src/server/runtime-http-api.ts`, `src/runtime/RuntimeFleetPage.tsx` | `src/runtime/agent-skill-probe.test.ts`, `src/server/runtime-http-api-skill-probe.test.ts`, `src/runtime/RuntimeFleetPage.skill-probe.test.tsx`, `e2e/runtime-fleet.spec.ts`, `npm run check:runtime`, `npm run check:backend`, `npm run check:quick`, `npm run check:e2e` |
 | Runtime Task acceptance | `docs/product/runtime-task-acceptance-spec.md`, `docs/product/runtime-openclaw-adapter-spec.md`, `src/runtime/runtime-work-query-api.ts` | `src/runtime/runtime-work-query-api.test.ts`, `e2e/runtime-work-board.spec.ts`, `npm run check:quick`, `npm run check:e2e` |

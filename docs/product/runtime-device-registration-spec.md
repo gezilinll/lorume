@@ -1,15 +1,15 @@
 # Runtime & Device Registration Spec
 
-版本：TinySpec v0.6
+版本：TinySpec v0.7
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化 device state snapshot。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
 - 通过一条本地安装命令在设备上安装 Lorume Device Collector。
 - Collector 作为设备侧常驻 Device Agent 运行，设备主动连接 Lorume。
 - Collector 只读采集本机事实和 OpenClaw 运行资产。
-- 后端接收设备主动上报的 device state snapshot，并提供 Runtime Fleet / Runs 查询 API。
+- 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
 - Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
 - WebSocket 控制面只支持设备主动 `hello`、`heartbeat` 和连接健康判定；不下发采集、探测、调度或任意命令。
 
@@ -134,8 +134,8 @@ export interface Task {
   id: string;
   agentId: string;
   taskType: "conversation" | "scheduled";
-  title: string;
-  description?: string;
+  userMessage?: string;
+  agentReply?: string;
   status: TaskStatus;
   source?: { kind?: "openclaw"; externalId?: string };
   channel?: {
@@ -148,20 +148,12 @@ export interface Task {
     externalId?: string;
     lastActivityAt?: string;
   };
-  assignee?: { name?: string };
+  assignee?: { name: string; externalId?: string };
   creator?: { name?: string; externalId?: string };
-  toolCalls?: Array<{
-    id: string;
-    name: string;
-    status: "done" | "failed" | "unknown";
-    arguments?: unknown;
-    resultPreview?: string;
-    error?: string;
-  }>;
   raw?: {
     openclaw?: {
       status?: string;
-      statusSource?: "session" | "trajectory" | "tool" | "tasks_list";
+      statusSource?: "session" | "trajectory" | "tasks_list";
       sessionId?: string;
       sessionKey?: string;
       messageId?: string;
@@ -171,12 +163,12 @@ export interface Task {
   error?: string;
   createdAt?: string;
   updatedAt?: string;
-  lastSeenAt?: string;
 }
 ```
 
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
 Runtime 名称不能写入 `Task.channel`；如果任务没有 DingTalk、Telegram、Slack 或其他用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
+Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。页面需要标题时，从 `userMessage` 生成短展示标题；需要任务新鲜度时，只看源系统业务时间 `updatedAt` / `createdAt`。
 
 ## 状态规则
 
@@ -208,13 +200,13 @@ Runtime 和 Agent 的 `collectionStatus` 只表达采集可用性，不表达工
 | cancelled, canceled | `cancelled` |
 | 不能可靠判断 | `unknown` |
 
-## Device State Snapshot
+## 上报 Envelope
 
-Collector 最终上报一份统一 snapshot。它是传输 envelope，不是产品实体。
+CLI 在设备本地生成一份统一 `DeviceStateSnapshot`。它是 collector 内部传输 envelope，不是产品实体。Collector 对后端上报时必须拆成两类请求：metadata snapshot 和 Task batch。
 
 ```ts
 export interface DeviceStateSnapshot {
-  observedAt: string;
+  collectedAt: string;
   device: Device;
   runtimes: Runtime[];
   agents: Agent[];
@@ -225,13 +217,29 @@ export interface DeviceStateSnapshot {
 }
 ```
 
-上报是全量 snapshot。后端以当前 snapshot 为准 upsert 对象，并清理同一设备下本次没有出现的 Runtime、Agent 和 Task。OpenClaw 历史 session / trajectory 可能长期累积；adapter 必须在 CLI 侧把 Task 输出限制为最近任务窗口，并同时受字节预算约束，避免单次上报超过 collector buffer 或后端 JSON body 上限。被窗口裁掉的旧 Task 不进入本次 snapshot，并写入 diagnostics warning。
+HTTP 上报规则：
+
+- `POST /api/device-state-snapshots` 只接收 Device、Runtime、Agent 和 diagnostics；`tasks` 必须为空数组。
+- `POST /api/device-task-batches` 接收 Task 批次，每条 Task 带 collector 计算出的稳定 hash。
+- 后端按稳定 ID upsert 当前对象；第一版不做删除、不发 tombstone，不清理本轮没有出现的 Task。
+- Collector 本地只缓存已被后端 ACK 的 `{ id, hash, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化或本地未 ACK 的 Task。
+- `collectedAt` 表示设备端本轮采集完成时间；`receivedAt` 表示后端收到请求时间。
+
+默认批次预算：
+
+| 约束 | 默认值 | 说明 |
+|---|---:|---|
+| 单批最大 Task 数 | `1000` | 超过时拆分批次。 |
+| 单批最大 JSON 字节 | `512KiB` | 控制网络与后端入库压力。 |
+
+每天或 collector 升级后的 full reconcile 可以清空本地 ack cache，让当前可见 Task 重新按批次上报一次，用来修正设备端缓存漂移。该机制仍然使用 Task batch，不恢复“带 Task 的全量 snapshot”。
 
 ## API
 
 - `GET /api/device-collector/install.sh`：返回无密钥远程安装入口脚本。
 - `GET /api/device-collector/files/:fileName`：只允许下载白名单设备包文件。
-- `POST /api/device-state-snapshots`：Collector 上报 `DeviceStateSnapshot`，使用 device token 鉴权。
+- `POST /api/device-state-snapshots`：Collector 上报 Device / Runtime / Agent metadata snapshot，使用 device token 鉴权；`tasks` 必须为空。
+- `POST /api/device-task-batches`：Collector 上报变化 Task 批次，使用 device token 鉴权；后端返回 ACK 列表供本地 cache 推进。
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
 - `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
@@ -246,14 +254,14 @@ OpenClaw 是当前唯一默认启用的 runtime adapter。详细字段映射见 
 | Device | collector host facts | 使用现有本机事实采集逻辑。 |
 | Runtime | OpenClaw config、`openclaw health --json`、`openclaw status --json` | 生成一个 `OpenClaw Gateway` runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw health/status agent 列表和 config agent 列表 | 每个真实 OpenClaw agent id 生成一个 Agent。 |
-| Task | OpenClaw task/message/run 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
+| Task | OpenClaw session / trajectory / DingTalk state 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
 
 Task 上报窗口：
 
 - 默认最多保留最近 `200` 个 OpenClaw Task。
-- 默认 Task 数组 JSON 预算为 `8MiB`，为后端 `10MB` 请求体上限保留 envelope 空间。
-- 排序使用 `updatedAt -> lastSeenAt -> createdAt` 的最近时间优先。
-- 已保留 Task 的 `toolCalls.arguments` 不做裁剪或脱敏；如果窗口超限，丢弃更旧 Task，而不是改写保留下来的 Task。
+- 默认 Task 数组 JSON 预算为 `8MiB`，再交由 collector 按 `512KiB / 1000 tasks` 拆 batch。
+- 排序使用 `updatedAt -> createdAt` 的最近时间优先。
+- 当前不上传 `toolCalls`。如果窗口超限，丢弃更旧 Task，而不是改写被保留 Task。
 
 稳定 ID：
 
@@ -286,9 +294,9 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 
 ## 验收
 
-- `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出 `DeviceStateSnapshot`。
+- `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出带 `collectedAt` 的 `DeviceStateSnapshot`。
 - 默认采集 allowlist 只执行 OpenClaw adapter，不执行 Slock、Multica 或 Codex 命令。
-- 后端能接收 `POST /api/device-state-snapshots`，并写入 Device、Runtime、Agent、Task。
+- Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。
 - Installer harness 必须验证安装目录文件完整性，并验证已安装 CLI 能执行 `collector uninstall`。

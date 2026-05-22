@@ -345,7 +345,7 @@ export function RuntimeFleetPage() {
 
 function createEmptyRuntimeInventorySnapshot(): RuntimeFleetSnapshot {
   return {
-    observedAt: new Date(0).toISOString(),
+    collectedAt: new Date(0).toISOString(),
     devices: [],
     runtimes: [],
     agents: [],
@@ -389,7 +389,7 @@ function deviceCollectionHealthFromResponse(value: unknown): DeviceCollectionHea
   return {
     checks,
     deviceId: candidate.deviceId,
-    lastObservedAt: typeof candidate.lastObservedAt === "string" ? candidate.lastObservedAt : undefined,
+    lastCollectedAt: typeof candidate.lastCollectedAt === "string" ? candidate.lastCollectedAt : undefined,
     lastReceivedAt: typeof candidate.lastReceivedAt === "string" ? candidate.lastReceivedAt : undefined,
     status: candidate.status,
     summary: candidate.summary,
@@ -503,7 +503,7 @@ function DevicePanel({
               <span>
                 <strong>{device.id}</strong>
                 <small>{device.hostname}</small>
-                <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}</small>
+                <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}</small>
               </span>
               <StatusBadge label={label} status={status} />
             </button>

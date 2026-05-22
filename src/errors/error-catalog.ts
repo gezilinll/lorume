@@ -16,6 +16,7 @@ const errorMessages: Record<string, string> = {
   invalid_device_state_snapshot: "设备状态采集数据无效，请检查 Lorume CLI 版本或上报结构。",
   invalid_device_token: "设备认证失败，请检查 Lorume CLI 的设备令牌配置。",
   invalid_json_body: "请求内容不是有效的 JSON。",
+  invalid_runtime_task_batch: "任务批量上报数据无效，请检查 Lorume CLI 版本或上报结构。",
   invalid_or_expired_code: "验证码无效或已过期，请重新获取验证码。",
   invitation_email_and_role_required: "请输入邀请邮箱并选择成员角色。",
   invitation_not_available: "邀请链接无效、已过期或与当前邮箱不匹配。",
@@ -28,6 +29,7 @@ const errorMessages: Record<string, string> = {
 
 const technicalCodePatterns: Array<[RegExp, string]> = [
   [/invalid device state snapshot/i, "invalid_device_state_snapshot"],
+  [/invalid runtime task batch/i, "invalid_runtime_task_batch"],
   [/invalid collector snapshot/i, "invalid_device_state_snapshot"],
   [/invalid snapshot/i, "invalid_device_state_snapshot"],
   [/invalid json body/i, "invalid_json_body"],

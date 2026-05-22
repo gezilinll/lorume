@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-05-21T10:00:00.000Z",
+  "collectedAt": "2026-05-21T10:00:00.000Z",
   "device": {
     "id": "fixture-mac",
     "hostname": "fixture-mac.local",
@@ -52,8 +52,8 @@
       "id": "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
       "agentId": "fixture-mac:runtime:openclaw:agent:main",
       "taskType": "conversation",
-      "title": "Review DingTalk request",
-      "description": "PMO asked OpenClaw to inspect the handoff.",
+      "userMessage": "PMO asked OpenClaw to inspect the handoff.",
+      "agentReply": "The handoff is ready for review.",
       "status": "todo",
       "channel": {
         "kind": "dingtalk",
@@ -71,7 +71,7 @@
       "assignee": {
         "name": "main"
       },
-      "lastSeenAt": "2026-05-21T09:59:00.000Z"
+      "updatedAt": "2026-05-21T09:59:00.000Z"
     }
   ]
 }

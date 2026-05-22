@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeviceStateSnapshot } from "../src/runtime/runtime-model";
+import { createRuntimeTaskBatches } from "../src/runtime/runtime-task-sync";
 import { resetE2eDatabase } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -10,16 +11,16 @@ const fixture = JSON.parse(
   readFileSync(path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json"), "utf8"),
 ) as {
   agents: DeviceStateSnapshot["agents"];
+  collectedAt: string;
   devices: DeviceStateSnapshot["device"][];
-  observedAt: string;
   runtimes: DeviceStateSnapshot["runtimes"];
   tasks: DeviceStateSnapshot["tasks"];
 };
 
 const backendDeviceState: DeviceStateSnapshot = {
   agents: fixture.agents,
+  collectedAt: fixture.collectedAt,
   device: fixture.devices[0],
-  observedAt: fixture.observedAt,
   runtimes: fixture.runtimes,
   tasks: fixture.tasks,
 };
@@ -151,6 +152,17 @@ test.describe("Runtime Fleet", () => {
 });
 
 async function seedRuntimeFleetData(request: APIRequestContext): Promise<void> {
-  const seedResponse = await request.post("/api/device-state-snapshots", { data: backendDeviceState });
+  const seedResponse = await request.post("/api/device-state-snapshots", {
+    data: { ...backendDeviceState, tasks: [] },
+  });
   expect(seedResponse.ok()).toBe(true);
+  for (const batch of createRuntimeTaskBatches(backendDeviceState.tasks, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: backendDeviceState.collectedAt,
+    deviceId: backendDeviceState.device.id,
+  })) {
+    const batchResponse = await request.post("/api/device-task-batches", { data: batch });
+    expect(batchResponse.ok()).toBe(true);
+  }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import deviceStateFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import { createDeviceStateSnapshot, type DeviceStateSnapshot } from "../runtime/runtime-model";
+import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
 import { createPostgresStore } from "./postgres-store";
 
@@ -15,31 +16,45 @@ describeDb("Postgres runtime store", () => {
       try {
         const snapshot = createFixtureDeviceState();
 
-        const result = await store.upsertDeviceStateSnapshot(snapshot);
+        const result = await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        const batchResult = await store.upsertRuntimeTaskBatch(createFixtureTaskBatch(snapshot));
 
         expect(result).toEqual({
-          counts: { agents: 1, devices: 1, runtimes: 1, tasks: 2 },
+          counts: { agents: 1, devices: 1, runtimes: 1, tasks: 0 },
           deviceId: "fixture-mac",
           snapshotType: "device_state",
+        });
+        expect(batchResult).toMatchObject({
+          acked: [
+            { id: "fixture-mac:runtime:openclaw:agent:main:task:running-1", hash: expect.any(String) },
+            { id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1", hash: expect.any(String) },
+          ],
+          deviceId: "fixture-mac",
         });
         expect(await store.readEntityCounts()).toEqual({
           agentSkillProbeSnapshots: 0,
           agents: 1,
-          collectorIngestions: 1,
+          collectorIngestions: 2,
           devices: 1,
           runtimes: 1,
           tasks: 2,
         });
-        await expect(store.listCollectorIngestions("fixture-mac")).resolves.toEqual([
+        await expect(store.listCollectorIngestions("fixture-mac")).resolves.toEqual(expect.arrayContaining([
           expect.objectContaining({
-            counts: { agents: 1, devices: 1, runtimes: 1, tasks: 2 },
+            counts: { agents: 1, devices: 1, runtimes: 1, tasks: 0 },
             deviceId: "fixture-mac",
-            observedAt: expect.any(Date),
+            collectedAt: expect.any(Date),
             receivedAt: expect.any(Date),
             snapshotType: "device_state",
             status: "succeeded",
           }),
-        ]);
+          expect.objectContaining({
+            counts: { batches: 1, tasks: 2 },
+            deviceId: "fixture-mac",
+            snapshotType: "task_batch",
+            status: "succeeded",
+          }),
+        ]));
         await expect(store.readDeviceCollectionHealth("fixture-mac")).resolves.toMatchObject({
           checks: [expect.objectContaining({ id: "device_state", message: "采集正常", status: "healthy" })],
           deviceId: "fixture-mac",
@@ -74,14 +89,15 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
-  it("keeps current query tables aligned to the latest device-state snapshot for one device", async () => {
+  it("keeps metadata aligned without deleting already acknowledged Tasks", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
       runMigrationsScript(database.url);
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
-        await store.upsertDeviceStateSnapshot(snapshot);
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch(snapshot));
         await store.upsertDeviceStateSnapshot({
           ...snapshot,
           agents: [snapshot.agents[0]],
@@ -90,15 +106,15 @@ describeDb("Postgres runtime store", () => {
         });
 
         const fleet = await store.readRuntimeFleet();
-        expect(fleet.summary).toEqual({ agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 0 });
-        await expect(store.listRuntimeTasks()).resolves.toMatchObject({ items: [], total: 0 });
+        expect(fleet.summary).toEqual({ agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 });
+        await expect(store.listRuntimeTasks()).resolves.toMatchObject({ total: 2 });
         await expect(store.readEntityCounts()).resolves.toEqual({
           agentSkillProbeSnapshots: 0,
           agents: 1,
-          collectorIngestions: 2,
+          collectorIngestions: 3,
           devices: 1,
           runtimes: 1,
-          tasks: 0,
+          tasks: 2,
         });
       } finally {
         await store.close();
@@ -115,7 +131,8 @@ describeDb("Postgres runtime store", () => {
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
-        await store.upsertDeviceStateSnapshot({
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
           ...snapshot,
           tasks: [
             {
@@ -124,7 +141,7 @@ describeDb("Postgres runtime store", () => {
               raw: { openclaw: { sessionId: "conversation-session", status: "success", statusSource: "session" } },
               status: "done",
               taskType: "conversation",
-              title: "Conversation request",
+              userMessage: "Conversation request",
             },
             {
               ...snapshot.tasks[0],
@@ -133,10 +150,10 @@ describeDb("Postgres runtime store", () => {
               source: { kind: "openclaw", externalId: "cron:daily-summary" },
               status: "done",
               taskType: "scheduled",
-              title: "Daily summary cron",
+              userMessage: "Daily summary cron",
             },
           ],
-        });
+        }));
 
         const scheduled = await store.listRuntimeTasks({ taskType: "scheduled" });
         const conversation = await store.listRuntimeTasks({ taskType: "conversation" });
@@ -218,25 +235,26 @@ describeDb("Postgres runtime store", () => {
       const store = createPostgresStore({ connectionString: database.url });
       try {
         const snapshot = createFixtureDeviceState();
-        await store.upsertDeviceStateSnapshot({
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
           ...snapshot,
           tasks: [0, 1, 2].map((index) => ({
             ...snapshot.tasks[0],
             id: `${snapshot.tasks[0].id}-${index}`,
-            source: { externalId: `task-${index}` },
-            title: `Cursor task ${index}`,
-            lastSeenAt: `2026-05-21T10:0${index}:00.000Z`,
+            source: { kind: "openclaw", externalId: `task-${index}` },
+            userMessage: `Cursor task ${index}`,
+            updatedAt: `2026-05-21T10:0${index}:00.000Z`,
           })),
-        });
+        }));
 
         const search = await store.listRuntimeTasks({ search: "Cursor task" });
         const firstPage = await store.listRuntimeTasks({ limit: 2 });
         const secondPage = await store.listRuntimeTasks({ cursor: firstPage.nextCursor, limit: 2 });
 
         expect(search.total).toBe(3);
-        expect(firstPage.items.map((item) => item.title)).toEqual(["Cursor task 2", "Cursor task 1"]);
+        expect(firstPage.items.map((item) => item.userMessage)).toEqual(["Cursor task 2", "Cursor task 1"]);
         expect(firstPage.nextCursor).toEqual(expect.any(String));
-        expect(secondPage.items.map((item) => item.title)).toEqual(["Cursor task 0"]);
+        expect(secondPage.items.map((item) => item.userMessage)).toEqual(["Cursor task 0"]);
         expect(secondPage.nextCursor).toBeUndefined();
       } finally {
         await store.close();
@@ -252,4 +270,15 @@ function createFixtureDeviceState(): DeviceStateSnapshot {
     ...deviceStateFixture,
     device: deviceStateFixture.devices[0],
   });
+}
+
+function createFixtureTaskBatch(snapshot: DeviceStateSnapshot) {
+  const batch = createRuntimeTaskBatches(snapshot.tasks, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: snapshot.collectedAt,
+    deviceId: snapshot.device.id,
+  })[0];
+  if (!batch) throw new Error("fixture task batch should not be empty");
+  return batch;
 }

@@ -11,11 +11,12 @@ import {
   type AgentSkillProbeStatus,
 } from "../runtime/agent-skill-probe";
 import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
+import { normalizeRuntimeTaskBatch } from "../runtime/runtime-task-sync";
 import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
 import type { CollectionHealthIngestion } from "../runtime/runtime-collection-health";
 
 const maxJsonBodyChars = 10_000_000;
-type CollectorSnapshotType = "device_state";
+type CollectorSnapshotType = "device_state" | "task_batch";
 
 /** Dependencies for the Runtime Fleet local HTTP API. */
 export interface RuntimeHttpApiHandlerOptions {
@@ -147,17 +148,41 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         body = await readJsonBody(request);
         const snapshot = normalizeDeviceStateSnapshot(enrichDeviceStateSnapshotWithRequestNetwork(body, request));
         if (!snapshot) throw new Error("invalid device state snapshot");
+        if (snapshot.tasks.length > 0) throw new Error("device state snapshots must not include tasks; use task batches");
         await options.postgresStore.upsertDeviceStateSnapshot(snapshot);
         sendJson(response, 201, {
           ok: true,
           deviceId: snapshot.device.id,
-          observedAt: snapshot.observedAt,
+          collectedAt: snapshot.collectedAt,
         });
       } catch (error) {
         const errorResponse = createErrorResponse(error, "invalid_device_state_snapshot");
         await recordFailedCollectorIngestion(options, "device_state", body, error);
         await notifyFailedCollectorIngestion(options, "device_state", body, error, deviceAuth);
         logCollectorIngestionFailure(options, "device_state", body, errorResponse);
+        sendJson(response, statusCodeForWriteError(error), errorResponse);
+      }
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/device-task-batches") {
+      const deviceAuth = await authorizeDeviceWrite(options, request, response);
+      if (deviceAuth === null) return;
+      if (!options.postgresStore) {
+        sendJson(response, 503, { error: "postgres_store_unavailable" });
+        return;
+      }
+      let body: unknown = undefined;
+      try {
+        body = await readJsonBody(request);
+        const batch = normalizeRuntimeTaskBatch(body);
+        if (!batch) throw new Error("invalid runtime task batch");
+        const result = await options.postgresStore.upsertRuntimeTaskBatch(batch);
+        sendJson(response, 201, { ok: true, ...result });
+      } catch (error) {
+        const errorResponse = createErrorResponse(error, "invalid_runtime_task_batch");
+        await recordFailedCollectorIngestion(options, "task_batch", body, error);
+        logCollectorIngestionFailure(options, "task_batch", body, errorResponse);
         sendJson(response, statusCodeForWriteError(error), errorResponse);
       }
       return;
@@ -395,7 +420,7 @@ async function recordFailedCollectorIngestion(
   await options.postgresStore.recordFailedCollectorIngestion({
     deviceId: extractDeviceId(snapshotType, body),
     error: `${errorResponse.error}: ${errorResponse.message}`,
-    observedAt: extractObservedAt(body),
+    collectedAt: extractCollectedAt(body),
     snapshotType,
   }).catch(() => undefined);
 }
@@ -464,6 +489,7 @@ function extractDeviceId(snapshotType: CollectorSnapshotType, body: unknown): st
   void snapshotType;
   if (!body || typeof body !== "object") return "unknown";
   const candidate = body as Record<string, unknown>;
+  if (typeof candidate.deviceId === "string" && candidate.deviceId.trim()) return candidate.deviceId;
   const device = candidate.device;
   if (device && typeof device === "object" && typeof (device as Record<string, unknown>).id === "string") {
     return (device as Record<string, string>).id;
@@ -474,19 +500,21 @@ function extractDeviceId(snapshotType: CollectorSnapshotType, body: unknown): st
 function fallbackErrorCodeForSnapshotType(snapshotType: CollectorSnapshotType): string {
   void snapshotType;
   if (snapshotType === "device_state") return "invalid_device_state_snapshot";
+  if (snapshotType === "task_batch") return "invalid_runtime_task_batch";
   return "invalid_device_state_snapshot";
 }
 
 function labelForSnapshotType(snapshotType: CollectorSnapshotType): string {
   void snapshotType;
   if (snapshotType === "device_state") return "设备状态";
+  if (snapshotType === "task_batch") return "任务批量";
   return "设备状态";
 }
 
-function extractObservedAt(body: unknown): string | undefined {
+function extractCollectedAt(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
-  const observedAt = (body as Record<string, unknown>).observedAt;
-  return typeof observedAt === "string" ? observedAt : undefined;
+  const collectedAt = (body as Record<string, unknown>).collectedAt;
+  return typeof collectedAt === "string" ? collectedAt : undefined;
 }
 
 function parseLimit(value: string | null): number | undefined {

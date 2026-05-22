@@ -411,7 +411,9 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
       ...(channel ? { channel } : {}),
       ...(channel ? { conversation: {
         title: trajectoryChannel?.conversationTitle || channel.name || channel.kind,
-        ...(openClawProductConversationExternalId(run.sessionKey, run.conversationId) ? { externalId: openClawProductConversationExternalId(run.sessionKey, run.conversationId) } : {}),
+        ...(trajectoryChannel?.externalId || openClawProductConversationExternalId(run.sessionKey, run.conversationId) ? {
+          externalId: trajectoryChannel?.externalId || openClawProductConversationExternalId(run.sessionKey, run.conversationId),
+        } : {}),
         ...(lastActivityAt ? { lastActivityAt } : {}),
       } } : {}),
       ...(creator ? { creator } : {}),
@@ -552,7 +554,7 @@ function openClawProductUserMessage(run, taskType, channel, dingtalkState) {
   }
 
   if (channel?.kind === "dingtalk") {
-    const message = openClawDingTalkMessageForRun(run, dingtalkState.messages);
+    const message = openClawDingTalkMessageForRun(run, dingtalkState);
     const text = cleanOpenClawTaskText(message?.text);
     return text
       ? { userMessage: text, message }
@@ -564,8 +566,8 @@ function openClawProductUserMessage(run, taskType, channel, dingtalkState) {
     : { reason: "missing userMessage" };
 }
 
-function openClawDingTalkMessageForRun(run, messages) {
-  const inboundMessages = messages.filter((message) => message.direction === "inbound");
+function openClawDingTalkMessageForRun(run, dingtalkState) {
+  const inboundMessages = dingtalkState.messages.filter((message) => message.direction === "inbound");
   if (run.messageId) {
     const messageId = String(run.messageId);
     const exact = inboundMessages.find((message) => message.msgId === messageId);
@@ -573,8 +575,18 @@ function openClawDingTalkMessageForRun(run, messages) {
   }
   const conversationId = run.conversationId || parseOpenClawSessionKey(run.sessionKey)?.conversationId;
   if (!conversationId) return undefined;
-  const candidates = inboundMessages.filter((message) => message.conversationId === String(conversationId));
-  return candidates.length === 1 ? candidates[0] : undefined;
+  for (const candidateId of openClawDingTalkConversationIdCandidates(conversationId, dingtalkState.targetsByConversationId)) {
+    const candidates = inboundMessages.filter((message) => message.conversationId === candidateId);
+    if (candidates.length === 1) return candidates[0];
+  }
+  return undefined;
+}
+
+function openClawDingTalkConversationIdCandidates(conversationId, targetsByConversationId) {
+  const ids = [String(conversationId)];
+  const target = targetsByConversationId.get(String(conversationId)) || targetsByConversationId.get(String(conversationId).toLowerCase());
+  if (target?.conversationId) ids.push(String(target.conversationId));
+  return Array.from(new Set(ids));
 }
 
 function openClawProductAgentReply(run) {
@@ -1179,10 +1191,11 @@ function openClawDingTalkChannel(conversationId, targetsByConversationId, fallba
   const target = conversationId
     ? targetsByConversationId.get(conversationId) || targetsByConversationId.get(String(conversationId).toLowerCase())
     : undefined;
+  const canonicalConversationId = target?.conversationId || conversationId;
   return {
     kind: "dingtalk",
     label: formatOpenClawDingTalkLabel(conversationId, target, fallbackKind),
-    ...(conversationId ? { externalId: conversationId } : {}),
+    ...(canonicalConversationId ? { externalId: canonicalConversationId } : {}),
   };
 }
 
@@ -1201,7 +1214,7 @@ function openClawChannelFromTrajectoryRun(run, targetsByConversationId) {
     const channel = openClawDingTalkChannel(conversationId, targetsByConversationId, session.conversationKind || "group");
     const metadataLabel = run.groupSubject || run.conversationLabel;
     if (metadataLabel && String(channel.label || "").startsWith("DingTalk ")) {
-      return { ...channel, label: metadataLabel, ...(run.conversationId ? { externalId: run.conversationId } : {}) };
+      return { ...channel, label: metadataLabel };
     }
     return channel;
   }

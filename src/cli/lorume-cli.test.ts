@@ -516,6 +516,90 @@ exit 91
     expect(output.tasks[0]).not.toHaveProperty("lastSeenAt");
   });
 
+  it("matches DingTalk messages through canonical conversation ids from OpenClaw targets", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-dingtalk-canonical-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "live");
+    const dingtalkStateDir = path.join(root, ".openclaw", "agents", "main", "sessions", "dingtalk-state");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(dingtalkStateDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-canonical.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-canonical",
+        sessionKey: "agent:main:dingtalk:group:cidztz9jowm0xwxyssk2rf4uw==",
+        ts: "2026-05-21T02:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "run-canonical",
+        sessionKey: "agent:main:dingtalk:group:cidztz9jowm0xwxyssk2rf4uw==",
+        ts: "2026-05-21T02:01:00.000Z",
+        data: { prompt: "记录问题" },
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "run-canonical",
+        sessionKey: "agent:main:dingtalk:group:cidztz9jowm0xwxyssk2rf4uw==",
+        ts: "2026-05-21T02:03:00.000Z",
+        data: { finalStatus: "success", assistantTexts: ["已记录。"] },
+      }),
+    ].join("\n"));
+    writeFileSync(path.join(dingtalkStateDir, "targets.directory.json"), JSON.stringify({
+      groups: {
+        "cidZtz9jOwM0xwxYSSK2RF4Uw==": { currentTitle: "问题登记群" },
+      },
+    }));
+    writeFileSync(path.join(dingtalkStateDir, "messages.context.json"), JSON.stringify({
+      records: [{
+        msgId: "msg-canonical-1",
+        conversationId: "cidZtz9jOwM0xwxYSSK2RF4Uw==",
+        direction: "inbound",
+        text: "记录问题",
+        senderId: "user-canonical-1",
+        senderName: "张良",
+        createdAt: "2026-05-21T02:01:00.000Z",
+        updatedAt: "2026-05-21T02:01:00.000Z",
+      }],
+    }));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      userMessage: "记录问题",
+      agentReply: "已记录。",
+      channel: { kind: "dingtalk", name: "问题登记群", externalId: "cidZtz9jOwM0xwxYSSK2RF4Uw==" },
+      conversation: { title: "问题登记群", externalId: "cidZtz9jOwM0xwxYSSK2RF4Uw==" },
+      creator: { name: "张良", externalId: "user-canonical-1" },
+    });
+    expect(output.diagnostics?.items || []).not.toContainEqual(expect.objectContaining({
+      code: "openclaw_missing_dingtalk_inbound_context",
+    }));
+  });
+
   it("maps OpenClaw cron trajectory runs into scheduled Tasks", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-scheduled-"));
     const binDir = path.join(root, "bin");

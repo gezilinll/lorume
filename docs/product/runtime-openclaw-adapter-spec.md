@@ -160,7 +160,7 @@ Task 必须映射到本次采集到的 Agent。
 | `updatedAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
 | `error` | failed task/tool/trajectory 的用户可读摘要 | `Column 'event_code' cannot be resolved` |
 
-DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation / scheduled 缺少 `agentReply` 可以入库；如果同时缺少可读 `error` 且没有 OpenClaw 已通过消息工具发送的证据，必须写 `warning` diagnostic。
+DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。匹配 message context 时先按 `messageId` 精确匹配；没有精确匹配时，允许通过 `targets.directory` 把 sessionKey 中的小写 conversation id 还原为 canonical conversation id，并且仅在该 conversation 下存在唯一 inbound message 时匹配。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation / scheduled 缺少 `agentReply` 可以入库；如果同时缺少可读 `error` 且没有 OpenClaw 已通过消息工具发送的证据，必须写 `warning` diagnostic。
 
 ### OpenClaw Diagnostics
 

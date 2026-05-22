@@ -333,6 +333,65 @@ console.log(JSON.stringify({
     }
   });
 
+  it("resends tasks when the task sync cache belongs to a different registration scope", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-task-cache-scope-"));
+    const configPath = path.join(configDir, "config.json");
+    const cachePath = path.join(configDir, "task-cache.json");
+    const firstServer = await startRecordingSnapshotServer({
+      expectedAuthorization: "Bearer first-device-token",
+    });
+    let secondServer: Awaited<ReturnType<typeof startRecordingSnapshotServer>> | undefined;
+
+    try {
+      writeFileSync(configPath, JSON.stringify({
+        deviceToken: "first-device-token",
+        serverUrl: firstServer.baseUrl,
+        taskSyncCachePath: cachePath,
+      }));
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--config",
+        configPath,
+      ]);
+
+      expect(firstServer.taskBatches()).toHaveLength(1);
+
+      secondServer = await startRecordingSnapshotServer({
+        expectedAuthorization: "Bearer second-device-token",
+      });
+      writeFileSync(configPath, JSON.stringify({
+        deviceToken: "second-device-token",
+        serverUrl: secondServer.baseUrl,
+        taskSyncCachePath: cachePath,
+      }));
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--config",
+        configPath,
+      ]);
+
+      expect(secondServer.taskBatches()).toHaveLength(1);
+      expect(JSON.stringify(readFileSync(cachePath, "utf8"))).not.toContain("second-device-token");
+      expect(JSON.parse(readFileSync(cachePath, "utf8"))).toMatchObject({
+        schemaVersion: "device-state-v2",
+        scope: {
+          deviceId: "fixture-mac",
+          tokenPrefix: "second-devic",
+        },
+      });
+    } finally {
+      firstServer.server.close();
+      secondServer?.server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("retries transient backend failures when posting device-state snapshots", async () => {
     const { server, receivedSnapshot, baseUrl, requestCount } = await startFlakySnapshotServer();
 
@@ -455,6 +514,54 @@ function runCommand(command: string, args: string[], options: { env?: NodeJS.Pro
       reject(new Error((stderr || stdout).trim()));
     });
   });
+}
+
+async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{
+  baseUrl: string;
+  server: Server;
+  snapshots: () => Array<Record<string, unknown>>;
+  taskBatches: () => Array<Record<string, unknown>>;
+}> {
+  const snapshots: Array<Record<string, unknown>> = [];
+  const taskBatches: Array<Record<string, unknown>> = [];
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
+      response.statusCode = 404;
+      response.end("not found");
+      return;
+    }
+    if (options.expectedAuthorization && request.headers.authorization !== options.expectedAuthorization) {
+      response.statusCode = 401;
+      response.end("unauthorized");
+      return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const parsed = JSON.parse(body);
+      if (request.url === "/api/device-state-snapshots") snapshots.push(parsed);
+      else taskBatches.push(parsed);
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        acked: Array.isArray(parsed.tasks)
+          ? parsed.tasks.map((entry: { hash?: string; task?: { id?: string } }) => ({ hash: entry.hash, id: entry.task?.id }))
+          : [],
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    server,
+    snapshots: () => [...snapshots],
+    taskBatches: () => [...taskBatches],
+  };
 }
 
 async function startSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{

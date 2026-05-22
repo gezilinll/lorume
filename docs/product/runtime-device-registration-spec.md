@@ -235,7 +235,8 @@ HTTP 上报规则：
 - `POST /api/device-state-snapshots` 只接收 Device、Runtime、Agent 和 diagnostics；`tasks` 必须为空数组。
 - `POST /api/device-task-batches` 接收 Task 批次，每条 Task 带 collector 计算出的稳定 hash。
 - 后端按稳定 ID upsert 当前对象；第一版不做删除、不发 tombstone，不清理本轮没有出现的 Task。
-- Collector 本地只缓存已被后端 ACK 的 `{ id, hash, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化或本地未 ACK 的 Task。
+- Collector 本地 ACK cache 必须绑定当前注册作用域：`schemaVersion`、规范化 `serverUrl`、`deviceId` 和 `deviceToken` 的前 12 位 `tokenPrefix`。作用域缺失或不一致时，collector 必须把本地 cache 视为空并重新按批次上报当前可见 Task。
+- Collector 本地只缓存已被后端 ACK 的 `{ id, hash, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化、本地未 ACK、或注册作用域不匹配的 Task。
 - `collectedAt` 表示设备端本轮采集完成时间；`receivedAt` 表示后端收到请求时间。
 - `diagnostics.items` 只存结构化聚合，不存逐条原始字符串。`debug` / `info` 是内部过滤摘要，`warning` 是数据质量缺口，`error` 是采集链路失败。
 - `warning` 不改变 Device / Runtime / Agent 的 `collectionStatus`；只有采集链路 `error` 才能把对应采集状态置为 `error`。Task 自身失败只进入 `Task.status="failed"` 和 `Task.error`。
@@ -247,7 +248,7 @@ HTTP 上报规则：
 | 单批最大 Task 数 | `1000` | 超过时拆分批次。 |
 | 单批最大 JSON 字节 | `512KiB` | 控制网络与后端入库压力。 |
 
-每天或 collector 升级后的 full reconcile 可以清空本地 ack cache，让当前可见 Task 重新按批次上报一次，用来修正设备端缓存漂移。该机制仍然使用 Task batch，不恢复“带 Task 的全量 snapshot”。
+重新注册设备、切换 backend、切换 device id 或更换 device token 会改变注册作用域，并触发当前可见 Task 的批量重传。该机制仍然使用 Task batch，不恢复“带 Task 的全量 snapshot”。
 
 ## API
 

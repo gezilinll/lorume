@@ -306,7 +306,8 @@ async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, 
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
   if (tasks.length === 0) return;
   const cachePath = resolveTaskSyncCachePath(config);
-  const cache = readTaskSyncCache(cachePath);
+  const cacheScope = createTaskSyncCacheScope(serverUrl, snapshot.device.id, deviceToken);
+  const cache = readTaskSyncCache(cachePath, cacheScope);
   const entries = tasks
     .map((task) => ({ task, hash: createRuntimeTaskHash(task) }))
     .filter((entry) => cache.tasks[entry.task.id]?.hash !== entry.hash);
@@ -338,14 +339,62 @@ function resolveTaskSyncCachePath(config = {}) {
   return process.env.LORUME_TASK_SYNC_CACHE_PATH || config.taskSyncCachePath || path.join(homeDir(), ".lorume", "task-sync-cache.json");
 }
 
-function readTaskSyncCache(cachePath) {
+function createTaskSyncCacheScope(serverUrl, deviceId, deviceToken) {
+  return {
+    deviceId: String(deviceId || ""),
+    serverUrl: normalizeTaskSyncServerUrl(serverUrl),
+    tokenPrefix: String(deviceToken || "").slice(0, 12),
+  };
+}
+
+function normalizeTaskSyncServerUrl(serverUrl) {
+  try {
+    const url = new URL(String(serverUrl || ""));
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/g, "");
+    return url.toString().replace(/\/$/g, "");
+  } catch {
+    return String(serverUrl || "").replace(/\/+$/g, "");
+  }
+}
+
+function readTaskSyncCache(cachePath, scope) {
   try {
     const parsed = JSON.parse(readFileSync(cachePath, "utf8"));
-    if (parsed && typeof parsed === "object" && parsed.tasks && typeof parsed.tasks === "object") return parsed;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.schemaVersion === TASK_SYNC_SCHEMA_VERSION &&
+      taskSyncScopesEqual(parsed.scope, scope) &&
+      parsed.tasks &&
+      typeof parsed.tasks === "object"
+    ) {
+      return {
+        schemaVersion: TASK_SYNC_SCHEMA_VERSION,
+        scope,
+        tasks: parsed.tasks,
+      };
+    }
   } catch {
     // Missing or malformed cache starts empty.
   }
-  return { tasks: {} };
+  return createEmptyTaskSyncCache(scope);
+}
+
+function taskSyncScopesEqual(left, right) {
+  return Boolean(left && right) &&
+    left.deviceId === right.deviceId &&
+    left.serverUrl === right.serverUrl &&
+    left.tokenPrefix === right.tokenPrefix;
+}
+
+function createEmptyTaskSyncCache(scope) {
+  return {
+    schemaVersion: TASK_SYNC_SCHEMA_VERSION,
+    scope,
+    tasks: {},
+  };
 }
 
 function writeTaskSyncCache(cachePath, cache) {

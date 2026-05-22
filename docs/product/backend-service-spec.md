@@ -86,14 +86,14 @@ Collector 保持主动上报：
 - 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
 - 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter `warning` diagnostic 时仍算成功，diagnostic 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报和批量 ACK。每天或 collector 升级后的 full reconcile 可以清空本地 task cache，让当前可见 Task 重新分批上报一次以修正漂移。
+- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报和批量 ACK。Task cache 必须绑定 `schemaVersion`、规范化 `serverUrl`、`deviceId` 和 device token 前 12 位 `tokenPrefix`；注册作用域缺失或不一致时，collector 视为空 cache 并重新分批上报当前可见 Task。
 
 建议节奏：
 
 - `10-30s`：heartbeat / 连接状态。
 - `30-60s`：`device_state` 变化采集。
 - `5-10min`：Device / Runtime / Agent metadata full reconcile。
-- 低频任务：Task batch full reconcile（清空本地 ack cache 后重新按批次上报当前可见 Task）。
+- 注册作用域变化：重新注册设备、切换 backend、切换 device id 或更换 device token 后，collector 自动重传当前可见 Task。
 
 ## API
 

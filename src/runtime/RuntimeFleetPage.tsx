@@ -421,7 +421,7 @@ function deviceHealthFromResponse(value: unknown): DeviceHealthStatusResult | nu
 }
 
 function isDeviceHealthStatus(value: unknown): value is DeviceHealthStatus {
-  return value === "syncing" || value === "online" || value === "offline" || value === "abnormal";
+  return value === "syncing" || value === "online" || value === "offline" || value === "error";
 }
 
 function isDeviceHealthLabel(value: unknown): value is DeviceHealthStatusResult["label"] {
@@ -436,7 +436,7 @@ function isCollectionHealthCheck(value: unknown): value is CollectionHealthCheck
     && typeof candidate.label === "string"
     && isCollectionHealthStatus(candidate.status)
     && typeof candidate.message === "string"
-    && Array.isArray(candidate.warnings)
+    && Array.isArray(candidate.diagnostics)
     && typeof candidate.counts === "object"
     && Boolean(candidate.counts)
   );

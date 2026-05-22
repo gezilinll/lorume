@@ -454,7 +454,7 @@ export function getRuntimeFleetDetail(
 export function runtimeFleetStatusFromDeviceHealth(status: DeviceHealthStatus): RuntimeFleetObjectStatus {
   if (status === "online") return "online";
   if (status === "offline") return "offline";
-  if (status === "abnormal") return "error";
+  if (status === "error") return "error";
   return "syncing";
 }
 

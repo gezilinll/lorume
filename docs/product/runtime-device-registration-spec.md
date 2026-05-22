@@ -212,8 +212,21 @@ export interface DeviceStateSnapshot {
   agents: Agent[];
   tasks: Task[];
   diagnostics?: {
-    warnings?: string[];
+    items: CollectionDiagnosticItem[];
   };
+}
+
+export type CollectionDiagnosticSeverity = "debug" | "info" | "warning" | "error";
+
+export interface CollectionDiagnosticItem {
+  code: string;
+  severity: CollectionDiagnosticSeverity;
+  count: number;
+  message: string;
+  source?: string;
+  target?: "adapter" | "collector" | "snapshot" | "task";
+  action?: "ignored" | "task_dropped" | "task_ingested_with_gap" | "ingestion_failed";
+  sampleRefs?: string[];
 }
 ```
 
@@ -224,6 +237,8 @@ HTTP 上报规则：
 - 后端按稳定 ID upsert 当前对象；第一版不做删除、不发 tombstone，不清理本轮没有出现的 Task。
 - Collector 本地只缓存已被后端 ACK 的 `{ id, hash, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化或本地未 ACK 的 Task。
 - `collectedAt` 表示设备端本轮采集完成时间；`receivedAt` 表示后端收到请求时间。
+- `diagnostics.items` 只存结构化聚合，不存逐条原始字符串。`debug` / `info` 是内部过滤摘要，`warning` 是数据质量缺口，`error` 是采集链路失败。
+- `warning` 不改变 Device / Runtime / Agent 的 `collectionStatus`；只有采集链路 `error` 才能把对应采集状态置为 `error`。Task 自身失败只进入 `Task.status="failed"` 和 `Task.error`。
 
 默认批次预算：
 
@@ -254,7 +269,7 @@ OpenClaw 是当前唯一默认启用的 runtime adapter。详细字段映射见 
 | Device | collector host facts | 使用现有本机事实采集逻辑。 |
 | Runtime | OpenClaw config、`openclaw health --json`、`openclaw status --json` | 生成一个 `OpenClaw Gateway` runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw health/status agent 列表和 config agent 列表 | 每个真实 OpenClaw agent id 生成一个 Agent。 |
-| Task | OpenClaw session / trajectory / DingTalk state 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 diagnostic warning。 |
+| Task | OpenClaw session / trajectory / DingTalk state 证据 | 只生成能明确关联到 Agent 的 Task；无法唯一关联时跳过并记录 `warning` diagnostic。 |
 
 Task 上报范围：
 

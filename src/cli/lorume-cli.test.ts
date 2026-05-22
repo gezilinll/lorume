@@ -296,8 +296,12 @@ exit 91
     });
 
     expect(output.tasks).toEqual([]);
-    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("task-ambiguous-1"));
-    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("ambiguous OpenClaw agent"));
+    expect(output.diagnostics.items).toContainEqual(expect.objectContaining({
+      code: "openclaw_ambiguous_agent_link",
+      count: 1,
+      severity: "warning",
+      sampleRefs: ["task-ambiguous-1"],
+    }));
   });
 
   it("maps OpenClaw trajectory run evidence into device-state tasks", () => {
@@ -562,7 +566,12 @@ exit 91
     });
 
     expect(output.tasks).toEqual([]);
-    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("missing DingTalk inbound message context"));
+    expect(output.diagnostics.items).toContainEqual(expect.objectContaining({
+      code: "openclaw_missing_dingtalk_inbound_context",
+      count: 1,
+      severity: "warning",
+      sampleRefs: ["run-missing-message"],
+    }));
   });
 
   it("filters internal OpenClaw announce and subagent runs into diagnostics only", () => {
@@ -605,10 +614,21 @@ exit 91
     });
 
     expect(output.tasks).toEqual([]);
-    expect(output.diagnostics.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining("announce-v1"),
-      expect.stringContaining("subagent-run"),
+    expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "openclaw_internal_announce_ignored",
+        count: 1,
+        severity: "debug",
+        sampleRefs: ["announce-v1"],
+      }),
+      expect.objectContaining({
+        code: "openclaw_internal_subagent_ignored",
+        count: 1,
+        severity: "debug",
+        sampleRefs: ["subagent-run"],
+      }),
     ]));
+    expect(output.diagnostics.items.some((item: { severity?: string }) => item.severity === "warning")).toBe(false);
   });
 
   it("does not cap OpenClaw trajectory tasks by count", () => {

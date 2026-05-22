@@ -2,6 +2,25 @@ export const COLLECTION_STATUSES = ["syncing", "online", "offline", "error"] as 
 
 export type CollectionStatus = (typeof COLLECTION_STATUSES)[number];
 
+export const COLLECTION_DIAGNOSTIC_SEVERITIES = ["debug", "info", "warning", "error"] as const;
+
+export type CollectionDiagnosticSeverity = (typeof COLLECTION_DIAGNOSTIC_SEVERITIES)[number];
+
+export interface CollectionDiagnosticItem {
+  code: string;
+  severity: CollectionDiagnosticSeverity;
+  count: number;
+  message: string;
+  source?: string;
+  target?: "adapter" | "collector" | "snapshot" | "task";
+  action?: "ignored" | "task_dropped" | "task_ingested_with_gap" | "ingestion_failed";
+  sampleRefs?: string[];
+}
+
+export interface CollectionDiagnostics {
+  items: CollectionDiagnosticItem[];
+}
+
 export const RUNTIME_KINDS = ["openclaw", "slock", "multica", "codex"] as const;
 
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
@@ -120,21 +139,20 @@ export interface DeviceStateSnapshot {
   runtimes: Runtime[];
   agents: Agent[];
   tasks: Task[];
-  diagnostics?: {
-    warnings?: string[];
-  };
+  diagnostics?: CollectionDiagnostics;
 }
 
 type LooseRecord = Record<string, any>;
 
 export function createDeviceStateSnapshot(input: LooseRecord): DeviceStateSnapshot {
+  const diagnostics = cleanCollectionDiagnostics(input.diagnostics);
   return {
     collectedAt: input.collectedAt,
     device: cleanDevice(input.device || {}),
     runtimes: Array.isArray(input.runtimes) ? input.runtimes.map(cleanRuntime) : [],
     agents: Array.isArray(input.agents) ? input.agents.map(cleanAgent) : [],
     tasks: Array.isArray(input.tasks) ? input.tasks.map(cleanTask) : [],
-    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+    ...(diagnostics.items.length ? { diagnostics } : {}),
   };
 }
 
@@ -304,6 +322,49 @@ function cleanTaskConversation(value: LooseRecord | undefined): Task["conversati
 function normalizeCollectionStatus(value: string | undefined): CollectionStatus {
   if (value === "syncing" || value === "online" || value === "offline" || value === "error") return value;
   return "syncing";
+}
+
+function cleanCollectionDiagnostics(value: unknown): CollectionDiagnostics {
+  if (!value || typeof value !== "object") return { items: [] };
+  const rawItems: unknown[] = Array.isArray((value as LooseRecord).items) ? (value as LooseRecord).items : [];
+  const items = rawItems.length
+    ? rawItems.map(cleanCollectionDiagnosticItem).filter((item): item is CollectionDiagnosticItem => Boolean(item))
+    : [];
+  return { items };
+}
+
+function cleanCollectionDiagnosticItem(value: unknown): CollectionDiagnosticItem | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as LooseRecord;
+  if (!isNonEmptyString(candidate.code) || !isCollectionDiagnosticSeverity(candidate.severity)) return null;
+  const count = Number(candidate.count);
+  if (!Number.isInteger(count) || count < 1) return null;
+  const message = isNonEmptyString(candidate.message) ? candidate.message : candidate.code;
+  const sampleRefs = Array.isArray(candidate.sampleRefs)
+    ? candidate.sampleRefs.filter(isNonEmptyString).slice(0, 5)
+    : undefined;
+  return {
+    code: candidate.code,
+    severity: candidate.severity,
+    count,
+    message,
+    ...(isNonEmptyString(candidate.source) ? { source: candidate.source } : {}),
+    ...(isCollectionDiagnosticTarget(candidate.target) ? { target: candidate.target } : {}),
+    ...(isCollectionDiagnosticAction(candidate.action) ? { action: candidate.action } : {}),
+    ...(sampleRefs?.length ? { sampleRefs } : {}),
+  };
+}
+
+function isCollectionDiagnosticSeverity(value: unknown): value is CollectionDiagnosticSeverity {
+  return value === "debug" || value === "info" || value === "warning" || value === "error";
+}
+
+function isCollectionDiagnosticTarget(value: unknown): value is NonNullable<CollectionDiagnosticItem["target"]> {
+  return value === "adapter" || value === "collector" || value === "snapshot" || value === "task";
+}
+
+function isCollectionDiagnosticAction(value: unknown): value is NonNullable<CollectionDiagnosticItem["action"]> {
+  return value === "ignored" || value === "task_dropped" || value === "task_ingested_with_gap" || value === "ingestion_failed";
 }
 
 function normalizeRuntimeKind(value: string | undefined): RuntimeKind {

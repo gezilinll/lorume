@@ -39,7 +39,7 @@ describe("deriveDeviceHealthStatus", () => {
         collectedAt: "2026-05-21T08:59:30.000Z",
         receivedAt: "2026-05-21T08:59:35.000Z",
         counts: { devices: 1 },
-        warnings: [],
+        diagnostics: [],
       }],
     })).toMatchObject({
       status: "online",
@@ -65,7 +65,7 @@ describe("deriveDeviceHealthStatus", () => {
         collectedAt: "2026-05-21T08:40:00.000Z",
         receivedAt: "2026-05-21T08:40:10.000Z",
         counts: { devices: 1 },
-        warnings: [],
+        diagnostics: [],
       }],
     })).toMatchObject({
       status: "offline",
@@ -74,7 +74,7 @@ describe("deriveDeviceHealthStatus", () => {
     });
   });
 
-  it("returns abnormal for the latest failed device-state collection", () => {
+  it("returns error for the latest failed device-state collection", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -91,18 +91,18 @@ describe("deriveDeviceHealthStatus", () => {
         collectedAt: "2026-05-21T08:59:30.000Z",
         receivedAt: "2026-05-21T08:59:35.000Z",
         counts: {},
-        warnings: [],
+        diagnostics: [],
         error: "invalid device state snapshot",
       }],
     })).toMatchObject({
-      status: "abnormal",
+      status: "error",
       label: "异常",
       reason: "last_device_state_failed",
       message: "最近一次设备状态采集失败",
     });
   });
 
-  it("returns abnormal when a fresh connection exceeds the first sync window without device-state collection", () => {
+  it("returns error when a fresh connection exceeds the first sync window without device-state collection", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -114,7 +114,7 @@ describe("deriveDeviceHealthStatus", () => {
       },
       deviceStateIngestions: [],
     })).toMatchObject({
-      status: "abnormal",
+      status: "error",
       label: "异常",
       reason: "first_sync_timeout",
     });

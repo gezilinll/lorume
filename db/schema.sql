@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS collector_ingestions (
   received_at timestamptz NOT NULL DEFAULT now(),
   duration_ms integer,
   counts jsonb NOT NULL DEFAULT '{}'::jsonb,
-  warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+  diagnostics jsonb NOT NULL DEFAULT '[]'::jsonb,
   error text,
   created_at timestamptz NOT NULL DEFAULT now()
 );

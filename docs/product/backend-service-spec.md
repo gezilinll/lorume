@@ -63,7 +63,7 @@ flowchart LR
 - `runtimes`：设备上的 Runtime / 平台入口，例如 OpenClaw、Multica、Codex、Slock。
 - `agents`：Lorume 管理视角下的 Managed Agent。
 - `tasks`：Agent 承接的业务工作。Task 只通过 `agent_id` 关联 Agent，不直接保存 Runtime 或 Device 外键。
-- `collector_ingestions`：每次 collector 上报的结果、数量、耗时、warning 和错误摘要。
+- `collector_ingestions`：每次 collector 上报的结果、数量、耗时、结构化 diagnostics 和错误摘要。
 - `operations`：用户可见的异步动作状态。
 - `operation_jobs`：后端 runner 可 claim 和执行的任务单元。
 - `notification_events` / `notification_threads` / `notification_deliveries` / `notification_preferences`：公共通知事件、聚合、投递和偏好。
@@ -79,12 +79,12 @@ Collector 保持主动上报：
 - `POST /api/device-task-batches` 按稳定 Task ID upsert Task，并返回 ACK 列表；collector 只有在 ACK 中看到当前 `{ id, hash }` 后才推进本地 task sync cache。
 - 第一版不做删除、不发 tombstone，不清理本轮没有出现的 Runtime、Agent 或 Task。后续如需删除语义，必须先补 spec 和 harness。
 - `inventory` 和 `work_state` 不作为兼容回退保留；对应旧 HTTP 入口、CLI 命令和 DB 表都不属于当前规则。
-- Task 必须引用当前数据库中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录 warning，不能写成悬空任务。
-- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、warnings、规范化错误码、用户可读错误摘要、`collectedAt` 和 `receivedAt`。
-- 认证后的 collector 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime warning，接收人为所属组织 active owner / admin。
+- Task 必须引用当前数据库中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录结构化 diagnostic，不能写成悬空任务。
+- 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、结构化 diagnostics、规范化错误码、用户可读错误摘要、`collectedAt` 和 `receivedAt`。
+- 认证后的 collector 上报失败除了写入 `collector_ingestions`，还必须进入统一 Notification 模型，按设备和 snapshot type 聚合为 runtime 采集失败通知，接收人为所属组织 active owner / admin。
 - Collector 上报 `device_state` 或 `task_batch` 时遇到网络错误或后端 `5xx` 可以做有限重试；`4xx` 代表 payload 或权限问题，不应通过重试掩盖。
 - 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
-- 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter warning 时仍算成功，warning 进入 ingestion、日志、通知或后续诊断入口。
+- 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter `warning` diagnostic 时仍算成功，diagnostic 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
 - 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报和批量 ACK。每天或 collector 升级后的 full reconcile 可以清空本地 task cache，让当前可见 Task 重新分批上报一次以修正漂移。
 
@@ -122,7 +122,7 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
   - 返回最近采集记录，用于解释数据新鲜度和缺口；记录必须包含 `collectedAt` 和 `receivedAt`，方便区分设备采集完成时间与后端接收时间。
 - `GET /api/devices/:deviceId/collection-health`
   - 返回设备级采集诊断摘要，只返回 `device_state` 检查项。
-  - `healthy`：最近一次上报成功；warnings 只进入诊断信息，不改变 Runtime Fleet 展示状态。
+  - `healthy`：最近一次上报成功；`debug` / `info` / `warning` diagnostics 只进入诊断信息，不改变 Runtime Fleet 展示状态。
   - `failed`：尚未收到记录、最近一次上报失败、payload 结构不可用或后端写入失败。
   - 该接口不再返回用户界面专用的 `warning`、`stale` 或 `unknown` 状态；Runtime Fleet 展示层只把 `failed` 折叠为对象 `异常`。
   - 该接口面向产品诊断，不返回外部平台密钥、原始 payload 或调试-only 字段。
@@ -184,7 +184,7 @@ Production-like 本地验收形态：
 - connection channel harness：WebSocket hello、heartbeat、断连和 stale 判定继续可用。
 - operation runner harness：Postgres Job claim、lease、retry、完成态和失败态。
 - notification harness：事件聚合、限流、in-app 记录和 email delivery 记录。
-- collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime warning 通知。
+- collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime 采集失败通知。
 - collector contract harness：当前 collector `device_state` payload 可被后端接收。
 - error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
 - structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。

@@ -214,7 +214,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
-  it("marks diagnostics abnormal after invalid device-state ingestion", async () => {
+  it("marks diagnostics error after invalid device-state ingestion", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
       runDatabaseSchemaScript(database.url);
@@ -240,7 +240,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
           deviceId: "broken-diagnostic-device",
           label: "异常",
           reason: "last_device_state_failed",
-          status: "abnormal",
+          status: "error",
         });
       } finally {
         await postgresStore.close();

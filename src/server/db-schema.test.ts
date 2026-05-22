@@ -81,6 +81,19 @@ describeDb("database schema baseline", () => {
           "created_at",
           "updated_at",
         ]);
+        await expect(listPublicColumnNames(client, "collector_ingestions")).resolves.toEqual([
+          "id",
+          "device_id",
+          "snapshot_type",
+          "status",
+          "collected_at",
+          "received_at",
+          "duration_ms",
+          "counts",
+          "diagnostics",
+          "error",
+          "created_at",
+        ]);
       } finally {
         await client.end();
       }

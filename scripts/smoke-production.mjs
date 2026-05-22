@@ -56,7 +56,7 @@ const authenticatedChecks = [
     path: `/api/devices/${encodeURIComponent(deviceId)}/diagnostics`,
     type: "json",
     validate: (body) => body?.deviceId === deviceId
-      && ["syncing", "online", "offline", "abnormal"].includes(body?.status)
+      && ["syncing", "online", "offline", "error"].includes(body?.status)
       && typeof body?.label === "string",
   },
 ];

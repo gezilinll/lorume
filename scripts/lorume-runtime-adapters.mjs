@@ -156,6 +156,96 @@ function collectLocalIps() {
   return Array.from(new Set(values)).sort();
 }
 
+function createCollectionDiagnosticCollector() {
+  const byCode = new Map();
+  return {
+    add(input, sampleRef) {
+      if (!input?.code || !input?.severity) return;
+      const existing = byCode.get(input.code) || {
+        code: input.code,
+        severity: input.severity,
+        count: 0,
+        message: input.message || input.code,
+        source: input.source || "openclaw",
+        ...(input.target ? { target: input.target } : {}),
+        ...(input.action ? { action: input.action } : {}),
+        sampleRefs: [],
+      };
+      existing.count += 1;
+      if (sampleRef && existing.sampleRefs.length < 5 && !existing.sampleRefs.includes(String(sampleRef))) {
+        existing.sampleRefs.push(String(sampleRef));
+      }
+      byCode.set(input.code, existing);
+    },
+    items() {
+      return Array.from(byCode.values())
+        .map((item) => ({
+          ...item,
+          message: formatDiagnosticMessage(item),
+          ...(item.sampleRefs.length ? { sampleRefs: item.sampleRefs } : {}),
+        }))
+        .sort(compareDiagnostics);
+    },
+  };
+}
+
+function formatDiagnosticMessage(item) {
+  const count = item.count;
+  const messages = {
+    openclaw_ambiguous_agent_link: `${count} 条 OpenClaw 任务缺少明确 Agent 归属，已跳过。`,
+    openclaw_internal_announce_ignored: `${count} 条 OpenClaw 内部 announce 记录已过滤。`,
+    openclaw_internal_command_completion_ignored: `${count} 条 OpenClaw 内部命令完成记录已过滤。`,
+    openclaw_internal_heartbeat_ignored: `${count} 条 OpenClaw 内部心跳记录已过滤。`,
+    openclaw_internal_subagent_ignored: `${count} 条 OpenClaw 内部 subagent 记录已过滤。`,
+    openclaw_internal_system_ignored: `${count} 条 OpenClaw 内部 system 记录已过滤。`,
+    openclaw_missing_agent_link: `${count} 条 OpenClaw 任务缺少 Agent 归属，已跳过。`,
+    openclaw_missing_dingtalk_inbound_context: `${count} 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。`,
+    openclaw_missing_prompt_ignored: `${count} 条 OpenClaw 非任务记录缺少 prompt，已过滤。`,
+    openclaw_missing_agent_reply: `${count} 条 OpenClaw 会话任务缺少 Agent 回复，已按不完整任务入库。`,
+    openclaw_task_missing_user_message: `${count} 条 OpenClaw 任务缺少用户消息，已跳过。`,
+    openclaw_uncollected_agent_link: `${count} 条 OpenClaw 任务归属到未采集 Agent，已跳过。`,
+    openclaw_unsupported_task_type_ignored: `${count} 条 OpenClaw 非产品任务类型已过滤。`,
+  };
+  return messages[item.code] || item.message || item.code;
+}
+
+function compareDiagnostics(left, right) {
+  const severityRank = { error: 0, warning: 1, info: 2, debug: 3 };
+  const severityDelta = severityRank[left.severity] - severityRank[right.severity];
+  if (severityDelta !== 0) return severityDelta;
+  return String(left.code).localeCompare(String(right.code));
+}
+
+function openClawEligibilityDiagnostic(reason) {
+  const base = { source: "openclaw", target: "adapter", action: "ignored" };
+  if (reason === "missing task prompt") {
+    return { ...base, code: "openclaw_task_missing_user_message", severity: "warning", target: "task", action: "task_dropped" };
+  }
+  if (reason === "missing prompt") return { ...base, code: "openclaw_missing_prompt_ignored", severity: "debug" };
+  if (reason === "internal heartbeat run") return { ...base, code: "openclaw_internal_heartbeat_ignored", severity: "debug" };
+  if (reason === "internal command completion run") return { ...base, code: "openclaw_internal_command_completion_ignored", severity: "debug" };
+  if (reason === "internal system run") return { ...base, code: "openclaw_internal_system_ignored", severity: "debug" };
+  if (reason === "internal announce run") return { ...base, code: "openclaw_internal_announce_ignored", severity: "debug" };
+  if (reason === "internal subagent run") return { ...base, code: "openclaw_internal_subagent_ignored", severity: "debug" };
+  if (reason === "unsupported OpenClaw task type") return { ...base, code: "openclaw_unsupported_task_type_ignored", severity: "info" };
+  return null;
+}
+
+function openClawAgentDiagnostic(reason) {
+  const base = { source: "openclaw", target: "task", action: "task_dropped", severity: "warning" };
+  if (reason === "ambiguous OpenClaw agent ownership") return { ...base, code: "openclaw_ambiguous_agent_link" };
+  if (reason === "missing OpenClaw agent ownership") return { ...base, code: "openclaw_missing_agent_link" };
+  if (reason === "uncollected OpenClaw agent") return { ...base, code: "openclaw_uncollected_agent_link" };
+  return null;
+}
+
+function openClawUserMessageDiagnostic(reason) {
+  const base = { source: "openclaw", target: "task", action: "task_dropped", severity: "warning" };
+  if (reason === "missing DingTalk inbound message context") return { ...base, code: "openclaw_missing_dingtalk_inbound_context" };
+  if (reason === "missing scheduled prompt" || reason === "missing userMessage") return { ...base, code: "openclaw_task_missing_user_message" };
+  return null;
+}
+
 function createProductRuntime({ deviceId, kind, name, version, collectionStatus, lastSeenAt, diagnostics }) {
   return {
     id: makeProductRuntimeId(deviceId, kind),
@@ -210,7 +300,7 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
   const config = readOpenClawConfig();
   const health = runJson("openclaw", ["health", "--json", "--timeout", "5000"]);
   const status = runJson("openclaw", ["status", "--json", "--timeout", "5000"]);
-  if (!health && !status && !config) return { runtimes: [], agents: [], tasks: [], warnings: [] };
+  if (!health && !status && !config) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
 
   const gateway = status?.gateway;
   const collectionStatus = health?.ok === false || gateway?.reachable === false ? "error" : "online";
@@ -257,15 +347,13 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
     }),
   );
 
-  const warnings = [...trajectoryMapping.warnings];
-
-  return { runtimes: [runtime], agents, tasks: trajectoryMapping.tasks, warnings };
+  return { runtimes: [runtime], agents, tasks: trajectoryMapping.tasks, diagnostics: trajectoryMapping.diagnostics };
 }
 
 function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId }) {
   const dingtalkState = readOpenClawDingTalkState();
   const tasks = [];
-  const warnings = [];
+  const diagnostics = createCollectionDiagnosticCollector();
   const agentExternalIds = new Set();
   const taskAgentExternalIds = new Map();
 
@@ -274,16 +362,16 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
     const runId = String(run.runId || "run");
     const eligibility = openClawTrajectoryTaskEligibility(run, taskType);
     if (!eligibility.create) {
-      if (eligibility.reason) warnings.push(`Skipped OpenClaw trajectory run ${runId}: ${eligibility.reason}.`);
+      diagnostics.add(openClawEligibilityDiagnostic(eligibility.reason), runId);
       continue;
     }
     const agentResolution = resolveOpenClawTrajectoryAgentExternalId(run, knownAgentIds);
     if (!agentResolution.agentExternalId) {
-      warnings.push(`Skipped OpenClaw trajectory run ${runId}: ${agentResolution.reason}.`);
+      diagnostics.add(openClawAgentDiagnostic(agentResolution.reason), runId);
       continue;
     }
     if (knownAgentIds.length && !knownAgentIds.includes(agentResolution.agentExternalId)) {
-      warnings.push(`Skipped OpenClaw trajectory run ${runId}: agent ${agentResolution.agentExternalId} is not in collected OpenClaw agents.`);
+      diagnostics.add(openClawAgentDiagnostic("uncollected OpenClaw agent"), runId);
       continue;
     }
 
@@ -293,7 +381,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
     const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
     const userMessageResult = openClawProductUserMessage(run, taskType, channel, dingtalkState);
     if (!userMessageResult.userMessage) {
-      warnings.push(`Skipped OpenClaw trajectory run ${runId}: ${userMessageResult.reason}.`);
+      diagnostics.add(openClawUserMessageDiagnostic(userMessageResult.reason), runId);
       continue;
     }
     const status = normalizeOpenClawTrajectoryProductTaskStatus(run);
@@ -302,7 +390,13 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
     const sourceExternalId = run.messageId || runId;
     const agentReply = openClawProductAgentReply(run);
     if (status === "done" && taskType === "conversation" && !agentReply) {
-      warnings.push(`OpenClaw trajectory run ${runId}: done conversation task is missing agentReply.`);
+      diagnostics.add({
+        action: "task_ingested_with_gap",
+        code: "openclaw_missing_agent_reply",
+        severity: "warning",
+        source: "openclaw",
+        target: "task",
+      }, runId);
     }
     const creator = openClawProductCreatorFromTrajectoryRun(run) || openClawProductCreatorFromDingTalkMessage(userMessageResult.message);
 
@@ -351,7 +445,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
   );
   for (const agentExternalId of visibleAgentExternalIds) agentExternalIds.add(agentExternalId);
 
-  return { tasks: orderedTasks, warnings, agentExternalIds: Array.from(agentExternalIds) };
+  return { tasks: orderedTasks, diagnostics: diagnostics.items(), agentExternalIds: Array.from(agentExternalIds) };
 }
 
 function orderOpenClawProductTasks(tasks) {
@@ -1002,7 +1096,11 @@ function shouldCreateOpenClawTrajectoryTask(run, taskType = inferOpenClawTaskTyp
 
 function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType(run)) {
   const prompt = cleanOpenClawPromptText(run?.prompt);
-  if (!prompt) return { create: false, reason: "missing prompt" };
+  if (!prompt) {
+    return taskType === "conversation" || taskType === "scheduled"
+      ? { create: false, reason: "missing task prompt" }
+      : { create: false, reason: "missing prompt" };
+  }
   if (prompt === "HEARTBEAT_OK" || /^\[OpenClaw heartbeat poll\]/i.test(prompt)) {
     return { create: false, reason: "internal heartbeat run" };
   }
@@ -1144,7 +1242,7 @@ export function collectDeviceStateSnapshot(config = {}, args = {}) {
   const baseDevice = createDevice(mergedConfig, collectedAt);
   const collected = adapterEnabled(mergedConfig, "openclaw")
     ? collectOpenClawDeviceState(baseDevice.id, collectedAt)
-    : { runtimes: [], agents: [], tasks: [], warnings: [] };
+    : { runtimes: [], agents: [], tasks: [], diagnostics: [] };
 
   return {
     collectedAt,
@@ -1159,6 +1257,6 @@ export function collectDeviceStateSnapshot(config = {}, args = {}) {
     runtimes: collected.runtimes,
     agents: collected.agents,
     tasks: collected.tasks,
-    ...(collected.warnings.length ? { diagnostics: { warnings: collected.warnings } } : {}),
+    ...(collected.diagnostics.length ? { diagnostics: { items: collected.diagnostics } } : {}),
   };
 }

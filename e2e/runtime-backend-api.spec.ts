@@ -297,7 +297,7 @@ async function expectDeviceDiagnostics(
   expect(response.status()).toBe(200);
   const body = await response.json() as { deviceId?: string; status?: string; label?: string };
   expect(body.deviceId).toBe(deviceId);
-  expect(["syncing", "online", "offline", "abnormal"]).toContain(body.status);
+  expect(["syncing", "online", "offline", "error"]).toContain(body.status);
   expect(["同步中", "在线", "离线", "异常"]).toContain(body.label);
   return body;
 }

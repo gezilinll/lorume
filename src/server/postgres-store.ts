@@ -8,7 +8,15 @@ import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
-import { createDeviceStateSnapshot, type Agent, type Device, type DeviceStateSnapshot, type Runtime, type Task } from "../runtime/runtime-model";
+import {
+  createDeviceStateSnapshot,
+  type Agent,
+  type CollectionDiagnosticItem,
+  type Device,
+  type DeviceStateSnapshot,
+  type Runtime,
+  type Task,
+} from "../runtime/runtime-model";
 import type { RuntimeTaskBatch } from "../runtime/runtime-task-sync";
 
 const { Pool } = pg;
@@ -56,7 +64,7 @@ export interface PostgresCollectorIngestion {
   collectedAt: string | Date | null;
   receivedAt: string | Date;
   counts: Record<string, number>;
-  warnings: string[];
+  diagnostics: CollectionDiagnosticItem[];
   error?: string | null;
 }
 
@@ -137,8 +145,8 @@ export interface PostgresFailedCollectorIngestionInput {
   snapshotType: CollectorSnapshotType;
   /** Observed timestamp from the invalid payload when available. */
   collectedAt?: string;
-  /** Warning strings extracted before failure. */
-  warnings?: string[];
+  /** Structured diagnostics extracted before failure. */
+  diagnostics?: CollectionDiagnosticItem[];
   /** Short error summary safe for diagnostics. */
   error: string;
 }
@@ -158,7 +166,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         collected_at AS "collectedAt",
         received_at AS "receivedAt",
         counts,
-        warnings,
+        diagnostics,
         error
       FROM collector_ingestions
       WHERE device_id = $1
@@ -190,7 +198,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           collectedAt: snapshot.collectedAt,
           snapshotType: "device_state",
           status: "succeeded",
-          warnings: snapshot.diagnostics?.warnings ?? [],
+          diagnostics: snapshot.diagnostics?.items ?? [],
         });
         return { deviceId: snapshot.device.id, snapshotType: "device_state", counts };
       });
@@ -213,7 +221,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           collectedAt: batch.collectedAt,
           snapshotType: "task_batch",
           status: "succeeded",
-          warnings: [],
+          diagnostics: [],
         });
         return { acked, batchId: batch.batchId, counts, deviceId: batch.deviceId };
       });
@@ -226,7 +234,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         collectedAt: input.collectedAt ?? new Date().toISOString(),
         snapshotType: input.snapshotType,
         status: "failed",
-        warnings: input.warnings ?? [],
+        diagnostics: input.diagnostics ?? [],
       });
     },
     async checkReady() {
@@ -558,12 +566,12 @@ async function insertCollectorIngestion(
     status: "succeeded" | "failed";
     collectedAt: string;
     counts: Record<string, number>;
-    warnings: string[];
+    diagnostics: CollectionDiagnosticItem[];
     error: string | null;
   },
 ): Promise<void> {
   await client.query(`
-    INSERT INTO collector_ingestions (device_id, snapshot_type, status, collected_at, counts, warnings, error)
+    INSERT INTO collector_ingestions (device_id, snapshot_type, status, collected_at, counts, diagnostics, error)
     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
   `, [
     input.deviceId,
@@ -571,7 +579,7 @@ async function insertCollectorIngestion(
     input.status,
     toDate(input.collectedAt),
     toJson(input.counts),
-    toJson(input.warnings),
+    toJson(input.diagnostics),
     input.error,
   ]);
 }

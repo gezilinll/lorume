@@ -1,6 +1,7 @@
 import type { CollectionHealthIngestion } from "./runtime-collection-health";
+import type { CollectionStatus } from "./runtime-model";
 
-export type DeviceHealthStatus = "syncing" | "online" | "offline" | "abnormal";
+export type DeviceHealthStatus = CollectionStatus;
 
 export type DeviceHealthReason =
   | "first_sync_pending"
@@ -47,7 +48,7 @@ const labels: Record<DeviceHealthStatus, DeviceHealthStatusResult["label"]> = {
   syncing: "同步中",
   online: "在线",
   offline: "离线",
-  abnormal: "异常",
+  error: "异常",
 };
 
 /** Derive the user-visible Device status from connection freshness and device-state ingestion only. */
@@ -60,7 +61,7 @@ export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): Device
   const lastHeartbeatAt = input.connection?.lastHeartbeatAt;
 
   if (input.connection?.lastError) {
-    return result(input, "abnormal", "control_error", "设备连接出现异常", {
+    return result(input, "error", "control_error", "设备连接出现异常", {
       lastHeartbeatAt,
       lastDeviceStateSuccessAt: receivedAt(latestSuccess),
       lastDeviceStateFailureAt: latestDeviceState?.status === "failed" ? receivedAt(latestDeviceState) : undefined,
@@ -68,7 +69,7 @@ export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): Device
   }
 
   if (latestDeviceState?.status === "failed") {
-    return result(input, "abnormal", "last_device_state_failed", "最近一次设备状态采集失败", {
+    return result(input, "error", "last_device_state_failed", "最近一次设备状态采集失败", {
       lastHeartbeatAt,
       lastDeviceStateSuccessAt: receivedAt(latestSuccess),
       lastDeviceStateFailureAt: receivedAt(latestDeviceState),
@@ -77,7 +78,7 @@ export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): Device
 
   if (!latestSuccess) {
     if (isFirstSyncTimedOut(input.connection?.connectedAt, input.now, firstSyncWindowMs)) {
-      return result(input, "abnormal", "first_sync_timeout", "设备连接后仍未完成首次同步", {
+      return result(input, "error", "first_sync_timeout", "设备连接后仍未完成首次同步", {
         lastHeartbeatAt,
       });
     }

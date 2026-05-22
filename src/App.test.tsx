@@ -65,7 +65,7 @@ function collectionHealthResponse(snapshot: RuntimeFleetSnapshot) {
         lastReceivedAt: snapshot.collectedAt,
         message: "采集正常",
         status: "healthy",
-        warnings: [],
+        diagnostics: [],
       },
     ],
     deviceId: snapshot.devices[0].id,

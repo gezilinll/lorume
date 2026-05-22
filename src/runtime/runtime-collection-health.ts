@@ -1,3 +1,5 @@
+import type { CollectionDiagnosticItem } from "./runtime-model";
+
 /** Snapshot type that the device collector reports for the current product model. */
 export type CollectionHealthSnapshotType = "device_state";
 
@@ -24,8 +26,8 @@ export interface CollectionHealthIngestion {
   receivedAt: string | Date;
   /** Object counts written by the ingestion. */
   counts: Record<string, number>;
-  /** Adapter warnings captured without failing the ingestion. */
-  warnings: string[];
+  /** Structured adapter diagnostics captured without failing the ingestion. */
+  diagnostics: CollectionDiagnosticItem[];
   /** Error summary for failed ingestion. */
   error?: string | null;
 }
@@ -44,8 +46,8 @@ export interface CollectionHealthCheck {
   lastReceivedAt?: string;
   /** Latest object counts for this snapshot type. */
   counts: Record<string, number>;
-  /** Adapter warnings from the latest ingestion. */
-  warnings: string[];
+  /** Structured diagnostics from the latest ingestion. */
+  diagnostics: CollectionDiagnosticItem[];
   /** Error summary from the latest failed ingestion. */
   error?: string | null;
   /** Short explanation suitable for the UI. */
@@ -121,13 +123,16 @@ function deriveCheck(
       label,
       status: "failed",
       counts: {},
-      warnings: [],
+      diagnostics: [],
       message: "尚未收到采集记录",
     };
   }
 
   const lastReceivedAt = toIso(ingestion.receivedAt);
   const lastCollectedAt = toIso(ingestion.collectedAt);
+  const diagnostics = ingestion.diagnostics ?? [];
+  const warningCount = diagnosticCount(diagnostics, "warning");
+  const errorCount = diagnosticCount(diagnostics, "error");
   if (ingestion.status === "failed") {
     return {
       id: snapshotType,
@@ -136,13 +141,27 @@ function deriveCheck(
       lastCollectedAt,
       lastReceivedAt,
       counts: ingestion.counts,
-      warnings: ingestion.warnings,
+      diagnostics,
       error: ingestion.error ?? null,
       message: "采集失败",
     };
   }
 
-  if (ingestion.warnings.length > 0) {
+  if (errorCount > 0) {
+    return {
+      id: snapshotType,
+      label,
+      status: "failed",
+      lastCollectedAt,
+      lastReceivedAt,
+      counts: ingestion.counts,
+      diagnostics,
+      error: ingestion.error ?? null,
+      message: `采集存在 ${errorCount} 条错误`,
+    };
+  }
+
+  if (warningCount > 0) {
     return {
       id: snapshotType,
       label,
@@ -150,9 +169,9 @@ function deriveCheck(
       lastCollectedAt,
       lastReceivedAt,
       counts: ingestion.counts,
-      warnings: ingestion.warnings,
+      diagnostics,
       error: ingestion.error ?? null,
-      message: `采集成功，但有 ${ingestion.warnings.length} 条警告`,
+      message: `采集成功，但有 ${warningCount} 条数据质量提示`,
     };
   }
 
@@ -163,10 +182,16 @@ function deriveCheck(
     lastCollectedAt,
     lastReceivedAt,
     counts: ingestion.counts,
-    warnings: [],
+    diagnostics,
     error: null,
     message: "采集正常",
   };
+}
+
+function diagnosticCount(diagnostics: CollectionDiagnosticItem[], severity: CollectionDiagnosticItem["severity"]): number {
+  return diagnostics
+    .filter((item) => item.severity === severity)
+    .reduce((sum, item) => sum + item.count, 0);
 }
 
 function latestIngestion(

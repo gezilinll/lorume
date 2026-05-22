@@ -85,7 +85,7 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 |---|---|---|
 | Runtime | OpenClaw config、health/status 只读结果 | 生成一个 OpenClaw Runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw agent 配置或 health/status 中可识别的 agent | 每个真实 agent 生成一个 Lorume Agent。 |
-| Task | OpenClaw session JSONL、trajectory JSONL、DingTalk state | 只生成能明确归属到 Agent 的 `conversation` 或 `scheduled` 任务；无法唯一归属时跳过并写 diagnostic warning。 |
+| Task | OpenClaw session JSONL、trajectory JSONL、DingTalk state | 只生成能明确归属到 Agent 的 `conversation` 或 `scheduled` 任务；无法唯一归属时跳过并写 `warning` diagnostic。 |
 
 稳定 ID：
 
@@ -106,7 +106,7 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 | 会话任务 | session `*.jsonl`、`*.trajectory.jsonl`、`dingtalk-state/*.json` | 一条可识别用户消息 turn 生成一个 `taskType="conversation"` 的 Task。 |
 | 定时任务 | cron session JSONL 和 trajectory JSONL | 一次 cron 执行生成一个 `taskType="scheduled"` 的 Task。 |
 | ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 当前不入库、不上报；仅允许 adapter 内部用于失败摘要判断。 |
-| Diagnostics | `openclaw tasks list --json` | 可保存为 warning/raw diagnostics，不作为产品 Task 来源。 |
+| Diagnostics | `openclaw tasks list --json` | 只能保存为结构化 diagnostics，不作为产品 Task 来源。 |
 
 ### OpenClaw Task Snapshot 窗口
 
@@ -128,7 +128,7 @@ Task 必须映射到本次采集到的 Agent。
 2. Agent id 固定为 `${runtimeId}:agent:${openClawAgentId}`。
 3. Task 从 `sessionKey` 解析 `agent:<openClawAgentId>:`，例如 `agent:main:dingtalk:group:...` 解析为 `main`。
 4. 如果 `sessionKey` 解析不到 agent，且 health/status/config 无法唯一确定 agent，这条 Task 不入库。
-5. 如果解析出的 agent 不在本次采集的 agents 集合中，这条 Task 不入库，并写 diagnostic warning。
+5. 如果解析出的 agent 不在本次采集的 agents 集合中，这条 Task 不入库，并写 `warning` diagnostic。
 
 ### OpenClaw 字段映射
 
@@ -158,7 +158,25 @@ Task 必须映射到本次采集到的 Agent。
 | `updatedAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
 | `error` | failed task/tool/trajectory 的用户可读摘要 | `Column 'event_code' cannot be resolved` |
 
-DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 diagnostic warning。`done` conversation 缺少 `agentReply` 可以入库，但必须写 diagnostic warning。
+DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation 缺少 `agentReply` 可以入库，但必须写 `warning` diagnostic。
+
+### OpenClaw Diagnostics
+
+OpenClaw adapter 不输出逐条原始 warning 字符串。它必须输出结构化聚合 `diagnostics.items`，并且按以下规则分类：
+
+| code | severity | 规则 |
+|---|---|---|
+| `openclaw_internal_heartbeat_ignored` | `debug` | OpenClaw 内部心跳记录，过滤，不影响健康状态。 |
+| `openclaw_internal_command_completion_ignored` | `debug` | OpenClaw 内部命令完成记录，过滤，不影响健康状态。 |
+| `openclaw_internal_system_ignored` / `openclaw_internal_announce_ignored` / `openclaw_internal_subagent_ignored` | `debug` | 内部系统记录，过滤，不影响健康状态。 |
+| `openclaw_unsupported_task_type_ignored` | `info` | 非产品任务类型，过滤，不影响健康状态。 |
+| `openclaw_missing_prompt_ignored` | `debug` | 不能确认是产品任务且缺少 prompt，过滤，不影响健康状态。 |
+| `openclaw_task_missing_user_message` | `warning` | 已确认是产品任务但缺用户消息，跳过该任务。 |
+| `openclaw_missing_dingtalk_inbound_context` | `warning` | DingTalk 会话任务缺 inbound message context，跳过该任务。 |
+| `openclaw_ambiguous_agent_link` / `openclaw_missing_agent_link` / `openclaw_uncollected_agent_link` | `warning` | 任务无法稳定关联 Agent，跳过该任务。 |
+| `openclaw_missing_agent_reply` | `warning` | `done` 会话任务缺 Agent 回复，任务可入库但标记数据质量缺口。 |
+
+`warning` 只表示数据质量缺口，不把 Device / Runtime / Agent 置为 `error`。OpenClaw 任务自身执行失败进入 `Task.status="failed"` 和 `Task.error`，不算采集链路 error。
 
 ## 用户可读规则
 

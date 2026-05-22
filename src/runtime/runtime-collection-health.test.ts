@@ -8,7 +8,7 @@ import {
 const now = new Date("2026-05-12T10:00:00.000Z");
 
 describe("runtime collection health", () => {
-  it("marks a device healthy when device state was ingested without warnings", () => {
+  it("marks a device healthy when device state was ingested without diagnostics", () => {
     const health = deriveDeviceCollectionHealth("gezilinll-claw", [
       ingestion("device_state", "succeeded", "2026-05-12T09:59:30.000Z", {
         agents: 1,
@@ -26,11 +26,15 @@ describe("runtime collection health", () => {
     expect(collectionHealthStatusLabels[health.status]).toBe("正常");
   });
 
-  it("surfaces adapter warnings without treating the whole device as failed", () => {
+  it("surfaces adapter warning diagnostics without treating the whole device as failed", () => {
     const health = deriveDeviceCollectionHealth("gezilinll-claw", [
-      ingestion("device_state", "succeeded", "2026-05-12T09:58:40.000Z", { tasks: 12 }, [
-        "OpenClaw conversation probe unavailable",
-      ]),
+      ingestion("device_state", "succeeded", "2026-05-12T09:58:40.000Z", { tasks: 12 }, [{
+        code: "openclaw_missing_dingtalk_inbound_context",
+        count: 3,
+        message: "3 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。",
+        severity: "warning",
+        source: "openclaw",
+      }]),
     ], { now });
 
     expect(health.status).toBe("healthy");
@@ -38,8 +42,37 @@ describe("runtime collection health", () => {
     expect(health.checks[0]).toMatchObject({
       id: "device_state",
       status: "healthy",
-      message: "采集成功，但有 1 条警告",
-      warnings: ["OpenClaw conversation probe unavailable"],
+      message: "采集成功，但有 3 条数据质量提示",
+      diagnostics: [{
+        code: "openclaw_missing_dingtalk_inbound_context",
+        count: 3,
+        message: "3 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。",
+        severity: "warning",
+        source: "openclaw",
+      }],
+    });
+  });
+
+  it("does not turn debug diagnostics into warning messages", () => {
+    const health = deriveDeviceCollectionHealth("gezilinll-claw", [
+      ingestion("device_state", "succeeded", "2026-05-12T09:58:40.000Z", { tasks: 12 }, [{
+        code: "openclaw_internal_heartbeat_ignored",
+        count: 456,
+        message: "456 条 OpenClaw 内部心跳记录已过滤。",
+        severity: "debug",
+        source: "openclaw",
+      }]),
+    ], { now });
+
+    expect(health.status).toBe("healthy");
+    expect(health.checks[0]).toMatchObject({
+      id: "device_state",
+      message: "采集正常",
+      diagnostics: [expect.objectContaining({
+        code: "openclaw_internal_heartbeat_ignored",
+        count: 456,
+        severity: "debug",
+      })],
     });
   });
 
@@ -62,6 +95,7 @@ describe("runtime collection health", () => {
         label: "设备状态",
         message: "采集正常",
         status: "healthy",
+        diagnostics: [],
       }),
     ]);
   });
@@ -77,6 +111,7 @@ describe("runtime collection health", () => {
       id: "device_state",
       status: "healthy",
       message: "采集正常",
+      diagnostics: [],
     });
     expect(Object.values(collectionHealthStatusLabels)).not.toContain("采集过期");
     expect(Object.values(collectionHealthStatusLabels)).not.toContain("未知");
@@ -105,7 +140,7 @@ function ingestion(
   status: CollectionHealthIngestion["status"],
   receivedAt: string,
   counts: Record<string, number> = {},
-  warnings: string[] = [],
+  diagnostics: CollectionHealthIngestion["diagnostics"] = [],
   error: string | null = null,
 ): CollectionHealthIngestion {
   return {
@@ -116,6 +151,6 @@ function ingestion(
     receivedAt,
     snapshotType: snapshotType as CollectionHealthIngestion["snapshotType"],
     status,
-    warnings,
+    diagnostics,
   };
 }

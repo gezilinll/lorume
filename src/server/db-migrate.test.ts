@@ -126,9 +126,109 @@ describeDb("database migrations", () => {
           "0008_notification_read_state",
           "0009_agent_skill_probing",
           "0011_device_state_tasks",
+          "0012_runtime_task_batch_sync",
         ]);
       } finally {
         await client.end();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("upgrades databases that already applied the old Task schema migration", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    const client = await connectWithRetry(database.url);
+
+    try {
+      await client.query(`
+        CREATE TABLE schema_migrations (
+          version text PRIMARY KEY,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        );
+        INSERT INTO schema_migrations(version) VALUES
+          ('0001_backend_core'),
+          ('0002_auth_access'),
+          ('0005_operations_notifications'),
+          ('0008_notification_read_state'),
+          ('0009_agent_skill_probing'),
+          ('0011_device_state_tasks');
+
+        CREATE TABLE collector_ingestions (
+          id bigserial PRIMARY KEY,
+          device_id text NOT NULL,
+          snapshot_type text NOT NULL,
+          status text NOT NULL,
+          observed_at timestamptz,
+          received_at timestamptz NOT NULL DEFAULT now(),
+          duration_ms integer,
+          counts jsonb NOT NULL DEFAULT '{}'::jsonb,
+          warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+          error text,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE tasks (
+          id text PRIMARY KEY,
+          device_id text NOT NULL,
+          agent_id text NOT NULL,
+          task_type text NOT NULL DEFAULT 'conversation',
+          title text NOT NULL,
+          description text,
+          status text NOT NULL,
+          source_external_id text,
+          channel jsonb NOT NULL DEFAULT '{}'::jsonb,
+          conversation jsonb NOT NULL DEFAULT '{}'::jsonb,
+          creator jsonb,
+          assignee jsonb,
+          error text,
+          created_source_at timestamptz,
+          updated_source_at timestamptz,
+          last_seen_at timestamptz,
+          raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        INSERT INTO tasks(id, device_id, agent_id, title, description, status)
+        VALUES ('task-1', 'device-1', 'agent-1', 'Legacy title', 'Legacy description', 'todo');
+      `);
+      await client.end();
+
+      runMigrationsScript(database.url);
+
+      const migratedClient = await connectWithRetry(database.url);
+      try {
+        await expect(listPublicColumnNames(migratedClient, "collector_ingestions")).resolves.toContain("collected_at");
+        await expect(listPublicColumnNames(migratedClient, "collector_ingestions")).resolves.not.toContain("observed_at");
+        await expect(listPublicColumnNames(migratedClient, "tasks")).resolves.toEqual([
+          "id",
+          "device_id",
+          "agent_id",
+          "task_type",
+          "status",
+          "source_external_id",
+          "channel",
+          "conversation",
+          "creator",
+          "assignee",
+          "error",
+          "created_source_at",
+          "updated_source_at",
+          "raw",
+          "created_at",
+          "updated_at",
+          "user_message",
+          "agent_reply",
+          "sync_hash",
+        ]);
+        const result = await migratedClient.query<{ user_message: string | null }>(
+          "SELECT user_message FROM tasks WHERE id = 'task-1'",
+        );
+        expect(result.rows[0]?.user_message).toBe("Legacy description");
+        expect(await listMigrationVersions(migratedClient)).toContain("0012_runtime_task_batch_sync");
+      } finally {
+        await migratedClient.end();
       }
     } finally {
       await database.drop();

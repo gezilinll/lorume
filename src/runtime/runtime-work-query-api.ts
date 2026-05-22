@@ -42,6 +42,7 @@ export interface RuntimeTasksQueryPage {
 }
 
 export interface RuntimeTaskBoardItem extends Task {
+  displayTitle: string;
   statusLabel: string;
   channelKindLabel?: string;
   channelLabel?: string;
@@ -103,7 +104,7 @@ export function createTasksQueryUrl(
 export function runtimeTasksQueryPageFromResponse(value: unknown): RuntimeTasksQueryPage | null {
   if (!isRuntimeTasksQueryResponse(value)) return null;
   const tasks = createDeviceStateSnapshot({
-    observedAt: new Date().toISOString(),
+    collectedAt: new Date().toISOString(),
     device: { id: "query", hostname: "query", os: "unknown" },
     runtimes: [],
     agents: [],
@@ -170,9 +171,16 @@ function taskBoardItem(task: Task): RuntimeTaskBoardItem {
     channelKindLabel: task.channel?.kind ? channelKindLabels[task.channel.kind] : undefined,
     channelLabel: task.conversation?.title ?? task.channel?.name,
     creatorLabel: task.creator?.name ?? "未知",
-    requestExcerpt: task.description ?? task.conversation?.title ?? task.title,
+    displayTitle: taskDisplayTitle(task),
+    requestExcerpt: task.userMessage ?? task.conversation?.title ?? "未上报用户消息",
     statusLabel: taskStatusLabels[task.status],
   };
+}
+
+export function taskDisplayTitle(task: Task): string {
+  const message = task.userMessage?.replace(/\s+/g, " ").trim();
+  if (message) return message.length > 32 ? `${message.slice(0, 32)}...` : message;
+  return task.conversation?.title ?? task.channel?.name ?? "未命名任务";
 }
 
 function normalizeSearch(value: string): string {
@@ -192,8 +200,8 @@ function matchesSearch(task: Task, query: string): boolean {
   return [
     task.id,
     task.agentId,
-    task.title,
-    task.description,
+    task.userMessage,
+    task.agentReply,
     task.status,
     task.channel?.kind,
     task.channel?.name,
@@ -206,7 +214,7 @@ function matchesSearch(task: Task, query: string): boolean {
 
 function matchesTimeRange(task: Task, timeRange?: RuntimeTaskTimeRangeFilter): boolean {
   if (!timeRange?.start && !timeRange?.end) return true;
-  const timestamp = Date.parse(task.lastSeenAt ?? task.updatedAt ?? task.createdAt ?? "");
+  const timestamp = Date.parse(task.updatedAt ?? task.createdAt ?? "");
   if (!Number.isFinite(timestamp)) return false;
   const start = timeRange.start ? Date.parse(timeRange.start) : Number.NEGATIVE_INFINITY;
   const end = timeRange.end ? Date.parse(timeRange.end) : Number.POSITIVE_INFINITY;

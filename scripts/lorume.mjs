@@ -75,17 +75,17 @@ async function main() {
 }
 
 function identifyDevice(flags) {
-  const observedAt = new Date().toISOString();
+  const collectedAt = new Date().toISOString();
   const deviceId = stringFlag(flags, "device-id") || process.env.LORUME_DEVICE_ID || sanitizeId(hostname());
   const localIps = collectLocalIps();
   return {
     command: "device.identify",
-    observedAt,
+    collectedAt,
     device: {
       architecture: arch(),
       hostname: hostname(),
       id: deviceId,
-      lastSeenAt: observedAt,
+      lastSeenAt: collectedAt,
       ...(localIps.length ? { network: { localIps } } : {}),
       user: { username: safeUsername() },
       os: platform(),
@@ -99,8 +99,8 @@ function listRuntimes(flags) {
   return {
     agents: Array.isArray(snapshot.agents) ? snapshot.agents : [],
     command: "runtime.list",
+    collectedAt: typeof snapshot.collectedAt === "string" ? snapshot.collectedAt : null,
     device: snapshot.device ?? null,
-    observedAt: typeof snapshot.observedAt === "string" ? snapshot.observedAt : null,
     runtimes: Array.isArray(snapshot.runtimes) ? snapshot.runtimes : [],
   };
 }
@@ -192,9 +192,9 @@ function readDeviceStateSnapshot(snapshotPath) {
   const device = snapshot.device ?? (Array.isArray(snapshot.devices) ? snapshot.devices[0] : null);
   return {
     agents: Array.isArray(snapshot.agents) ? snapshot.agents : [],
+    collectedAt: typeof snapshot.collectedAt === "string" ? snapshot.collectedAt : new Date().toISOString(),
     device,
     diagnostics: snapshot.diagnostics && typeof snapshot.diagnostics === "object" ? snapshot.diagnostics : undefined,
-    observedAt: typeof snapshot.observedAt === "string" ? snapshot.observedAt : new Date().toISOString(),
     runtimes: Array.isArray(snapshot.runtimes) ? snapshot.runtimes : [],
     tasks: Array.isArray(snapshot.tasks) ? snapshot.tasks : [],
   };

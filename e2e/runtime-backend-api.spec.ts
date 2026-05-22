@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type { DeviceStateSnapshot } from "../src/runtime/runtime-model";
+import { createRuntimeTaskBatches } from "../src/runtime/runtime-task-sync";
 import { resetE2eDatabase } from "./db";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,16 +17,16 @@ const fixtureSnapshotPath = path.join(repoRoot, "fixtures", "runtime", "collecto
 const deviceStateFixturePath = path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json");
 const deviceStateFixture = JSON.parse(readFileSync(deviceStateFixturePath, "utf8")) as {
   agents: DeviceStateSnapshot["agents"];
+  collectedAt: string;
   devices: DeviceStateSnapshot["device"][];
-  observedAt: string;
   runtimes: DeviceStateSnapshot["runtimes"];
   tasks: DeviceStateSnapshot["tasks"];
 };
 
 const deviceStateSnapshot: DeviceStateSnapshot = {
   agents: deviceStateFixture.agents,
+  collectedAt: "2026-05-20T08:00:00.000Z",
   device: deviceStateFixture.devices[0],
-  observedAt: "2026-05-20T08:00:00.000Z",
   runtimes: deviceStateFixture.runtimes,
   tasks: deviceStateFixture.tasks,
 };
@@ -42,12 +43,14 @@ test.describe("Runtime backend API", () => {
 
     const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request);
 
-    const unauthorizedIngest = await request.post("/api/device-state-snapshots", { data: deviceStateSnapshot });
+    const unauthorizedIngest = await request.post("/api/device-state-snapshots", {
+      data: { ...deviceStateSnapshot, tasks: [] },
+    });
     expect(unauthorizedIngest.status()).toBe(401);
 
     const authHeaders = { authorization: `Bearer ${deviceToken}` };
     const deviceStateResponse = await request.post("/api/device-state-snapshots", {
-      data: deviceStateSnapshot,
+      data: { ...deviceStateSnapshot, tasks: [] },
       headers: authHeaders,
     });
     expect(deviceStateResponse.status()).toBe(201);
@@ -55,6 +58,7 @@ test.describe("Runtime backend API", () => {
       deviceId: "fixture-mac",
       ok: true,
     });
+    await postTaskBatches(request, deviceStateSnapshot, authHeaders);
 
     const fleetResponse = await request.get("/api/runtime-fleet");
     expect(fleetResponse.status()).toBe(200);
@@ -75,7 +79,7 @@ test.describe("Runtime backend API", () => {
         id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
         status: "todo",
         taskType: "conversation",
-        title: "Review DingTalk request",
+        userMessage: "PMO asked OpenClaw to inspect the handoff.",
       })],
       total: 1,
     });
@@ -144,10 +148,13 @@ test.describe("Runtime backend API", () => {
     const collectorHome = mkdtempSync(path.join(tmpdir(), "lorume-backend-e2e-openclaw-"));
     const binDir = path.join(collectorHome, "bin");
     const sessionDir = path.join(collectorHome, ".openclaw", "agents", "main", "sessions", "live");
+    const dingtalkStateDir = path.join(collectorHome, ".openclaw", "agents", "main", "sessions", "dingtalk-state");
     const sessionFile = path.join(sessionDir, "run-openclaw-1.session.jsonl");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(dingtalkStateDir, { recursive: true });
     writeOpenClawExecutable(binDir);
+    writeDingTalkState(dingtalkStateDir);
     writeFileSync(sessionFile, [
       JSON.stringify({ role: "user", content: "帮我查一下 Seedance 模型调用情况" }),
       JSON.stringify({
@@ -165,6 +172,7 @@ test.describe("Runtime backend API", () => {
       }),
     ].join("\n"));
     writeTrajectoryFile(sessionDir, "run-openclaw-1", {
+      assistantTexts: ["Seedance 调用情况已查询。"],
       finalStatus: "success",
       prompt: "帮我查一下 Seedance 模型调用情况",
       runtimeContext: {
@@ -208,13 +216,10 @@ test.describe("Runtime backend API", () => {
         id: `${deviceId}:runtime:openclaw:agent:main:task:run-openclaw-1`,
         taskType: "conversation",
         source: { kind: "openclaw", externalId: "msg-seedance-1" },
+        userMessage: "帮我查一下 Seedance 模型的调用次数、成功次数、失败次数以及失败次数里因为稿豆不足而失败的次数",
+        agentReply: "Seedance 调用情况已查询。",
         creator: { name: "张良", externalId: "user-zhangliang" },
-        toolCalls: [expect.objectContaining({
-          arguments: { command: "python3 scripts/query_sls.py --metric seedance" },
-          id: "exec-sls-1",
-          name: "bash",
-          status: "done",
-        })],
+        assignee: { name: "main", externalId: "main" },
         raw: { openclaw: expect.objectContaining({ status: "success", statusSource: "trajectory" }) },
       });
       await waitForCollectorTask(request, collector, "scheduled", {
@@ -261,6 +266,27 @@ async function createLoggedInOrganizationAndDeviceToken(
   expect(tokenBody.deviceToken.tokenHash).toBeUndefined();
 
   return { deviceToken: tokenBody.deviceToken.token, organizationId };
+}
+
+async function postTaskBatches(
+  request: APIRequestContext,
+  snapshot: DeviceStateSnapshot,
+  headers: Record<string, string>,
+): Promise<void> {
+  for (const batch of createRuntimeTaskBatches(snapshot.tasks, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: snapshot.collectedAt,
+    deviceId: snapshot.device.id,
+  })) {
+    const response = await request.post("/api/device-task-batches", { data: batch, headers });
+    expect(response.status()).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      acked: batch.tasks.map((entry) => ({ id: entry.task.id, hash: entry.hash })),
+      batchId: batch.batchId,
+      ok: true,
+    });
+  }
 }
 
 async function expectDeviceDiagnostics(
@@ -388,10 +414,33 @@ console.log("{}");
   chmodSync(executablePath, 0o755);
 }
 
+function writeDingTalkState(dingtalkStateDir: string): void {
+  writeFileSync(path.join(dingtalkStateDir, "targets.directory.json"), JSON.stringify({
+    groups: {
+      "group-seedance": {
+        currentTitle: "日常工作提醒助手",
+        lastSeenAt: "2026-05-21T06:00:00.000Z",
+      },
+    },
+  }));
+  writeFileSync(path.join(dingtalkStateDir, "messages.context.json"), JSON.stringify({
+    records: [{
+      conversationId: "group-seedance",
+      createdAt: "2026-05-21T06:00:30.000Z",
+      direction: "inbound",
+      msgId: "msg-seedance-1",
+      senderId: "user-zhangliang",
+      senderName: "张良",
+      text: "帮我查一下 Seedance 模型的调用次数、成功次数、失败次数以及失败次数里因为稿豆不足而失败的次数",
+    }],
+  }));
+}
+
 function writeTrajectoryFile(
   sessionDir: string,
   runId: string,
   options: {
+    assistantTexts?: string[];
     finalStatus: "success" | "error";
     prompt: string;
     runtimeContext?: Record<string, unknown>;
@@ -425,7 +474,10 @@ function writeTrajectoryFile(
       runId,
       sessionKey: options.sessionKey,
       ts: "2026-05-21T06:03:00.000Z",
-      data: { finalStatus: options.finalStatus },
+      data: {
+        finalStatus: options.finalStatus,
+        ...(options.assistantTexts ? { assistantTexts: options.assistantTexts } : {}),
+      },
     }),
   ].join("\n"));
 }
@@ -469,7 +521,7 @@ async function expectDeviceHeartbeatAccepted(deviceToken: string): Promise<void>
       socket.send(JSON.stringify({
         type: "heartbeat",
         deviceId: "fixture-mac",
-        summary: { deviceStateUploadedAt: deviceStateSnapshot.observedAt },
+        summary: { deviceStateUploadedAt: deviceStateSnapshot.collectedAt },
       }));
       clearTimeout(timeout);
       socket.close();

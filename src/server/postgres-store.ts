@@ -9,10 +9,11 @@ import {
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
 import { createDeviceStateSnapshot, type Agent, type Device, type DeviceStateSnapshot, type Runtime, type Task } from "../runtime/runtime-model";
+import type { RuntimeTaskBatch } from "../runtime/runtime-task-sync";
 
 const { Pool } = pg;
 
-type CollectorSnapshotType = "device_state";
+type CollectorSnapshotType = "device_state" | "task_batch";
 
 /** Construction options for the Postgres-backed Lorume repository. */
 export interface PostgresStoreOptions {
@@ -27,6 +28,13 @@ export interface PostgresIngestionResult {
   /** Snapshot type persisted by the repository. */
   snapshotType: CollectorSnapshotType;
   /** Object counts written by this ingestion. */
+  counts: Record<string, number>;
+}
+
+export interface PostgresTaskBatchResult {
+  deviceId: string;
+  batchId: string;
+  acked: Array<{ id: string; hash: string }>;
   counts: Record<string, number>;
 }
 
@@ -45,14 +53,14 @@ export interface PostgresCollectorIngestion {
   deviceId: string;
   snapshotType: CollectorSnapshotType;
   status: "succeeded" | "failed";
-  observedAt: string | Date | null;
+  collectedAt: string | Date | null;
   receivedAt: string | Date;
   counts: Record<string, number>;
   warnings: string[];
   error?: string | null;
 }
 
-const taskOrderExpression = "coalesce(t.last_seen_at, t.updated_source_at, t.created_source_at, t.updated_at, t.created_at)";
+const taskOrderExpression = "coalesce(t.updated_source_at, t.created_source_at, t.updated_at, t.created_at)";
 
 interface PostgresTaskQueryRow {
   raw: Task;
@@ -61,7 +69,7 @@ interface PostgresTaskQueryRow {
 
 /** Backend query result for Runtime Fleet. */
 export interface PostgresRuntimeFleetResult {
-  observedAt: string | null;
+  collectedAt: string | null;
   devices: Device[];
   runtimes: Runtime[];
   agents: Agent[];
@@ -97,6 +105,8 @@ export interface PostgresRuntimeTaskResult {
 export interface PostgresStore {
   /** Upsert a unified Device / Runtime / Agent / Task snapshot. */
   upsertDeviceStateSnapshot: (snapshot: DeviceStateSnapshot) => Promise<PostgresIngestionResult>;
+  /** Upsert one changed Task batch and return ACKs for cache advancement. */
+  upsertRuntimeTaskBatch: (batch: RuntimeTaskBatch) => Promise<PostgresTaskBatchResult>;
   /** Record a failed collector ingestion when a report cannot be persisted as a valid snapshot. */
   recordFailedCollectorIngestion: (input: PostgresFailedCollectorIngestionInput) => Promise<void>;
   /** Verify the repository can serve backend traffic. */
@@ -126,7 +136,7 @@ export interface PostgresFailedCollectorIngestionInput {
   /** Snapshot endpoint that received the invalid report. */
   snapshotType: CollectorSnapshotType;
   /** Observed timestamp from the invalid payload when available. */
-  observedAt?: string;
+  collectedAt?: string;
   /** Warning strings extracted before failure. */
   warnings?: string[];
   /** Short error summary safe for diagnostics. */
@@ -145,7 +155,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         device_id AS "deviceId",
         snapshot_type AS "snapshotType",
         status,
-        observed_at AS "observedAt",
+        collected_at AS "collectedAt",
         received_at AS "receivedAt",
         counts,
         warnings,
@@ -165,21 +175,19 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         for (const agent of snapshot.agents) {
           await upsertDeviceStateAgent(client, agent);
         }
-        await deleteExistingTasksForDevice(client, snapshot.device.id);
-        for (const task of snapshot.tasks) await upsertTask(client, snapshot.device.id, task);
         await deleteStaleRuntimeObjects(client, snapshot);
 
         const counts = {
           agents: snapshot.agents.length,
           devices: 1,
           runtimes: snapshot.runtimes.length,
-          tasks: snapshot.tasks.length,
+          tasks: 0,
         };
         await insertCollectorIngestion(client, {
           counts,
           deviceId: snapshot.device.id,
           error: null,
-          observedAt: snapshot.observedAt,
+          collectedAt: snapshot.collectedAt,
           snapshotType: "device_state",
           status: "succeeded",
           warnings: snapshot.diagnostics?.warnings ?? [],
@@ -187,12 +195,35 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         return { deviceId: snapshot.device.id, snapshotType: "device_state", counts };
       });
     },
+    upsertRuntimeTaskBatch(batch) {
+      return withTransaction(pool, async (client) => {
+        const acked: Array<{ id: string; hash: string }> = [];
+        for (const entry of batch.tasks) {
+          await upsertTask(client, batch.deviceId, entry.task, entry.hash);
+          acked.push({ id: entry.task.id, hash: entry.hash });
+        }
+        const counts = {
+          batches: 1,
+          tasks: acked.length,
+        };
+        await insertCollectorIngestion(client, {
+          counts,
+          deviceId: batch.deviceId,
+          error: null,
+          collectedAt: batch.collectedAt,
+          snapshotType: "task_batch",
+          status: "succeeded",
+          warnings: [],
+        });
+        return { acked, batchId: batch.batchId, counts, deviceId: batch.deviceId };
+      });
+    },
     async recordFailedCollectorIngestion(input) {
       await insertCollectorIngestion(pool, {
         counts: {},
         deviceId: input.deviceId || "unknown",
         error: input.error,
-        observedAt: input.observedAt ?? new Date().toISOString(),
+        collectedAt: input.collectedAt ?? new Date().toISOString(),
         snapshotType: input.snapshotType,
         status: "failed",
         warnings: input.warnings ?? [],
@@ -218,27 +249,27 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
     },
     async readRuntimeFleet() {
       const [deviceResult, runtimeResult, agentResult, taskResult] = await Promise.all([
-        pool.query<{ collector: Device["collector"]; raw: Device; observed_at: Date | null }>(
-          "SELECT collector, raw, observed_at FROM devices ORDER BY hostname, id",
+        pool.query<{ collector: Device["collector"]; raw: Device; collected_at: Date | null }>(
+          "SELECT collector, raw, collected_at FROM devices ORDER BY hostname, id",
         ),
         pool.query<{ raw: Runtime }>("SELECT raw FROM runtimes ORDER BY name"),
         pool.query<{ raw: Agent }>("SELECT raw FROM agents ORDER BY name"),
-        pool.query<{ raw: Task }>("SELECT raw FROM tasks ORDER BY coalesce(last_seen_at, updated_source_at, created_source_at, updated_at, created_at) DESC, id DESC"),
+        pool.query<{ raw: Task }>(`SELECT t.raw FROM tasks t ORDER BY ${taskOrderExpression} DESC, t.id DESC`),
       ]);
-      const observedAt = deviceResult.rows
-        .map((row) => row.observed_at?.toISOString() ?? null)
+      const collectedAt = deviceResult.rows
+        .map((row) => row.collected_at?.toISOString() ?? null)
         .filter((value): value is string => Boolean(value))
         .sort()
         .at(-1) ?? null;
       const sanitized = createDeviceStateSnapshot({
-        observedAt: observedAt ?? new Date().toISOString(),
+        collectedAt: collectedAt ?? new Date().toISOString(),
         device: deviceResult.rows[0]?.raw ?? { id: "backend", hostname: "backend", os: "unknown" },
         runtimes: runtimeResult.rows.map((row) => row.raw),
         agents: agentResult.rows.map((row) => row.raw),
         tasks: taskResult.rows.map((row) => row.raw),
       });
       const devices = deviceResult.rows.map((row) => createDeviceStateSnapshot({
-        observedAt: observedAt ?? new Date().toISOString(),
+        collectedAt: collectedAt ?? new Date().toISOString(),
         device: { ...row.raw, collector: row.collector },
         runtimes: [],
         agents: [],
@@ -249,7 +280,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
       const tasks = sanitized.tasks;
 
       return {
-        observedAt,
+        collectedAt,
         devices,
         runtimes,
         agents,
@@ -289,7 +320,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         ? encodeTaskCursor(visibleRows[visibleRows.length - 1])
         : undefined;
       const tasks = createDeviceStateSnapshot({
-        observedAt: new Date().toISOString(),
+        collectedAt: new Date().toISOString(),
         device: { id: "query", hostname: "query", os: "unknown" },
         runtimes: [],
         agents: [],
@@ -363,7 +394,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
 async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceStateSnapshot): Promise<void> {
   await client.query(`
     INSERT INTO devices (
-      id, hostname, os, architecture, collection_status, collector, last_seen_at, observed_at, raw, updated_at
+      id, hostname, os, architecture, collection_status, collector, last_seen_at, collected_at, raw, updated_at
     )
     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
@@ -373,7 +404,7 @@ async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceSt
       collection_status = excluded.collection_status,
       collector = excluded.collector,
       last_seen_at = excluded.last_seen_at,
-      observed_at = excluded.observed_at,
+      collected_at = excluded.collected_at,
       raw = excluded.raw,
       updated_at = now()
   `, [
@@ -384,7 +415,7 @@ async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceSt
     snapshot.device.collectionStatus,
     toJson(snapshot.device.collector ?? {}),
     toDate(snapshot.device.lastSeenAt),
-    toDate(snapshot.observedAt),
+    toDate(snapshot.collectedAt),
     toJson(snapshot.device),
   ]);
 }
@@ -461,14 +492,11 @@ async function deleteStaleRuntimeObjects(
   `, [snapshot.device.id, runtimeIds]);
 }
 
-async function deleteExistingTasksForDevice(client: pg.PoolClient, deviceId: string): Promise<void> {
-  await client.query("DELETE FROM tasks WHERE device_id = $1", [deviceId]);
-}
-async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): Promise<void> {
+async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, syncHash: string): Promise<void> {
   await client.query(`
     INSERT INTO tasks (
-      id, device_id, agent_id, task_type, title, description, status, source_external_id, channel, conversation,
-      creator, assignee, error, created_source_at, updated_source_at, last_seen_at, raw, updated_at
+      id, device_id, agent_id, task_type, user_message, agent_reply, status, source_external_id, channel, conversation,
+      creator, assignee, error, created_source_at, updated_source_at, sync_hash, raw, updated_at
     )
     VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
@@ -478,8 +506,8 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): 
       device_id = excluded.device_id,
       agent_id = excluded.agent_id,
       task_type = excluded.task_type,
-      title = excluded.title,
-      description = excluded.description,
+      user_message = excluded.user_message,
+      agent_reply = excluded.agent_reply,
       status = excluded.status,
       source_external_id = excluded.source_external_id,
       channel = excluded.channel,
@@ -489,7 +517,7 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): 
       error = excluded.error,
       created_source_at = excluded.created_source_at,
       updated_source_at = excluded.updated_source_at,
-      last_seen_at = excluded.last_seen_at,
+      sync_hash = excluded.sync_hash,
       raw = excluded.raw,
       updated_at = now()
   `, [
@@ -497,8 +525,8 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): 
     deviceId,
     task.agentId,
     task.taskType,
-    task.title,
-    task.description ?? null,
+    task.userMessage ?? null,
+    task.agentReply ?? null,
     task.status,
     task.source?.externalId ?? null,
     toJson(task.channel ?? {}),
@@ -508,7 +536,7 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task): 
     task.error ?? null,
     toDate(task.createdAt),
     toDate(task.updatedAt),
-    toDate(task.lastSeenAt),
+    syncHash,
     toJson(task),
   ]);
 }
@@ -528,20 +556,20 @@ async function insertCollectorIngestion(
     deviceId: string;
     snapshotType: CollectorSnapshotType;
     status: "succeeded" | "failed";
-    observedAt: string;
+    collectedAt: string;
     counts: Record<string, number>;
     warnings: string[];
     error: string | null;
   },
 ): Promise<void> {
   await client.query(`
-    INSERT INTO collector_ingestions (device_id, snapshot_type, status, observed_at, counts, warnings, error)
+    INSERT INTO collector_ingestions (device_id, snapshot_type, status, collected_at, counts, warnings, error)
     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
   `, [
     input.deviceId,
     input.snapshotType,
     input.status,
-    toDate(input.observedAt),
+    toDate(input.collectedAt),
     toJson(input.counts),
     toJson(input.warnings),
     input.error,
@@ -602,8 +630,8 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
   if (filters.search?.trim()) {
     values.push(`%${filters.search.trim()}%`);
     conditions.push(`(
-      t.title ILIKE $${values.length}
-      OR coalesce(t.description, '') ILIKE $${values.length}
+      coalesce(t.user_message, '') ILIKE $${values.length}
+      OR coalesce(t.agent_reply, '') ILIKE $${values.length}
       OR coalesce(t.source_external_id, '') ILIKE $${values.length}
       OR coalesce(t.channel->>'kind', '') ILIKE $${values.length}
       OR coalesce(t.channel->>'name', '') ILIKE $${values.length}

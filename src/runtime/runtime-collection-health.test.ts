@@ -112,7 +112,7 @@ function ingestion(
     counts,
     deviceId: "gezilinll-claw",
     error,
-    observedAt: receivedAt,
+    collectedAt: receivedAt,
     receivedAt,
     snapshotType: snapshotType as CollectionHealthIngestion["snapshotType"],
     status,

@@ -39,7 +39,7 @@ import { appendFileSync } from "node:fs";
 appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");
 console.log(JSON.stringify({
   command: "collect.device-state",
-  observedAt: "2026-05-19T00:00:00.000Z",
+  collectedAt: "2026-05-19T00:00:00.000Z",
   device: { id: "cli-device", hostname: "cli.local", os: "darwin", architecture: "arm64", collectionStatus: "online", lastSeenAt: "2026-05-19T00:00:00.000Z", collector: { version: "test" } },
   runtimes: [],
   agents: [],
@@ -272,6 +272,59 @@ console.log(JSON.stringify({
     }
   });
 
+  it("posts changed tasks as acknowledged batches and caches their hashes", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-task-batch-config-"));
+    const configPath = path.join(configDir, "config.json");
+    const cachePath = path.join(configDir, "task-cache.json");
+    const { server, receivedSnapshot, receivedTaskBatch, baseUrl } = await startSnapshotServer({
+      expectedAuthorization: "Bearer device-token-test",
+    });
+    writeFileSync(configPath, JSON.stringify({
+      deviceToken: "device-token-test",
+      serverUrl: baseUrl,
+      taskSyncCachePath: cachePath,
+    }));
+
+    try {
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--config",
+        configPath,
+      ]);
+      const snapshot = await receivedSnapshot;
+      const taskBatch = await receivedTaskBatch as {
+        tasks: Array<{ hash: string; task?: { id?: string } }>;
+      };
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+
+      expect((snapshot.tasks as unknown[])).toEqual([]);
+      expect(taskBatch).toMatchObject({
+        deviceId: "fixture-mac",
+        schemaVersion: "device-state-v2",
+        tasks: expect.arrayContaining([
+          expect.objectContaining({
+            hash: expect.any(String),
+            task: expect.objectContaining({ id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1" }),
+          }),
+        ]),
+      });
+      const todoEntry = taskBatch.tasks.find((entry) =>
+        entry.task?.id === "fixture-mac:runtime:openclaw:agent:main:task:todo-1"
+      );
+      expect(todoEntry).toBeDefined();
+      expect(cache.tasks["fixture-mac:runtime:openclaw:agent:main:task:todo-1"]).toMatchObject({
+        hash: todoEntry?.hash,
+        lastAckedAt: expect.any(String),
+      });
+    } finally {
+      server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("retries transient backend failures when posting device-state snapshots", async () => {
     const { server, receivedSnapshot, baseUrl, requestCount } = await startFlakySnapshotServer();
 
@@ -399,14 +452,19 @@ function runCommand(command: string, args: string[], options: { env?: NodeJS.Pro
 async function startSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{
   baseUrl: string;
   receivedSnapshot: Promise<Record<string, unknown>>;
+  receivedTaskBatch: Promise<Record<string, unknown>>;
   server: Server;
 }> {
   let resolveSnapshot: (snapshot: Record<string, unknown>) => void = () => undefined;
+  let resolveTaskBatch: (batch: Record<string, unknown>) => void = () => undefined;
   const receivedSnapshot = new Promise<Record<string, unknown>>((resolve) => {
     resolveSnapshot = resolve;
   });
+  const receivedTaskBatch = new Promise<Record<string, unknown>>((resolve) => {
+    resolveTaskBatch = resolve;
+  });
   const server = createServer((request, response) => {
-    if (request.url !== "/api/device-state-snapshots") {
+    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
       response.statusCode = 404;
       response.end("not found");
       return;
@@ -422,9 +480,19 @@ async function startSnapshotServer(options: { expectedAuthorization?: string } =
       body += chunk;
     });
     request.on("end", () => {
-      resolveSnapshot(JSON.parse(body));
+      const parsed = JSON.parse(body);
+      if (request.url === "/api/device-state-snapshots") {
+        resolveSnapshot(parsed);
+      } else {
+        resolveTaskBatch(parsed);
+      }
       response.writeHead(201, { "content-type": "application/json" });
-      response.end(JSON.stringify({ ok: true }));
+      response.end(JSON.stringify({
+        ok: true,
+        acked: Array.isArray(parsed.tasks)
+          ? parsed.tasks.map((entry: { hash?: string; task?: { id?: string } }) => ({ hash: entry.hash, id: entry.task?.id }))
+          : [],
+      }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -433,6 +501,7 @@ async function startSnapshotServer(options: { expectedAuthorization?: string } =
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     receivedSnapshot,
+    receivedTaskBatch,
     server,
   };
 }
@@ -449,9 +518,27 @@ async function startFlakySnapshotServer(): Promise<{
     resolveSnapshot = resolve;
   });
   const server = createServer((request, response) => {
-    if (request.url !== "/api/device-state-snapshots") {
+    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
       response.statusCode = 404;
       response.end("not found");
+      return;
+    }
+    if (request.url === "/api/device-task-batches") {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        const parsed = JSON.parse(body);
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          ok: true,
+          acked: Array.isArray(parsed.tasks)
+            ? parsed.tasks.map((entry: { hash?: string; task?: { id?: string } }) => ({ hash: entry.hash, id: entry.task?.id }))
+            : [],
+        }));
+      });
       return;
     }
     count += 1;

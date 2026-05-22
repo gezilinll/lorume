@@ -17,7 +17,7 @@ import {
 const fixtureLastSeenAt = formatRuntimeTimestamp("2026-05-21T10:00:00.000Z");
 
 const snapshot: RuntimeFleetSnapshot = {
-  observedAt: "2026-05-21T10:00:00.000Z",
+  collectedAt: "2026-05-21T10:00:00.000Z",
   devices: [{
     id: "fixture-mac",
     hostname: "fixture-mac.local",
@@ -51,23 +51,23 @@ const snapshot: RuntimeFleetSnapshot = {
       id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
       agentId: "fixture-mac:runtime:openclaw:agent:main",
       taskType: "conversation",
-      title: "Review DingTalk request",
-      description: "PMO asked OpenClaw to inspect the handoff.",
+      userMessage: "PMO asked OpenClaw to inspect the handoff.",
+      agentReply: "The handoff looks ready for review.",
       status: "todo",
       channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-live" },
       conversation: { title: "DingTalk 群聊", externalId: "conversation-1" },
       creator: { name: "PMO" },
       assignee: { name: "main" },
-      lastSeenAt: "2026-05-21T09:59:00.000Z",
+      updatedAt: "2026-05-21T09:59:00.000Z",
     },
     {
       id: "fixture-mac:runtime:openclaw:agent:main:task:running-1",
       agentId: "fixture-mac:runtime:openclaw:agent:main",
       taskType: "conversation",
-      title: "Execute OpenClaw run",
+      userMessage: "Execute OpenClaw run",
       status: "in_progress",
       channel: { kind: "dingtalk", name: "DingTalk 群聊" },
-      lastSeenAt: "2026-05-21T10:00:00.000Z",
+      updatedAt: "2026-05-21T10:00:00.000Z",
     },
   ],
 };
@@ -116,7 +116,10 @@ describe("runtime fleet query", () => {
     expect(result.devices.map((device) => device.id)).toEqual(["fixture-mac"]);
     expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["OpenClaw Gateway"]);
     expect(result.agents.map((agent) => agent.name)).toEqual(["main"]);
-    expect(result.tasks.map((task) => task.title)).toEqual(["Review DingTalk request", "Execute OpenClaw run"]);
+    expect(result.tasks.map((task) => task.userMessage)).toEqual([
+      "PMO asked OpenClaw to inspect the handoff.",
+      "Execute OpenClaw run",
+    ]);
   });
 
   it("resolves device detail with only device facts, collector facts, and derived task counts", () => {
@@ -211,7 +214,7 @@ describe("runtime fleet query", () => {
 
   it("parses backend Runtime Fleet responses and strips removed product fields", () => {
     const parsed = runtimeFleetSnapshotFromQueryResponse({
-      observedAt: "2026-05-21T10:00:00.000Z",
+      collectedAt: "2026-05-21T10:00:00.000Z",
       devices: [{
         ...snapshot.devices[0],
         name: "should not leak",
@@ -234,6 +237,9 @@ describe("runtime fleet query", () => {
         ...snapshot.tasks[0],
         runtimeId: "must-not-leak",
         lastRun: { status: "running" },
+        title: "should not leak",
+        description: "should not leak",
+        lastSeenAt: "2026-05-21T10:00:00.000Z",
       }],
     });
 
@@ -249,6 +255,9 @@ describe("runtime fleet query", () => {
     expect(parsed?.agents[0]).not.toHaveProperty("sourceRefs");
     expect(parsed?.tasks[0]).not.toHaveProperty("runtimeId");
     expect(parsed?.tasks[0]).not.toHaveProperty("lastRun");
+    expect(parsed?.tasks[0]).not.toHaveProperty("title");
+    expect(parsed?.tasks[0]).not.toHaveProperty("description");
+    expect(parsed?.tasks[0]).not.toHaveProperty("lastSeenAt");
   });
 
   it("uses runtime names as the stable display label", () => {

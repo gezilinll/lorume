@@ -42,7 +42,7 @@
 - `device.network.localIps`（可选，来自本机非 internal 网络接口）
 - `device.network.publicIp`（可选，只能来自后端观测或显式配置，CLI 不主动访问外部探测服务）
 - `device.user.username`（可选）
-- `observedAt`
+- `collectedAt`
 
 测试和安装脚本可以通过 `--device-id` 覆盖稳定设备身份。Device 不返回额外显示名、存储状态或连接模式字段。
 
@@ -50,7 +50,7 @@
 
 返回 `DeviceStateSnapshot`：
 
-- `observedAt`
+- `collectedAt`
 - `device`
 - `runtimes`
 - `agents`
@@ -63,7 +63,7 @@
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ```
 
-`DeviceStateSnapshot` 是全量 snapshot，但 OpenClaw Task 采集必须使用最近任务有界窗口，保证每次设备上报都能落在 collector buffer 和后端请求体上限以内。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
+`DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须使用最近任务有界窗口，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
 ### `lorume collector stop --json --install-dir <path>`
 
@@ -84,7 +84,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 - `device`
 - `runtimes`
 - `agents`
-- `observedAt`
+- `collectedAt`
 
 该命令不解释平台原始字段，只消费已归一化 snapshot。Collector 正式采集只调用 `lorume collect device-state --json`；`runtime list` 仅用于离线诊断和 fixture 检查。
 

@@ -26,7 +26,7 @@ function requestUrl(input: Parameters<typeof fetch>[0] | URL): string {
 
 function runtimeFleetQueryResponse(snapshot: RuntimeFleetSnapshot) {
   return {
-    observedAt: snapshot.observedAt,
+    collectedAt: snapshot.collectedAt,
     devices: snapshot.devices,
     runtimes: snapshot.runtimes,
     agents: snapshot.agents,
@@ -61,16 +61,16 @@ function collectionHealthResponse(snapshot: RuntimeFleetSnapshot) {
         error: null,
         id: "device_state",
         label: "设备状态",
-        lastObservedAt: snapshot.observedAt,
-        lastReceivedAt: snapshot.observedAt,
+        lastCollectedAt: snapshot.collectedAt,
+        lastReceivedAt: snapshot.collectedAt,
         message: "采集正常",
         status: "healthy",
         warnings: [],
       },
     ],
     deviceId: snapshot.devices[0].id,
-    lastObservedAt: snapshot.observedAt,
-    lastReceivedAt: snapshot.observedAt,
+    lastCollectedAt: snapshot.collectedAt,
+    lastReceivedAt: snapshot.collectedAt,
     status: "healthy",
     summary: "采集正常",
   };
@@ -84,8 +84,8 @@ function deviceDiagnosticsResponse(
   return {
     deviceId: snapshot.devices[0].id,
     label,
-    lastHeartbeatAt: snapshot.observedAt,
-    lastDeviceStateSuccessAt: snapshot.observedAt,
+    lastHeartbeatAt: snapshot.collectedAt,
+    lastDeviceStateSuccessAt: snapshot.collectedAt,
     message: "设备在线且采集正常",
     reason: "heartbeat_and_device_state_fresh",
     status,
@@ -99,7 +99,7 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function task(overrides: Partial<Task> & Pick<Task, "id" | "title">): Task {
+function task(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
     agentId: defaultAgentId,
     status: "todo",
@@ -259,7 +259,7 @@ describe("Console shell", () => {
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
 
-    const taskCard = screen.getByRole("button", { name: /Review DingTalk request/ });
+    const taskCard = screen.getByRole("button", { name: /PMO asked OpenClaw/ });
     expect(within(taskCard).getByText("待处理")).toBeInTheDocument();
     expect(screen.getAllByText(/PMO/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/main/).length).toBeGreaterThan(0);
@@ -272,7 +272,7 @@ describe("Console shell", () => {
     await user.click(taskCard);
 
     const detail = screen.getByRole("complementary", { name: "任务详情" });
-    expect(within(detail).getByRole("heading", { name: "Review DingTalk request" })).toBeInTheDocument();
+    expect(within(detail).getByRole("heading", { name: /PMO asked OpenClaw/ })).toBeInTheDocument();
     expect(within(detail).getByText("Channel: DingTalk")).toBeInTheDocument();
     expect(within(detail).getByText("发起人: PMO")).toBeInTheDocument();
     expect(within(detail).getByText("承接 Agent: main")).toBeInTheDocument();
@@ -290,9 +290,9 @@ describe("Console shell", () => {
         channel: { kind: "dingtalk", name: "DingTalk 群聊" },
         creator: { name: "PMO" },
         id: "task-no-execution",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "in_progress",
-        title: "Task without execution record",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Task without execution record",
       }),
     ];
     globalThis.fetch = vi.fn(async (input) => {
@@ -310,7 +310,7 @@ describe("Console shell", () => {
     expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
   });
 
-  it("keeps long Runs detail titles constrained while preserving the full title", async () => {
+  it("keeps long Runs detail titles constrained while preserving the full user message", async () => {
     const user = userEvent.setup();
     const longTitle = "使用Aetheris CLI帮我查询数据1、数据连接是：http://s-fat.dancf.com/4hzk 2、查询日期为多个周期内的数据并返回报告";
     globalThis.fetch = vi.fn(async (input) => {
@@ -321,9 +321,9 @@ describe("Console shell", () => {
             assignee: { name: "main" },
             creator: { name: "zhaoyang" },
             id: "fixture-long-title",
-            lastSeenAt: "2026-05-21T08:00:00.000Z",
             status: "review",
-            title: longTitle,
+            updatedAt: "2026-05-21T08:00:00.000Z",
+            userMessage: longTitle,
           }),
         ]));
       }
@@ -335,7 +335,7 @@ describe("Console shell", () => {
     await user.click(await screen.findByRole("button", { name: new RegExp(longTitle.slice(0, 12)) }));
 
     const detail = screen.getByRole("complementary", { name: "任务详情" });
-    const title = within(detail).getByRole("heading", { name: longTitle });
+    const title = within(detail).getByRole("heading", { name: new RegExp(longTitle.slice(0, 12)) });
     expect(title).toHaveClass("detailTitle");
     expect(title).toHaveAttribute("title", longTitle);
   });
@@ -366,9 +366,9 @@ describe("Console shell", () => {
         assignee: { name: "main" },
         creator: { name: "PMO" },
         id: "task-page-1",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "in_progress",
-        title: "First backend task",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "First backend task",
       }),
     ];
     const secondPage = [
@@ -376,9 +376,9 @@ describe("Console shell", () => {
         assignee: { name: "main" },
         creator: { name: "PMO" },
         id: "task-page-2",
-        lastSeenAt: "2026-05-21T07:59:00.000Z",
         status: "todo",
-        title: "Second backend task",
+        updatedAt: "2026-05-21T07:59:00.000Z",
+        userMessage: "Second backend task",
       }),
     ];
     const requests: string[] = [];
@@ -412,15 +412,15 @@ describe("Console shell", () => {
     const initialTasks = [
       task({
         id: "initial-todo-task",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "todo",
-        title: "Initial todo task",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Initial todo task",
       }),
       task({
         id: "initial-running-task",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "in_progress",
-        title: "Initial running task",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Initial running task",
       }),
     ];
     globalThis.fetch = vi.fn(async (input) => {
@@ -456,11 +456,10 @@ describe("Console shell", () => {
             assignee: { name: "main" },
             channel: { kind: "dingtalk", name: "DingTalk 群聊" },
             creator: { name: "PMO" },
-            description: "PMO asked OpenClaw to inspect queue handoff.",
             id: "task-query-1",
-            lastSeenAt: "2026-05-21T10:00:00.000Z",
             status: "in_progress",
-            title: "AGTD-001 Fix queue handoff",
+            updatedAt: "2026-05-21T10:00:00.000Z",
+            userMessage: "AGTD-001 Fix queue handoff. PMO asked OpenClaw to inspect queue handoff.",
           }),
         ]));
       }
@@ -480,15 +479,15 @@ describe("Console shell", () => {
     const allTasks = [
       task({
         id: "fixture-todo-task",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "todo",
-        title: "Unfiltered todo task",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Unfiltered todo task",
       }),
       task({
         id: "fixture-running-task",
-        lastSeenAt: "2026-05-21T08:00:00.000Z",
         status: "in_progress",
-        title: "Filtered running task",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Filtered running task",
       }),
     ];
     globalThis.fetch = vi.fn(async (input) => {
@@ -532,15 +531,15 @@ describe("Console shell", () => {
     const tasks = [
       task({
         id: "fixture-old-task",
-        lastSeenAt: "2026-05-20T10:00:00.000Z",
         status: "done",
-        title: "Old task",
+        updatedAt: "2026-05-20T10:00:00.000Z",
+        userMessage: "Old task",
       }),
       task({
         id: "fixture-new-task",
-        lastSeenAt: "2026-05-21T12:00:00.000Z",
         status: "done",
-        title: "New task",
+        updatedAt: "2026-05-21T12:00:00.000Z",
+        userMessage: "New task",
       }),
     ];
     globalThis.fetch = vi.fn(async (input) => {
@@ -694,7 +693,7 @@ describe("Console shell", () => {
             ...device,
             lastSeenAt: `2026-05-21T08:00:0${latestRequests}.000Z`,
           })),
-          observedAt: `2026-05-21T08:00:0${latestRequests}.000Z`,
+          collectedAt: `2026-05-21T08:00:0${latestRequests}.000Z`,
         };
         return jsonResponse(runtimeFleetQueryResponse(snapshot));
       }

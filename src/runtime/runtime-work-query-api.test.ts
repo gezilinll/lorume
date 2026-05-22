@@ -24,7 +24,7 @@ describe("Runtime task query API helpers", () => {
     expect(url.searchParams.get("endAt")).toBe("2026-05-21T03:00:00.000Z");
   });
 
-  it("parses Task query pages without runtimeId, lastRun, conversations, or executions", () => {
+  it("parses Task query pages without title, description, runtimeId, lastRun, conversations, or executions", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [{
         id: "agent-1:task:work-1",
@@ -33,6 +33,8 @@ describe("Runtime task query API helpers", () => {
         lastRun: { status: "running" },
         title: "Inspect task handoff",
         description: "Check the handoff context",
+        userMessage: "Check the handoff context",
+        agentReply: "I found the handoff owner.",
         status: "in_progress",
         channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-1" },
         conversation: { title: "DingTalk 群聊", externalId: "conversation-1" },
@@ -50,11 +52,15 @@ describe("Runtime task query API helpers", () => {
       tasks: [expect.objectContaining({
         agentId: "agent-1",
         id: "agent-1:task:work-1",
-        title: "Inspect task handoff",
+        userMessage: "Check the handoff context",
+        agentReply: "I found the handoff owner.",
       })],
     });
     expect(page?.tasks[0]).not.toHaveProperty("runtimeId");
     expect(page?.tasks[0]).not.toHaveProperty("lastRun");
+    expect(page?.tasks[0]).not.toHaveProperty("title");
+    expect(page?.tasks[0]).not.toHaveProperty("description");
+    expect(page?.tasks[0]).not.toHaveProperty("lastSeenAt");
     expect(page).not.toHaveProperty("conversations");
     expect(page).not.toHaveProperty("executions");
   });
@@ -62,9 +68,9 @@ describe("Runtime task query API helpers", () => {
   it("groups Task rows by Task.status in UI/BFF code", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
-        { id: "task-1", agentId: "agent-1", title: "Queued", status: "todo" },
-        { id: "task-2", agentId: "agent-1", title: "Running", status: "in_progress" },
-        { id: "task-3", agentId: "agent-1", title: "Failed", status: "failed", error: "timeout" },
+        { id: "task-1", agentId: "agent-1", userMessage: "Queued", status: "todo" },
+        { id: "task-2", agentId: "agent-1", userMessage: "Running", status: "in_progress" },
+        { id: "task-3", agentId: "agent-1", userMessage: "Failed", status: "failed", error: "timeout" },
       ],
       total: 3,
     });
@@ -80,16 +86,16 @@ describe("Runtime task query API helpers", () => {
     });
     expect(board.visibleItems).toEqual([expect.objectContaining({ id: "task-3", status: "failed" })]);
     expect(board.lanes.find((lane) => lane.status === "failed")?.items).toEqual([
-      expect.objectContaining({ id: "task-3" }),
+      expect.objectContaining({ displayTitle: "Failed", id: "task-3", requestExcerpt: "Failed" }),
     ]);
   });
 
   it("lists user-facing channel filters from Task context only", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
-        { id: "task-1", agentId: "agent-1", title: "One", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
-        { id: "task-2", agentId: "agent-1", title: "Two", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
-        { id: "task-3", agentId: "agent-1", title: "Three", status: "todo", channel: { kind: "slack", name: "#ops" } },
+        { id: "task-1", agentId: "agent-1", userMessage: "One", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
+        { id: "task-2", agentId: "agent-1", userMessage: "Two", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
+        { id: "task-3", agentId: "agent-1", userMessage: "Three", status: "todo", channel: { kind: "slack", name: "#ops" } },
       ],
       total: 3,
     });

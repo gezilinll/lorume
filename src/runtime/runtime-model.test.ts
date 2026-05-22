@@ -4,6 +4,7 @@ import {
   RUNTIME_KINDS,
   TASK_STATUSES,
   createDeviceStateSnapshot,
+  normalizeDeviceStateSnapshot,
   normalizeTaskStatus,
 } from "./runtime-model";
 
@@ -25,7 +26,7 @@ describe("runtime four-object model", () => {
 
   it("creates a device-state snapshot without removed product fields", () => {
     const snapshot = createDeviceStateSnapshot({
-      observedAt: "2026-05-21T00:00:00.000Z",
+      collectedAt: "2026-05-21T00:00:00.000Z",
       device: {
         id: "fixture-device",
         hostname: "fixture-device.local",
@@ -59,11 +60,17 @@ describe("runtime four-object model", () => {
         agentId: "fixture-device:runtime:openclaw:agent:main",
         runtimeId: "fixture-device:runtime:openclaw",
         title: "Handle DingTalk request",
+        description: "legacy description",
+        toolCalls: [{ id: "exec-1", name: "bash", status: "done" }],
+        userMessage: "Handle DingTalk request",
         status: "in_progress",
+        lastSeenAt: "2026-05-21T00:00:02.000Z",
         lastRun: { status: "running" },
       }],
     });
 
+    expect(snapshot).toHaveProperty("collectedAt", "2026-05-21T00:00:00.000Z");
+    expect(snapshot).not.toHaveProperty("observedAt");
     expect(snapshot.runtimes[0]).not.toHaveProperty("capabilities");
     expect(snapshot.runtimes[0]).not.toHaveProperty("endpoint");
     expect(snapshot.runtimes[0]).not.toHaveProperty("sourceRefs");
@@ -72,6 +79,14 @@ describe("runtime four-object model", () => {
     expect(snapshot.agents[0]).not.toHaveProperty("load");
     expect(snapshot.tasks[0]).not.toHaveProperty("runtimeId");
     expect(snapshot.tasks[0]).not.toHaveProperty("lastRun");
+    expect(snapshot.tasks[0]).not.toHaveProperty("title");
+    expect(snapshot.tasks[0]).not.toHaveProperty("description");
+    expect(snapshot.tasks[0]).not.toHaveProperty("toolCalls");
+    expect(snapshot.tasks[0]).not.toHaveProperty("lastSeenAt");
+    expect(snapshot.tasks[0]).toMatchObject({
+      userMessage: "Handle DingTalk request",
+      status: "in_progress",
+    });
   });
 
   it("normalizes external task and execution evidence into a single task status", () => {
@@ -88,9 +103,9 @@ describe("runtime four-object model", () => {
     expect(normalizeTaskStatus("not-a-known-status")).toBe("unknown");
   });
 
-  it("preserves OpenClaw task type, tool calls, creator external id, and raw status", () => {
+  it("preserves slim OpenClaw task fields, creator external id, assignee, and raw status", () => {
     const snapshot = createDeviceStateSnapshot({
-      observedAt: "2026-05-22T00:00:00.000Z",
+      collectedAt: "2026-05-22T00:00:00.000Z",
       device: { id: "fixture-device", hostname: "fixture.local", os: "darwin", collectionStatus: "online" },
       runtimes: [],
       agents: [],
@@ -98,11 +113,15 @@ describe("runtime four-object model", () => {
         id: "fixture-device:runtime:openclaw:agent:main:task:msg-1",
         agentId: "fixture-device:runtime:openclaw:agent:main",
         taskType: "conversation",
-        title: "查 Seedance 指标",
+        title: "legacy title",
+        description: "legacy description",
+        userMessage: "查 Seedance 指标",
+        agentReply: "应该查询 SLS 项目和对应日志库。",
         status: "success",
         source: { kind: "openclaw", externalId: "msg-1" },
         channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "cid-example" },
         conversation: { title: "日常工作提醒助手", externalId: "cid-example" },
+        assignee: { name: "main", externalId: "main" },
         creator: { name: "张良", externalId: "100854680226406967" },
         toolCalls: [{
           id: "exec-1",
@@ -128,21 +147,27 @@ describe("runtime four-object model", () => {
     expect(snapshot.tasks[0]).toMatchObject({
       taskType: "conversation",
       status: "done",
+      userMessage: "查 Seedance 指标",
+      agentReply: "应该查询 SLS 项目和对应日志库。",
       source: { kind: "openclaw", externalId: "msg-1" },
+      assignee: { name: "main", externalId: "main" },
       creator: { name: "张良", externalId: "100854680226406967" },
-      toolCalls: [expect.objectContaining({ id: "exec-1", status: "failed" })],
       raw: { openclaw: expect.objectContaining({ status: "done", messageId: "msg-1" }) },
     });
+    expect(snapshot.tasks[0]).not.toHaveProperty("title");
+    expect(snapshot.tasks[0]).not.toHaveProperty("description");
+    expect(snapshot.tasks[0]).not.toHaveProperty("toolCalls");
   });
 
   it("drops runtime source names from task channel context", () => {
     const snapshot = createDeviceStateSnapshot({
-      observedAt: "2026-05-21T00:00:00.000Z",
+      collectedAt: "2026-05-21T00:00:00.000Z",
       device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
       tasks: [{
         id: "agent-1:task:local-1",
         agentId: "agent-1",
         title: "Local runtime work",
+        userMessage: "Local runtime work",
         status: "done",
         channel: { kind: "openclaw", name: "OpenClaw" },
         conversation: { title: "OpenClaw" },
@@ -151,5 +176,22 @@ describe("runtime four-object model", () => {
 
     expect(snapshot.tasks[0]).not.toHaveProperty("channel");
     expect(snapshot.tasks[0]).not.toHaveProperty("conversation");
+  });
+
+  it("normalizes only collectedAt snapshots and does not require a stored task title", () => {
+    expect(normalizeDeviceStateSnapshot({
+      observedAt: "2026-05-22T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{ id: "task-1", agentId: "agent-1", status: "done", userMessage: "Hello" }],
+    })).toBeNull();
+
+    expect(normalizeDeviceStateSnapshot({
+      collectedAt: "2026-05-22T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{ id: "task-1", agentId: "agent-1", status: "done", userMessage: "Hello" }],
+    })?.tasks[0]).toMatchObject({
+      id: "task-1",
+      userMessage: "Hello",
+    });
   });
 });

@@ -9,6 +9,7 @@ import { createPostgresAuthStore, type AuthStore } from "../auth/auth-store";
 import { createPostgresNotificationStore } from "../notifications/notification-store";
 import { createPostgresOperationStore } from "../operations/operation-store";
 import { createDeviceStateSnapshot } from "../runtime/runtime-model";
+import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
 import { createLorumeBackendServer, type LorumeBackendServer } from "./backend-server";
 import {
@@ -181,11 +182,13 @@ describeDb("standalone Lorume backend server with Postgres", () => {
         device: deviceStateFixture.devices[0],
       });
 
-      const response = await postJson(`${backend.url}/api/device-state-snapshots`, snapshot);
+      const response = await postJson(`${backend.url}/api/device-state-snapshots`, { ...snapshot, tasks: [] });
+      const taskBatchResponse = await postJson(`${backend.url}/api/device-task-batches`, createTaskBatch(snapshot));
       const fleetResponse = await fetch(`${backend.url}/api/runtime-fleet`);
       const tasksResponse = await fetch(`${backend.url}/api/runtime-tasks?status=in_progress&channelKind=dingtalk`);
 
       expect(response.status).toBe(201);
+      expect(taskBatchResponse.status).toBe(201);
       await expect(fleetResponse.json()).resolves.toMatchObject({
         summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
         devices: [expect.objectContaining({ id: "fixture-mac" })],
@@ -343,6 +346,17 @@ function postJson(url: string, payload: unknown): Promise<Response> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot>) {
+  const batch = createRuntimeTaskBatches(snapshot.tasks, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: snapshot.collectedAt,
+    deviceId: snapshot.device.id,
+  })[0];
+  if (!batch) throw new Error("backend test task batch should not be empty");
+  return batch;
 }
 
 function sleep(milliseconds: number): Promise<void> {

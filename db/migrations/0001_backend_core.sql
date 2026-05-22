@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS devices (
   collection_status text NOT NULL DEFAULT 'syncing',
   collector jsonb NOT NULL DEFAULT '{}'::jsonb,
   last_seen_at timestamptz,
-  observed_at timestamptz NOT NULL,
+  collected_at timestamptz NOT NULL,
   raw jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS collector_ingestions (
   device_id text NOT NULL,
   snapshot_type text NOT NULL,
   status text NOT NULL,
-  observed_at timestamptz,
+  collected_at timestamptz,
   received_at timestamptz NOT NULL DEFAULT now(),
   duration_ms integer,
   counts jsonb NOT NULL DEFAULT '{}'::jsonb,

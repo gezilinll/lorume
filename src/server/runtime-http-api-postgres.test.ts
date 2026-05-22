@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPostgresAuthStore } from "../auth/auth-store";
 import { createPostgresNotificationStore } from "../notifications/notification-store";
+import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runMigrationsScript, shouldRunPostgresTests } from "../test/postgres";
 import { createPostgresStore, type PostgresStore } from "./postgres-store";
 import { createRuntimeControlChannel } from "./runtime-control-channel";
@@ -50,7 +51,8 @@ describeDb("runtime HTTP API with Postgres store", () => {
         const deviceStateSnapshot = createDeviceStateSnapshot();
 
         const noIngestionHealthResponse = await fetch(`${baseUrl}/api/devices/openclaw-device/collection-health`);
-        const response = await postJson(`${baseUrl}/api/device-state-snapshots`, deviceStateSnapshot);
+        const response = await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
+        const taskBatchResponse = await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
         const counts = await postgresStore.readEntityCounts();
         const fleetResponse = await fetch(`${baseUrl}/api/runtime-fleet`);
         const tasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?status=in_progress&channelKind=dingtalk`);
@@ -65,14 +67,20 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         expect(response.status).toBe(201);
         await expect(response.json()).resolves.toMatchObject({
+          collectedAt: "2026-05-21T03:00:00.000Z",
           deviceId: "openclaw-device",
-          observedAt: "2026-05-21T03:00:00.000Z",
+          ok: true,
+        });
+        expect(taskBatchResponse.status).toBe(201);
+        await expect(taskBatchResponse.json()).resolves.toMatchObject({
+          acked: [{ id: "openclaw-device:runtime:openclaw:agent:main:task:task-1", hash: expect.any(String) }],
+          deviceId: "openclaw-device",
           ok: true,
         });
         expect(counts).toEqual({
           agentSkillProbeSnapshots: 0,
           agents: 1,
-          collectorIngestions: 1,
+          collectorIngestions: 2,
           devices: 1,
           runtimes: 1,
           tasks: 1,
@@ -103,13 +111,13 @@ describeDb("runtime HTTP API with Postgres store", () => {
           total: 0,
         });
         await expect(ingestionsResponse.json()).resolves.toMatchObject({
-          ingestions: [
+          ingestions: expect.arrayContaining([
             expect.objectContaining({
               counts: expect.objectContaining({ tasks: 1 }),
-              snapshotType: "device_state",
+              snapshotType: "task_batch",
               status: "succeeded",
             }),
-          ],
+          ]),
         });
         await expect(healthResponse.json()).resolves.toMatchObject({
           checks: [expect.objectContaining({ id: "device_state", status: "healthy" })],
@@ -134,7 +142,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         const { baseUrl } = await startRuntimeApi(postgresStore);
 
         const response = await postJson(`${baseUrl}/api/device-state-snapshots`, {
-          observedAt: "2026-05-10T10:00:00.000Z",
+          collectedAt: "2026-05-10T10:00:00.000Z",
           device: { id: "broken-device" },
         });
         const ingestionsResponse = await fetch(`${baseUrl}/api/devices/broken-device/ingestions`);
@@ -146,7 +154,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
             expect.objectContaining({
               deviceId: "broken-device",
               error: expect.stringContaining("invalid_device_state_snapshot: 设备状态采集数据无效"),
-              observedAt: expect.any(String),
+              collectedAt: expect.any(String),
               receivedAt: expect.any(String),
               snapshotType: "device_state",
               status: "failed",
@@ -182,9 +190,10 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
 
         const uploadResponse = await postJson(`${baseUrl}/api/device-state-snapshots`, createDeviceStateSnapshot({
+          collectedAt: currentTime,
           deviceId: "diagnostic-device",
           hostname: "diagnostic.local",
-          observedAt: currentTime,
+          tasks: [],
         }));
         const response = await fetch(`${baseUrl}/api/devices/diagnostic-device/diagnostics`);
 
@@ -220,7 +229,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
 
         const uploadResponse = await postJson(`${baseUrl}/api/device-state-snapshots`, {
-          observedAt: "2026-05-21T08:59:30.000Z",
+          collectedAt: "2026-05-21T08:59:30.000Z",
           device: { id: "broken-diagnostic-device" },
         });
         const response = await fetch(`${baseUrl}/api/devices/broken-diagnostic-device/diagnostics?now=2026-05-21T09:00:00.000Z`);
@@ -266,7 +275,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
 
         const response = await postJson(`${baseUrl}/api/device-state-snapshots`, {
-          observedAt: "2026-05-10T10:00:00.000Z",
+          collectedAt: "2026-05-10T10:00:00.000Z",
           device: { id: "broken-device" },
         });
         const threads = await notificationStore.listThreads({
@@ -340,21 +349,22 @@ function postJson(url: string, payload: unknown): Promise<Response> {
 function createDeviceStateSnapshot(options: {
   deviceId?: string;
   hostname?: string;
-  observedAt?: string;
+  collectedAt?: string;
+  tasks?: Array<Record<string, unknown>>;
 } = {}) {
   const deviceId = options.deviceId ?? "openclaw-device";
   const runtimeId = `${deviceId}:runtime:openclaw`;
   const agentId = `${runtimeId}:agent:main`;
-  const observedAt = options.observedAt ?? "2026-05-21T03:00:00.000Z";
+  const collectedAt = options.collectedAt ?? "2026-05-21T03:00:00.000Z";
   return {
-    observedAt,
+    collectedAt,
     device: {
       architecture: "arm64",
       collectionStatus: "online",
       collector: { version: "0.1.0" },
       hostname: options.hostname ?? "openclaw.local",
       id: deviceId,
-      lastSeenAt: observedAt,
+      lastSeenAt: collectedAt,
       network: { localIps: ["192.168.1.10"] },
       os: "darwin",
       user: { username: "tester" },
@@ -364,28 +374,38 @@ function createDeviceStateSnapshot(options: {
       deviceId,
       id: runtimeId,
       kind: "openclaw",
-      lastSeenAt: observedAt,
+      lastSeenAt: collectedAt,
       name: "OpenClaw Gateway",
       version: "openclaw 1.0.0",
     }],
     agents: [{
       collectionStatus: "online",
       id: agentId,
-      lastSeenAt: observedAt,
+      lastSeenAt: collectedAt,
       name: "main",
       runtimeId,
     }],
-    tasks: [{
+    tasks: options.tasks ?? [{
       agentId,
       channel: { externalId: "group-live", kind: "dingtalk", name: "DingTalk 群聊" },
       createdAt: "2026-05-21T02:55:00.000Z",
       creator: { name: "PMO" },
-      description: "PMO asked OpenClaw to inspect the handoff.",
       id: `${agentId}:task:task-1`,
-      lastSeenAt: observedAt,
+      userMessage: "PMO asked OpenClaw to inspect the handoff.",
+      agentReply: "The handoff is ready for review.",
       status: "in_progress",
-      title: "Review DingTalk request",
-      updatedAt: observedAt,
+      updatedAt: collectedAt,
     }],
   };
+}
+
+function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot>) {
+  const batch = createRuntimeTaskBatches(snapshot.tasks as any, {
+    batchMaxBytes: 1_000_000,
+    batchMaxTasks: 1_000,
+    collectedAt: snapshot.collectedAt,
+    deviceId: snapshot.device.id,
+  })[0];
+  if (!batch) throw new Error("test task batch should not be empty");
+  return batch;
 }

@@ -49,8 +49,8 @@ export type RuntimeFleetLastSeenRange = "all" | "24h" | "7d" | "30d";
 
 /** Backend/UI Runtime Fleet snapshot built from the four top-level product objects. */
 export interface RuntimeFleetSnapshot {
-  /** Latest observation time across the result set. */
-  observedAt: string;
+  /** Collector completion time across the result set. */
+  collectedAt: string;
   /** Devices represented by the query. */
   devices: Device[];
   /** Runtime objects represented by the query. */
@@ -177,7 +177,7 @@ export function runtimeAgentLastSeenAt(
   runtime?: Runtime,
   snapshot?: RuntimeFleetSnapshot,
 ): string | undefined {
-  return agent.lastSeenAt ?? runtime?.lastSeenAt ?? snapshot?.observedAt;
+  return agent.lastSeenAt ?? runtime?.lastSeenAt ?? snapshot?.collectedAt;
 }
 
 /** List runtime kinds actually present in the current Runtime Fleet snapshot. */
@@ -253,7 +253,7 @@ export function filterRuntimeFleet(
       runtimeIds.has(agent.runtimeId) || matchesLastSeenRange(agent.lastSeenAt, lastSeenRange),
     );
     const agentIds = new Set(agents.map((agent) => agent.id));
-    tasks = tasks.filter((task) => agentIds.has(task.agentId) || matchesLastSeenRange(task.lastSeenAt, lastSeenRange));
+    tasks = tasks.filter((task) => agentIds.has(task.agentId) || matchesLastSeenRange(taskActivityAt(task), lastSeenRange));
   }
 
   if (query) {
@@ -318,7 +318,7 @@ export function getRuntimeFleetDetail(
       kind: "device",
       id: device.id,
       title: deviceDisplayLabel(device),
-      subtitle: `最近同步 ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
+      subtitle: `最近同步 ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}`,
       status,
       statusLabel,
       sections: [
@@ -347,7 +347,7 @@ export function getRuntimeFleetDetail(
             `Runtime 数量: ${runtimes.length}`,
             `Agent 数量: ${agents.length}`,
             `Task 数量: ${tasks.length}`,
-            `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.observedAt)}`,
+            `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}`,
           ],
         },
         {
@@ -463,28 +463,28 @@ export function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeFl
   if (!value || typeof value !== "object") return null;
   const candidate = value as {
     agents?: unknown[];
+    collectedAt?: unknown;
     devices?: unknown[];
-    observedAt?: unknown;
     runtimes?: unknown[];
     tasks?: unknown[];
   };
   if (!Array.isArray(candidate.devices) || !Array.isArray(candidate.runtimes) || !Array.isArray(candidate.agents)) {
     return null;
   }
-  const observedAt = typeof candidate.observedAt === "string"
-    ? candidate.observedAt
+  const collectedAt = typeof candidate.collectedAt === "string"
+    ? candidate.collectedAt
     : new Date().toISOString();
   const snapshot = createDeviceStateSnapshot({
-    observedAt,
+    collectedAt,
     device: candidate.devices[0] ?? { id: "backend", hostname: "backend", os: "unknown" },
     runtimes: candidate.runtimes,
     agents: candidate.agents,
     tasks: Array.isArray(candidate.tasks) ? candidate.tasks : [],
   });
   return {
-    observedAt: snapshot.observedAt,
+    collectedAt: snapshot.collectedAt,
     devices: candidate.devices.map((device) => createDeviceStateSnapshot({
-      observedAt,
+      collectedAt,
       device,
       runtimes: [],
       agents: [],
@@ -576,8 +576,8 @@ function taskMatches(task: Task, query: string): boolean {
   return includesQuery(
     [
       task.id,
-      task.title,
-      task.description,
+      task.userMessage,
+      task.agentReply,
       task.status,
       task.channel?.kind,
       task.channel?.name,
@@ -588,6 +588,10 @@ function taskMatches(task: Task, query: string): boolean {
     ],
     query,
   );
+}
+
+function taskActivityAt(task: Task): string | undefined {
+  return task.updatedAt ?? task.createdAt;
 }
 
 function registeredRuntimeLabels(runtimes: Runtime[]): string[] {

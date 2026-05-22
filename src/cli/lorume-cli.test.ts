@@ -30,7 +30,7 @@ describe("lorume CLI", () => {
     expect(output.device).not.toHaveProperty("status");
     expect(output.device).not.toHaveProperty("connectionMode");
     expect(output.device.lastSeenAt).toEqual(expect.any(String));
-    expect(output.observedAt).toEqual(expect.any(String));
+    expect(output.collectedAt).toEqual(expect.any(String));
   });
 
   it("lists normalized runtimes and agents from a device-state snapshot", () => {
@@ -189,12 +189,17 @@ exit 91
     expect(output.tasks[0]).toMatchObject({
       id: "test-device:runtime:openclaw:agent:main:task:run-webchat-1",
       agentId: "test-device:runtime:openclaw:agent:main",
-      title: "Run a local OpenClaw check",
+      userMessage: "Run a local OpenClaw check",
       status: "in_progress",
       source: { kind: "openclaw", externalId: "run-webchat-1" },
       taskType: "conversation",
       channel: { kind: "webchat", name: "OpenClaw Web Chat", externalId: "conversation-local-1" },
+      assignee: { name: "main", externalId: "main" },
     });
+    expect(output.tasks[0]).not.toHaveProperty("title");
+    expect(output.tasks[0]).not.toHaveProperty("description");
+    expect(output.tasks[0]).not.toHaveProperty("toolCalls");
+    expect(output.tasks[0]).not.toHaveProperty("lastSeenAt");
     expect(output.tasks[0].channel.kind).not.toBe("openclaw");
   });
 
@@ -215,11 +220,13 @@ exit 91
     writeOpenClawTrajectoryFile(sessionDir, "task-done-with-stale-error", {
       finalStatus: "success",
       prompt: "已经完成但保留了历史错误字段",
+      sessionKey: "agent:main:webchat:errors",
       traceError: "previous attempt failed",
     });
     writeOpenClawTrajectoryFile(sessionDir, "task-failed-with-error", {
       finalStatus: "error",
       prompt: "失败任务需要保留错误原因",
+      sessionKey: "agent:main:webchat:errors",
       traceError: "tool failed",
     });
 
@@ -297,9 +304,11 @@ exit 91
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-trajectory-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "live");
+    const dingtalkStateDir = path.join(root, ".openclaw", "agents", "main", "sessions", "dingtalk-state");
     const sessionFile = path.join(sessionDir, "run-traj-1.session.jsonl");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(dingtalkStateDir, { recursive: true });
     writeOpenClawExecutable(binDir, {
       health: { ok: true, agents: [{ agentId: "main" }] },
       status: {
@@ -310,6 +319,10 @@ exit 91
     });
     writeFileSync(sessionFile, [
       JSON.stringify({ role: "user", content: "整理今天项目风险并同步到群里" }),
+      JSON.stringify({
+        role: "assistant",
+        content: "我会整理风险并同步到群里。",
+      }),
       JSON.stringify({
         role: "assistant",
         toolCall: {
@@ -354,9 +367,26 @@ exit 91
         runId: "run-traj-1",
         sessionKey: "agent:main:dingtalk:group:group-live",
         ts: "2026-05-21T02:03:00.000Z",
-        data: { finalStatus: "error", error: "tool failed" },
+        data: { finalStatus: "error", error: "tool failed", assistantTexts: ["我会整理风险并同步到群里。"] },
       }),
     ].join("\n"));
+    writeFileSync(path.join(dingtalkStateDir, "targets.directory.json"), JSON.stringify({
+      groups: {
+        "group-live": { currentTitle: "日常工作提醒助手" },
+      },
+    }));
+    writeFileSync(path.join(dingtalkStateDir, "messages.context.json"), JSON.stringify({
+      records: [{
+        msgId: "msg-live-1",
+        conversationId: "group-live",
+        direction: "inbound",
+        text: "整理今天项目风险并同步到群里",
+        senderId: "user-live-1",
+        senderName: "张良",
+        createdAt: "2026-05-21T02:01:00.000Z",
+        updatedAt: "2026-05-21T02:01:00.000Z",
+      }],
+    }));
 
     const output = runCli([
       "collect",
@@ -376,8 +406,8 @@ exit 91
     expect(output.tasks[0]).toMatchObject({
       id: "test-device:runtime:openclaw:agent:main:task:run-traj-1",
       agentId: "test-device:runtime:openclaw:agent:main",
-      title: "整理今天项目风险并同步到群里",
-      description: "整理今天项目风险并同步到群里",
+      userMessage: "整理今天项目风险并同步到群里",
+      agentReply: "我会整理风险并同步到群里。",
       status: "failed",
       source: { kind: "openclaw", externalId: "msg-live-1" },
       taskType: "conversation",
@@ -388,14 +418,7 @@ exit 91
         lastActivityAt: "2026-05-21T02:03:00.000Z",
       },
       creator: { name: "张良", externalId: "user-live-1" },
-      toolCalls: [{
-        id: "exec-1",
-        name: "bash",
-        status: "failed",
-        arguments: { command: "python3 scripts/query_project_risks.py --today" },
-        resultPreview: "tool failed",
-        error: "tool failed",
-      }],
+      assignee: { name: "main", externalId: "main" },
       raw: {
         openclaw: {
           messageId: "msg-live-1",
@@ -408,9 +431,12 @@ exit 91
       error: "tool failed",
       createdAt: "2026-05-21T02:00:00.000Z",
       updatedAt: "2026-05-21T02:03:00.000Z",
-      lastSeenAt: "2026-05-21T02:03:00.000Z",
     });
     expect(output.tasks[0]).not.toHaveProperty("runtimeId");
+    expect(output.tasks[0]).not.toHaveProperty("title");
+    expect(output.tasks[0]).not.toHaveProperty("description");
+    expect(output.tasks[0]).not.toHaveProperty("toolCalls");
+    expect(output.tasks[0]).not.toHaveProperty("lastSeenAt");
   });
 
   it("maps OpenClaw cron trajectory runs into scheduled Tasks", () => {
@@ -452,9 +478,10 @@ exit 91
       id: "test-device:runtime:openclaw:agent:main:task:cron-daily-summary",
       agentId: "test-device:runtime:openclaw:agent:main",
       taskType: "scheduled",
-      title: "[cron:daily-summary] 汇总今天的项目风险",
+      userMessage: "[cron:daily-summary] 汇总今天的项目风险",
       status: "done",
       source: { kind: "openclaw", externalId: "cron-daily-summary" },
+      assignee: { name: "main", externalId: "main" },
       raw: {
         openclaw: {
           sessionKey: "agent:main:cron:daily-summary",
@@ -466,6 +493,105 @@ exit 91
     });
     expect(output.tasks[0]).not.toHaveProperty("channel");
     expect(output.tasks[0]).not.toHaveProperty("conversation");
+    expect(output.tasks[0]).not.toHaveProperty("title");
+    expect(output.tasks[0]).not.toHaveProperty("description");
+  });
+
+  it("records diagnostics instead of uploading DingTalk conversation tasks without inbound message context", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-missing-message-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "dingtalk-missing-message");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-missing-message.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-missing-message",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "run-missing-message",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:01:00.000Z",
+        data: {
+          prompt: "Conversation metadata: {\"message_id\":\"msg-missing\",\"chat_id\":\"group-live\"}\n\n帮我拉5月16日的数据",
+        },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toEqual([]);
+    expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("missing DingTalk inbound message context"));
+  });
+
+  it("filters internal OpenClaw announce and subagent runs into diagnostics only", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-internal-run-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "internal");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeOpenClawTrajectoryFile(sessionDir, "announce-v1", {
+      finalStatus: "success",
+      prompt: "[announce:v1] publish OpenClaw internal status",
+      sessionKey: "agent:main:webchat:internal",
+    });
+    writeOpenClawTrajectoryFile(sessionDir, "subagent-run", {
+      finalStatus: "success",
+      prompt: "[subagent:researcher] internal scratchpad work",
+      sessionKey: "agent:main:webchat:internal",
+    });
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toEqual([]);
+    expect(output.diagnostics.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("announce-v1"),
+      expect.stringContaining("subagent-run"),
+    ]));
   });
 
   it("limits OpenClaw trajectory tasks to the most recent snapshot window", () => {
@@ -489,21 +615,21 @@ exit 91
         JSON.stringify({
           type: "session.started",
           runId: `run-window-${index}`,
-          sessionKey: "agent:main:dingtalk:group:group-live",
+          sessionKey: "agent:main:webchat:window-live",
           ts: `2026-05-21T04:${minute}:00.000Z`,
           data: { agentId: "main" },
         }),
         JSON.stringify({
           type: "prompt.submitted",
           runId: `run-window-${index}`,
-          sessionKey: "agent:main:dingtalk:group:group-live",
+          sessionKey: "agent:main:webchat:window-live",
           ts: `2026-05-21T04:${minute}:10.000Z`,
           data: { prompt: `窗口任务 ${index}` },
         }),
         JSON.stringify({
           type: "trace.artifacts",
           runId: `run-window-${index}`,
-          sessionKey: "agent:main:dingtalk:group:group-live",
+          sessionKey: "agent:main:webchat:window-live",
           ts: `2026-05-21T04:${minute}:30.000Z`,
           data: { finalStatus: "success" },
         }),
@@ -534,7 +660,7 @@ exit 91
     expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 5 to 3"));
   });
 
-  it("keeps OpenClaw task snapshots inside the byte budget without trimming kept tool arguments", () => {
+  it("keeps OpenClaw task snapshots inside the byte budget without uploading tool call payloads", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-bytes-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "bytes");
@@ -554,7 +680,7 @@ exit 91
       const minute = String(index).padStart(2, "0");
       const sessionFile = path.join(sessionDir, `run-large-${index}.session.jsonl`);
       writeFileSync(sessionFile, [
-        JSON.stringify({ role: "user", content: `大参数任务 ${index}` }),
+        JSON.stringify({ role: "user", content: `大参数任务 ${index} ${largeArgument}` }),
         JSON.stringify({
           role: "assistant",
           toolCall: {
@@ -568,16 +694,16 @@ exit 91
         JSON.stringify({
           type: "session.started",
           runId: `run-large-${index}`,
-          sessionKey: "agent:main:dingtalk:group:group-live",
+          sessionKey: "agent:main:webchat:large-live",
           ts: `2026-05-21T05:${minute}:00.000Z`,
           data: { agentId: "main", sessionFile },
         }),
         JSON.stringify({
           type: "prompt.submitted",
           runId: `run-large-${index}`,
-          sessionKey: "agent:main:dingtalk:group:group-live",
+          sessionKey: "agent:main:webchat:large-live",
           ts: `2026-05-21T05:${minute}:10.000Z`,
-          data: { prompt: `大参数任务 ${index}` },
+          data: { prompt: `大参数任务 ${index} ${largeArgument}` },
         }),
       ].join("\n"));
     }
@@ -600,7 +726,8 @@ exit 91
 
     expect(output.tasks).toHaveLength(1);
     expect(output.tasks[0].id).toBe("test-device:runtime:openclaw:agent:main:task:run-large-3");
-    expect(output.tasks[0].toolCalls[0].arguments.payload).toHaveLength(2500);
+    expect(output.tasks[0].userMessage).toContain("大参数任务 3");
+    expect(output.tasks[0]).not.toHaveProperty("toolCalls");
     expect(Buffer.byteLength(JSON.stringify(output.tasks), "utf8")).toBeLessThanOrEqual(5000);
     expect(output.diagnostics.warnings).toContainEqual(expect.stringContaining("OpenClaw task snapshot truncated from 3 to 1"));
   });

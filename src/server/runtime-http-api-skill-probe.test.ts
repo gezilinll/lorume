@@ -44,7 +44,7 @@ async function startRuntimeApi() {
     staleAfterMs: 24 * 60 * 60 * 1000,
   });
   store.writeLatestSnapshot({
-    observedAt: "2026-05-21T10:00:00.000Z",
+    collectedAt: "2026-05-21T10:00:00.000Z",
     device: {
       id: "fixture-mac",
       hostname: "fixture-mac.local",

@@ -310,13 +310,13 @@ export function RuntimeWorkBoardPage() {
                           <Badge>{item.statusLabel}</Badge>
                           {item.channelKindLabel ? <Badge>{item.channelKindLabel}</Badge> : null}
                         </span>
-                        <strong>{item.title}</strong>
+                        <strong>{item.displayTitle}</strong>
                         <small>{item.requestExcerpt}</small>
                         <span className="workCardMeta">发起人 {item.creatorLabel}</span>
                         <span className="workCardMeta">承接 Agent {item.assigneeLabel}</span>
                         <span className="workCardMeta">
                           会话/群组 {item.channelLabel ?? "未上报"}
-                          {item.lastSeenAt ? ` · ${formatRuntimeTimestamp(item.lastSeenAt)}` : ""}
+                          {item.updatedAt ?? item.createdAt ? ` · ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}` : ""}
                         </span>
                       </button>
                     ))
@@ -358,7 +358,7 @@ function TaskDetail({ item }: { item: RuntimeTaskBoardItem | null }) {
       <div className="detailHeader">
         <div>
           <p className="eyebrow">Task</p>
-          <h2 className="detailTitle" title={item.title}>{item.title}</h2>
+          <h2 className="detailTitle" title={item.userMessage ?? item.displayTitle}>{item.displayTitle}</h2>
         </div>
         <StatusPill>{item.statusLabel}</StatusPill>
       </div>
@@ -375,12 +375,13 @@ function TaskDetail({ item }: { item: RuntimeTaskBoardItem | null }) {
       <DetailList
         title="最近状态"
         items={[
-          `最近同步: ${formatRuntimeTimestamp(item.lastSeenAt)}`,
+          `最近更新: ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}`,
           `任务状态: ${item.statusLabel}`,
           ...(item.error ? [`最近错误: ${item.error}`] : []),
         ]}
       />
-      <DetailBlock title="消息摘要">{item.requestExcerpt}</DetailBlock>
+      <DetailBlock title="用户消息">{item.userMessage ?? "未上报用户消息"}</DetailBlock>
+      {item.agentReply ? <DetailBlock title="Agent 回复">{item.agentReply}</DetailBlock> : null}
     </aside>
   );
 }

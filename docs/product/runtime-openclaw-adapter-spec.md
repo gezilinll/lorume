@@ -1,6 +1,6 @@
 # Runtime OpenClaw Adapter Spec
 
-版本：TinySpec v1.1
+版本：TinySpec v1.2
 
 本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent` 和 `Task`。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 adapter 是否启用由各自 spec 和 harness 决定。
 
@@ -24,9 +24,9 @@ export interface Task {
   id: string;
   agentId: string;
   taskType: "conversation" | "scheduled";
-  title: string;
-  description?: string;
   status: TaskStatus;
+  userMessage?: string;
+  agentReply?: string;
   source?: { kind?: "openclaw"; externalId?: string };
   channel?: {
     kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
@@ -38,20 +38,12 @@ export interface Task {
     externalId?: string;
     lastActivityAt?: string;
   };
-  assignee?: { name?: string };
+  assignee?: { name: string; externalId?: string };
   creator?: { name?: string; externalId?: string };
-  toolCalls?: Array<{
-    id: string;
-    name: string;
-    status: "done" | "failed" | "unknown";
-    arguments?: unknown;
-    resultPreview?: string;
-    error?: string;
-  }>;
   raw?: {
     openclaw?: {
       status?: string;
-      statusSource?: "session" | "trajectory" | "tool" | "tasks_list";
+      statusSource?: "session" | "trajectory" | "tasks_list";
       sessionId?: string;
       sessionKey?: string;
       messageId?: string;
@@ -61,13 +53,11 @@ export interface Task {
   error?: string;
   createdAt?: string;
   updatedAt?: string;
-  lastSeenAt?: string;
 }
 ```
 
 不允许在 Task 上保存 `runtimeId`、`run`、`execution` 或 `lastRun`。任务的当前状态只看 `Task.status`。
-
-`toolCalls` 是 Task 内嵌证据，不是独立产品实体。当前模型不新增 first-class `ToolCall`、`Conversation`、`Execution`、`Evidence` 或 `Run` 表。后端可以把完整 Task JSON 存入 `tasks.raw`，但产品查询只应暴露经过权限和字段策略确认的字段。
+当前模型不上传 `title`、`description`、`toolCalls` 或 Task `lastSeenAt`。`userMessage` 保存用户原始消息或定时任务 prompt，`agentReply` 保存 Agent 给用户的最终答复摘要。页面标题由查询层从 `userMessage` 派生，不重复落库。
 
 ## 状态映射
 
@@ -85,17 +75,17 @@ export interface Task {
 
 Runtime 和 Agent 不保存 working / idle。页面需要“进行中数量”“失败数量”时，从 Task 聚合。
 
-Adapter 负责生成归一化 `Task.status`，但不得覆盖 OpenClaw 原始状态。原始状态保存在 `Task.raw.openclaw.status`，并通过 `Task.raw.openclaw.statusSource` 标注状态来自 session、trajectory、tool 或 diagnostics。
+Adapter 负责生成归一化 `Task.status`，但不得覆盖 OpenClaw 原始状态。原始状态保存在 `Task.raw.openclaw.status`，并通过 `Task.raw.openclaw.statusSource` 标注状态来自 session、trajectory 或 tasks_list diagnostics。
 
 ## OpenClaw Adapter
 
-OpenClaw adapter 输出当前 `DeviceStateSnapshot` 内的 `runtimes`、`agents`、`tasks`。
+OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`agents`、`tasks`；collector 再拆分为 metadata snapshot 和 Task batch 上报。
 
 | Lorume 对象 | OpenClaw 来源 | 规则 |
 |---|---|---|
 | Runtime | OpenClaw config、health/status 只读结果 | 生成一个 OpenClaw Runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw agent 配置或 health/status 中可识别的 agent | 每个真实 agent 生成一个 Lorume Agent。 |
-| Task | OpenClaw session JSONL、trajectory JSONL、sessions index、DingTalk state | 只生成能明确归属到 Agent 的 `conversation` 或 `scheduled` 任务；无法唯一归属时跳过并写 diagnostic warning。 |
+| Task | OpenClaw session JSONL、trajectory JSONL、DingTalk state | 只生成能明确归属到 Agent 的 `conversation` 或 `scheduled` 任务；无法唯一归属时跳过并写 diagnostic warning。 |
 
 稳定 ID：
 
@@ -113,9 +103,9 @@ OpenClaw adapter 输出当前 `DeviceStateSnapshot` 内的 `runtimes`、`agents`
 |---|---|---|
 | Runtime | `openclaw health --json`、`openclaw status --json`、`~/.openclaw/openclaw.json` | 只读探测 OpenClaw 是否存在、版本和 agent 列表。 |
 | Agent | health/status/config 中的 agent id | 生成 Lorume Agent，当前真实样本主要是 `main`。 |
-| 会话任务 | `~/.openclaw/agents/*/sessions/sessions.json`、对应 session `*.jsonl`、`*.trajectory.jsonl`、`dingtalk-state/*.json` | 一条用户消息 turn 生成一个 `taskType="conversation"` 的 Task。 |
+| 会话任务 | session `*.jsonl`、`*.trajectory.jsonl`、`dingtalk-state/*.json` | 一条可识别用户消息 turn 生成一个 `taskType="conversation"` 的 Task。 |
 | 定时任务 | cron session JSONL 和 trajectory JSONL | 一次 cron 执行生成一个 `taskType="scheduled"` 的 Task。 |
-| ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 内嵌到 `Task.toolCalls[]`。 |
+| ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 当前不入库、不上报；仅允许 adapter 内部用于失败摘要判断。 |
 | Diagnostics | `openclaw tasks list --json` | 可保存为 warning/raw diagnostics，不作为产品 Task 来源。 |
 
 ### OpenClaw Task Snapshot 窗口
@@ -125,17 +115,17 @@ OpenClaw session / trajectory 是本机历史日志，不能无限制塞进每�
 | 约束 | 默认值 | 说明 |
 |---|---:|---|
 | 最大 Task 数 | `200` | 保留最近 Task，丢弃更旧 Task。 |
-| Task 数组最大 JSON 字节 | `8MiB` | 为后端 `10MB` 请求体上限预留 Device / Runtime / Agent / diagnostics envelope 空间。 |
+| Task 数组最大 JSON 字节 | `8MiB` | 先在 adapter 侧避免本地历史日志失控，再由 collector 拆成更小的 Task batch。 |
 
-排序时间使用 `updatedAt`，缺失时依次使用 `lastSeenAt`、`createdAt`。被窗口裁掉的 Task 不进入本次 snapshot，并写 diagnostics warning。已保留 Task 的 `toolCalls.arguments` 保持原样，便于后端排障；需要降低体积时优先丢弃更旧 Task，不改写被保留 Task。
+排序时间使用 `updatedAt`，缺失时使用 `createdAt`。被窗口裁掉的 Task 不进入本次采集输出，并写 diagnostics warning。需要降低体积时优先丢弃更旧 Task，不改写被保留 Task。
 
 ### OpenClaw Task 类型
 
 | `taskType` | 识别规则 | 入库规则 |
 |---|---|---|
-| `conversation` | `sessionKey` 包含 `:dingtalk:` / `:webchat:`，或存在用户触达渠道 + conversation 证据 | 入库。 |
-| `scheduled` | `sessionKey` 包含 `:cron:`，或用户 prompt 以 `[cron:` 开头 | 入库。 |
-| manual / background / unknown | explicit、subagent、Multica workspace prompt、无法稳定分类 | 当前不入产品 Task，写 diagnostics。 |
+| `conversation` | `sessionKey` 包含 `:dingtalk:` / `:webchat:`，或存在用户触达渠道 + conversation 证据 | 必须有可识别 `userMessage` 才入库。 |
+| `scheduled` | `sessionKey` 包含 `:cron:`，或用户 prompt 以 `[cron:` 开头 | 用 cron prompt 作为 `userMessage`。 |
+| manual / background / unknown | explicit、announce、subagent、system、background、Multica workspace prompt、无法稳定分类 | 当前不入产品 Task，写 diagnostics。 |
 
 ### OpenClaw Agent 映射
 
@@ -154,9 +144,9 @@ Task 必须映射到本次采集到的 Agent。
 | `taskType` | adapter 分类 | `conversation` |
 | `id` | `${agentId}:task:${messageId 或 trajectoryRunId}` | `...:task:581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `agentId` | `sessionKey` + 本次采集到的 Agent | `...:runtime:openclaw:agent:main` |
-| `title` | 用户消息或 cron 标题摘要 | `帮我查询示例模型的调用成功率...` |
-| `description` | 用户消息全文或 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
 | `status` | adapter 映射后的 Lorume 状态 | `done` |
+| `userMessage` | DingTalk inbound message text；scheduled task 使用 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
+| `agentReply` | trajectory `assistantTexts` | `已查询，调用 42 次，失败 3 次。` |
 | `source.kind` | adapter 固定值 | `openclaw` |
 | `source.externalId` | message id 或 trajectory run id | `581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `channel.kind` | `sessionKey` 或 DingTalk state | `dingtalk` |
@@ -164,28 +154,18 @@ Task 必须映射到本次采集到的 Agent。
 | `conversation.externalId` | DingTalk conversation id | `cid+example` |
 | `creator.name` | runtime context、origin label | `示例用户` |
 | `creator.externalId` | runtime context sender id | `user-example-001` |
-| `toolCalls[]` | session JSONL toolCall/toolResult pair | 见下表。 |
-| `raw.openclaw.status` | session/trajectory/tool 原始状态 | `done` / `success` / `error` |
+| `assignee.name` | OpenClaw agent id，缺失时默认 `main` | `main` |
+| `assignee.externalId` | OpenClaw agent id，缺失时默认 `main` | `main` |
+| `raw.openclaw.status` | session/trajectory 原始状态 | `done` / `success` / `error` |
 | `raw.openclaw.sessionId` | session file name 或 sessions index | `09fe1f68-d410-4dd6-a79c-14dc33c92ad9` |
 | `raw.openclaw.sessionKey` | sessions index / trajectory | `agent:main:dingtalk:group:cid+...` |
 | `raw.openclaw.messageId` | user message record id | `581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `raw.openclaw.trajectoryRunId` | matched trajectory run id | `6602d2a1-7e4a-4c9d-bef0-050b6b2af6d5` |
 | `createdAt` | user message timestamp / cron run start | `2026-05-21T09:10:33.514Z` |
-| `updatedAt`、`lastSeenAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
+| `updatedAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
 | `error` | failed task/tool/trajectory 的用户可读摘要 | `Column 'event_code' cannot be resolved` |
 
-ToolCall 内嵌字段：
-
-| ToolCall 字段 | OpenClaw 来源 | 示例 |
-|---|---|---|
-| `id` | `toolCall.id` | `exec-c9df226a-a7ab-4f06-bb9d-e36b50ef44ce` |
-| `name` | `toolCall.name` | `bash` |
-| `status` | 对应 `toolResult.isError` | `failed` |
-| `arguments` | `toolCall.arguments` 原样保存 | `{ "command": "python3 scripts/query_logs.py ..." }` |
-| `resultPreview` | `toolResult.content` 摘要 | `partial failures: ...` |
-| `error` | `isError=true` 时提取 | `Column 'event_code' cannot be resolved` |
-
-`toolCall.arguments` 在数据库 raw/evidence 中原样保存以便排查；后端日志、测试 fixture、文档样例和未来前端 API 展示必须另行处理敏感信息边界。
+DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 diagnostic warning。`done` conversation 缺少 `agentReply` 可以入库，但必须写 diagnostic warning。
 
 ## 用户可读规则
 
@@ -193,9 +173,9 @@ ToolCall 内嵌字段：
 - DingTalk 私聊缺少可读人名时，显示 `DingTalk 私聊`。
 - OpenClaw、Slock、Multica、Codex 是 Runtime 来源，不是用户触点渠道；没有用户触点证据的任务省略 `channel` 和 `conversation`。
 - 不展示 `cid...`、手机号、open conversation id 或其他不可读外部 id 作为会话名。
-- 没有标题或摘要的外部对象不能伪造成任务卡；保留在 diagnostics 或日志中。
+- 没有 `userMessage` 或可解释用户上下文的外部对象不能伪造成任务卡；保留在 diagnostics 或日志中。
 - 未关联 Agent 的 OpenClaw execution、内部 heartbeat、恢复任务、approval followup 等系统事件不进入 Runs。
-- 当前 Runs / Work Board 不展示 tool call 明细；后端可先入库，前端展示另行设计。
+- 当前不上报 tool call 明细；后续如要支持，必须先补跨平台数据结构、权限边界和 harness。
 
 ## Collector 边界
 
@@ -210,6 +190,6 @@ Collector 不调用旧 inventory 或旧工作态命令，不直接读取第三�
 ## Harness
 
 - `src/cli/lorume-cli.test.ts` 覆盖 `lorume collect device-state`、JSON 错误码和路径安全。
-- `src/runtime/device-collector-script.test.ts` 覆盖 collector 只通过 CLI 获取 `device_state`、上报 `/api/device-state-snapshots`、安装/卸载文件完整性。
+- `src/runtime/device-collector-script.test.ts` 覆盖 collector 只通过 CLI 获取 `device_state`、拆分上报 `/api/device-state-snapshots` 与 `/api/device-task-batches`、安装/卸载文件完整性。
 - `src/runtime/runtime-work-query-api.test.ts` 覆盖 Runs Task 查询响应解析、筛选和分页。
 - `e2e/runtime-work-board.spec.ts` 覆盖浏览器级 Runs / Work Board 展示，不依赖旧 latest snapshot 或旧 work item API。

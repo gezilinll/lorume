@@ -198,11 +198,11 @@ function formatDiagnosticMessage(item) {
     openclaw_internal_heartbeat_ignored: `${count} 条 OpenClaw 内部心跳记录已过滤。`,
     openclaw_internal_subagent_ignored: `${count} 条 OpenClaw 内部 subagent 记录已过滤。`,
     openclaw_internal_system_ignored: `${count} 条 OpenClaw 内部 system 记录已过滤。`,
+    openclaw_legacy_dingtalk_context_missing: `${count} 条 OpenClaw DingTalk 历史会话缺少可验证用户上下文，未作为 Task 入库。`,
     openclaw_missing_agent_link: `${count} 条 OpenClaw 任务缺少 Agent 归属，已跳过。`,
-    openclaw_missing_dingtalk_inbound_context: `${count} 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。`,
     openclaw_missing_prompt_ignored: `${count} 条 OpenClaw 非任务记录缺少 prompt，已过滤。`,
     openclaw_missing_agent_reply: `${count} 条 OpenClaw 会话/定时任务缺少 Agent 回复，已按不完整任务入库。`,
-    openclaw_task_missing_user_message: `${count} 条 OpenClaw 任务缺少用户消息，已跳过。`,
+    openclaw_orphan_run_missing_user_turn: `${count} 条 OpenClaw 运行记录缺少用户 turn，未作为 Task 入库。`,
     openclaw_uncollected_agent_link: `${count} 条 OpenClaw 任务归属到未采集 Agent，已跳过。`,
     openclaw_unsupported_task_type_ignored: `${count} 条 OpenClaw 非产品任务类型已过滤。`,
   };
@@ -219,7 +219,7 @@ function compareDiagnostics(left, right) {
 function openClawEligibilityDiagnostic(reason) {
   const base = { source: "openclaw", target: "adapter", action: "ignored" };
   if (reason === "missing task prompt") {
-    return { ...base, code: "openclaw_task_missing_user_message", severity: "warning", target: "task", action: "task_dropped" };
+    return { ...base, code: "openclaw_orphan_run_missing_user_turn", severity: "warning", target: "task", action: "task_dropped" };
   }
   if (reason === "missing prompt") return { ...base, code: "openclaw_missing_prompt_ignored", severity: "debug" };
   if (reason === "internal heartbeat run") return { ...base, code: "openclaw_internal_heartbeat_ignored", severity: "debug" };
@@ -241,8 +241,8 @@ function openClawAgentDiagnostic(reason) {
 
 function openClawUserMessageDiagnostic(reason) {
   const base = { source: "openclaw", target: "task", action: "task_dropped", severity: "warning" };
-  if (reason === "missing DingTalk inbound message context") return { ...base, code: "openclaw_missing_dingtalk_inbound_context" };
-  if (reason === "missing scheduled prompt" || reason === "missing userMessage") return { ...base, code: "openclaw_task_missing_user_message" };
+  if (reason === "missing DingTalk inbound message context") return { ...base, code: "openclaw_legacy_dingtalk_context_missing" };
+  if (reason === "missing scheduled prompt" || reason === "missing userMessage") return { ...base, code: "openclaw_orphan_run_missing_user_turn" };
   return null;
 }
 
@@ -556,8 +556,11 @@ function openClawProductUserMessage(run, taskType, channel, dingtalkState) {
   if (channel?.kind === "dingtalk") {
     const message = openClawDingTalkMessageForRun(run, dingtalkState);
     const text = cleanOpenClawTaskText(message?.text);
-    return text
-      ? { userMessage: text, message }
+    if (text) return { userMessage: text, message };
+    const snapshotText = cleanOpenClawTaskText(run.snapshotUserMessage);
+    const conversationId = openClawProductConversationExternalId(run.sessionKey, run.conversationId);
+    return snapshotText && run.messageId && conversationId
+      ? { userMessage: snapshotText }
       : { reason: "missing DingTalk inbound message context" };
   }
 
@@ -697,7 +700,7 @@ function readOpenClawDingTalkState() {
             targetsByConversationId.set(conversationId, target);
             targetsByConversationId.set(String(conversationId).toLowerCase(), target);
           }
-          for (const [conversationId, user] of Object.entries(directory.users || {})) {
+          for (const [conversationId, user] of Object.entries({ ...(directory.users || {}), ...(directory.directs || {}) })) {
             const target = {
               conversationId,
               kind: "direct",
@@ -837,6 +840,13 @@ function readOpenClawTrajectoryFile(trajectoryFile, fallbackAgentId) {
       current.error = data.promptErrorSource || data.error || current.error;
     } else if (event.type === "model.completed") {
       const data = event.data || {};
+      const snapshotUserTurn = extractOpenClawMessagesSnapshotUserTurn(data.messagesSnapshot || data.messages_snapshot);
+      if (snapshotUserTurn?.text) current.snapshotUserMessageCandidate ||= snapshotUserTurn.text;
+      const snapshotRuntimeContext = snapshotUserTurn?.runtimeContext || extractOpenClawRuntimeContext(data.messagesSnapshot || data.messages_snapshot);
+      if (snapshotRuntimeContext) {
+        applyOpenClawRuntimeContext(current, snapshotRuntimeContext);
+        if (snapshotUserTurn?.text) current.snapshotUserMessage ||= snapshotUserTurn.text;
+      }
       current.aborted = Boolean(data.aborted || current.aborted);
       current.timedOut = Boolean(data.timedOut || data.timed_out || current.timedOut);
       current.idleTimedOut = Boolean(data.idleTimedOut || data.idle_timed_out || current.idleTimedOut);
@@ -886,6 +896,27 @@ function extractOpenClawPrompt(data) {
     if (text.trim()) return text;
   }
   return "";
+}
+
+function extractOpenClawMessagesSnapshotUserTurn(messagesSnapshot) {
+  if (!Array.isArray(messagesSnapshot)) return null;
+  for (let index = messagesSnapshot.length - 1; index >= 0; index -= 1) {
+    const message = messagesSnapshot[index];
+    if ((message?.role || message?.message?.role || message?.data?.role) !== "user") continue;
+    const content = message.content ?? message.message?.content ?? message.data?.content ?? message.text;
+    const text = cleanOpenClawTaskText(cleanOpenClawPromptText(openClawTextFromContent(content)));
+    if (!text) continue;
+    const runtimeContext = extractOpenClawRuntimeContext(
+      message.runtimeContext ||
+      message.runtime_context ||
+      message.context ||
+      message.metadata ||
+      content ||
+      message,
+    );
+    return { text, runtimeContext };
+  }
+  return null;
 }
 
 function readLatestOpenClawUserPromptDetails(sessionFile) {
@@ -1031,7 +1062,7 @@ function openClawSessionIdFromFile(sessionFile) {
 
 function extractOpenClawRuntimeContextFromEvent(event) {
   const data = event?.data || {};
-  return extractOpenClawRuntimeContext(data.runtimeContext || data.runtime_context || data.context || data.prompt || data.messages || event.content);
+  return extractOpenClawRuntimeContext(data.runtimeContext || data.runtime_context || data.context || data.prompt || data.messages || data.messagesSnapshot || data.messages_snapshot || event.content);
 }
 
 function extractOpenClawRuntimeContext(value) {
@@ -1117,7 +1148,8 @@ function shouldCreateOpenClawTrajectoryTask(run, taskType = inferOpenClawTaskTyp
 
 function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType(run)) {
   const prompt = cleanOpenClawPromptText(run?.prompt);
-  if (!prompt) {
+  const userTurnText = prompt || cleanOpenClawTaskText(run?.snapshotUserMessage || run?.snapshotUserMessageCandidate);
+  if (!userTurnText) {
     return taskType === "conversation" || taskType === "scheduled"
       ? { create: false, reason: "missing task prompt" }
       : { create: false, reason: "missing prompt" };

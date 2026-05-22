@@ -103,7 +103,7 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 |---|---|---|
 | Runtime | `openclaw health --json`、`openclaw status --json`、`~/.openclaw/openclaw.json` | 只读探测 OpenClaw 是否存在、版本和 agent 列表。 |
 | Agent | health/status/config 中的 agent id | 生成 Lorume Agent，当前真实样本主要是 `main`。 |
-| 会话任务 | session `*.jsonl`、`*.trajectory.jsonl`、`dingtalk-state/*.json` | 一条可识别用户消息 turn 生成一个 `taskType="conversation"` 的 Task。 |
+| 会话任务 | session `*.jsonl`、`*.trajectory.jsonl`、`model.completed.messagesSnapshot`、`dingtalk-state/*.json` | 一条可识别用户消息 turn 生成一个 `taskType="conversation"` 的 Task。 |
 | 定时任务 | cron session JSONL 和 trajectory JSONL | 一次 cron 执行生成一个 `taskType="scheduled"` 的 Task。 |
 | ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 当前不入库、不上报；仅允许 adapter 内部用于失败摘要判断。 |
 | Diagnostics | `openclaw tasks list --json` | 只能保存为结构化 diagnostics，不作为产品 Task 来源。 |
@@ -140,7 +140,7 @@ Task 必须映射到本次采集到的 Agent。
 | `id` | `${agentId}:task:${messageId 或 trajectoryRunId}` | `...:task:581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
 | `agentId` | `sessionKey` + 本次采集到的 Agent | `...:runtime:openclaw:agent:main` |
 | `status` | adapter 映射后的 Lorume 状态 | `done` |
-| `userMessage` | DingTalk inbound message text；scheduled task 使用 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
+| `userMessage` | 用户消息 turn 证据；scheduled task 使用 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
 | `agentReply` | trajectory `assistantTexts` | `已查询，调用 42 次，失败 3 次。` |
 | `source.kind` | adapter 固定值 | `openclaw` |
 | `source.externalId` | message id 或 trajectory run id | `581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
@@ -160,7 +160,13 @@ Task 必须映射到本次采集到的 Agent。
 | `updatedAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
 | `error` | failed task/tool/trajectory 的用户可读摘要 | `Column 'event_code' cannot be resolved` |
 
-DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。匹配 message context 时先按 `messageId` 精确匹配；没有精确匹配时，允许通过 `targets.directory` 把 sessionKey 中的小写 conversation id 还原为 canonical conversation id，并且仅在该 conversation 下存在唯一 inbound message 时匹配。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation / scheduled 缺少 `agentReply` 可以入库；如果同时缺少可读 `error` 且没有 OpenClaw 已通过消息工具发送的证据，必须写 `warning` diagnostic。
+DingTalk `conversation` 的 `userMessage` 必须来自明确用户消息 turn 证据，不能用 assembled prompt、session fallback、日志时间邻近或 LLM 推断伪造。证据优先级如下：
+
+1. `dingtalk-state/messages.context` 中按 `messageId` 精确匹配的 inbound message。
+2. 同一 trajectory run 的 `model.completed.messagesSnapshot`，且该 user message 同时带有 runtime context，例如 `message_id`、`chat_id`、`sender` 或 `sender_id`。
+3. 通过 `targets.directory` 把 sessionKey 中的小写 conversation id 还原为 canonical conversation id，并且仅在该 conversation 下存在唯一 inbound message 时匹配。
+
+缺少可用用户消息 turn 证据的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation / scheduled 缺少 `agentReply` 可以入库；如果同时缺少可读 `error` 且没有 OpenClaw 已通过消息工具发送的证据，必须写 `warning` diagnostic。
 
 ### OpenClaw Diagnostics
 
@@ -173,8 +179,8 @@ OpenClaw adapter 不输出逐条原始 warning 字符串。它必须输出结构
 | `openclaw_internal_system_ignored` / `openclaw_internal_announce_ignored` / `openclaw_internal_subagent_ignored` | `debug` | 内部系统记录，过滤，不影响健康状态。 |
 | `openclaw_unsupported_task_type_ignored` | `info` | 非产品任务类型，过滤，不影响健康状态。 |
 | `openclaw_missing_prompt_ignored` | `debug` | 不能确认是产品任务且缺少 prompt，过滤，不影响健康状态。 |
-| `openclaw_task_missing_user_message` | `warning` | 已确认是产品任务但缺用户消息，跳过该任务。 |
-| `openclaw_missing_dingtalk_inbound_context` | `warning` | DingTalk 会话任务缺 inbound message context，跳过该任务。 |
+| `openclaw_legacy_dingtalk_context_missing` | `warning` | DingTalk 历史会话有文本或运行痕迹，但缺少可验证用户上下文，例如 `messageId`、sender 或 run-bound runtime context；作为采集诊断入库，不生成 Task。 |
+| `openclaw_orphan_run_missing_user_turn` | `warning` | 运行记录缺少用户 turn 本体，例如 prompt 和 `messagesSnapshot` 都为空；作为采集诊断入库，不生成 Task。 |
 | `openclaw_ambiguous_agent_link` / `openclaw_missing_agent_link` / `openclaw_uncollected_agent_link` | `warning` | 任务无法稳定关联 Agent，跳过该任务。 |
 | `openclaw_missing_agent_reply` | `warning` | 已完成的用户可见会话或定时任务缺少最终 Agent 回复，且没有可读 `error`、没有 OpenClaw `didSendViaMessagingTool` 之类的外部发送证据；任务可入库但标记数据质量缺口。 |
 

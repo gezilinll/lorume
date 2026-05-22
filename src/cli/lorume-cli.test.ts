@@ -596,7 +596,7 @@ exit 91
       creator: { name: "张良", externalId: "user-canonical-1" },
     });
     expect(output.diagnostics?.items || []).not.toContainEqual(expect.objectContaining({
-      code: "openclaw_missing_dingtalk_inbound_context",
+      code: "openclaw_legacy_dingtalk_context_missing",
     }));
   });
 
@@ -675,6 +675,165 @@ exit 91
     expect(output.tasks[0]).not.toHaveProperty("description");
   });
 
+  it("uses run-bound OpenClaw messagesSnapshot user turns for DingTalk conversation tasks", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-snapshot-turn-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "live");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-snapshot-turn.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-snapshot-turn",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "model.completed",
+        runId: "run-snapshot-turn",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:02:00.000Z",
+        data: {
+          messagesSnapshot: [{
+            role: "user",
+            content: "Conversation metadata: {\"message_id\":\"msg-snapshot-1\",\"chat_id\":\"group-live\",\"group_subject\":\"日常工作提醒助手\",\"sender\":\"张良\",\"sender_id\":\"user-live-1\"}\n\n帮我查 Seedance 模型今天的调用次数、成功次数和失败原因",
+          }],
+          assistantTexts: ["Seedance 今天调用 128 次，成功 120 次，失败 8 次。"],
+        },
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "run-snapshot-turn",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:03:00.000Z",
+        data: { finalStatus: "success" },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      id: "test-device:runtime:openclaw:agent:main:task:run-snapshot-turn",
+      agentId: "test-device:runtime:openclaw:agent:main",
+      userMessage: "帮我查 Seedance 模型今天的调用次数、成功次数和失败原因",
+      agentReply: "Seedance 今天调用 128 次，成功 120 次，失败 8 次。",
+      status: "done",
+      source: { kind: "openclaw", externalId: "msg-snapshot-1" },
+      taskType: "conversation",
+      channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "group-live" },
+      conversation: {
+        title: "日常工作提醒助手",
+        externalId: "group-live",
+        lastActivityAt: "2026-05-21T06:03:00.000Z",
+      },
+      creator: { name: "张良", externalId: "user-live-1" },
+      assignee: { name: "main", externalId: "main" },
+      raw: {
+        openclaw: {
+          messageId: "msg-snapshot-1",
+          sessionKey: "agent:main:dingtalk:group:group-live",
+          status: "success",
+          statusSource: "trajectory",
+          trajectoryRunId: "run-snapshot-turn",
+        },
+      },
+      createdAt: "2026-05-21T06:00:00.000Z",
+      updatedAt: "2026-05-21T06:03:00.000Z",
+    });
+    expect(output.diagnostics?.items ?? []).not.toContainEqual(expect.objectContaining({
+      code: "openclaw_legacy_dingtalk_context_missing",
+    }));
+  });
+
+  it("does not create DingTalk tasks from messagesSnapshot user text without runtime context", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-snapshot-no-context-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "live");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-snapshot-no-context.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-snapshot-no-context",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "model.completed",
+        runId: "run-snapshot-no-context",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:02:00.000Z",
+        data: {
+          messagesSnapshot: [{
+            role: "user",
+            content: "帮我查 Seedance 模型今天的调用次数、成功次数和失败原因",
+          }],
+          assistantTexts: ["已查询。"],
+        },
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "run-snapshot-no-context",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:03:00.000Z",
+        data: { finalStatus: "success" },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toEqual([]);
+    expect(output.diagnostics.items).toContainEqual(expect.objectContaining({
+      code: "openclaw_legacy_dingtalk_context_missing",
+      count: 1,
+      severity: "warning",
+      sampleRefs: ["run-snapshot-no-context"],
+    }));
+  });
+
   it("records diagnostics instead of uploading DingTalk conversation tasks without inbound message context", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-missing-message-"));
     const binDir = path.join(root, "bin");
@@ -724,10 +883,78 @@ exit 91
 
     expect(output.tasks).toEqual([]);
     expect(output.diagnostics.items).toContainEqual(expect.objectContaining({
-      code: "openclaw_missing_dingtalk_inbound_context",
+      code: "openclaw_legacy_dingtalk_context_missing",
       count: 1,
       severity: "warning",
       sampleRefs: ["run-missing-message"],
+    }));
+  });
+
+  it("records orphan OpenClaw runs without user turns as diagnostics only", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-orphan-run-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "dingtalk-orphan-run");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-orphan.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-orphan",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "run-orphan",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:01:00.000Z",
+        data: {},
+      }),
+      JSON.stringify({
+        type: "model.completed",
+        runId: "run-orphan",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:02:00.000Z",
+        data: {},
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "run-orphan",
+        sessionKey: "agent:main:dingtalk:group:group-live",
+        ts: "2026-05-21T06:03:00.000Z",
+        data: { finalStatus: "success", assistantTexts: ["已处理。"] },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toEqual([]);
+    expect(output.diagnostics.items).toContainEqual(expect.objectContaining({
+      code: "openclaw_orphan_run_missing_user_turn",
+      count: 1,
+      severity: "warning",
+      sampleRefs: ["run-orphan"],
     }));
   });
 

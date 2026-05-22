@@ -29,9 +29,9 @@ describe("runtime collection health", () => {
   it("surfaces adapter warning diagnostics without treating the whole device as failed", () => {
     const health = deriveDeviceCollectionHealth("gezilinll-claw", [
       ingestion("device_state", "succeeded", "2026-05-12T09:58:40.000Z", { tasks: 12 }, [{
-        code: "openclaw_missing_dingtalk_inbound_context",
+        code: "openclaw_legacy_dingtalk_context_missing",
         count: 3,
-        message: "3 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。",
+        message: "3 条 OpenClaw DingTalk 历史会话缺少可验证用户上下文，未作为 Task 入库。",
         severity: "warning",
         source: "openclaw",
       }]),
@@ -44,9 +44,9 @@ describe("runtime collection health", () => {
       status: "healthy",
       message: "采集成功，但有 3 条数据质量提示",
       diagnostics: [{
-        code: "openclaw_missing_dingtalk_inbound_context",
+        code: "openclaw_legacy_dingtalk_context_missing",
         count: 3,
-        message: "3 条 OpenClaw DingTalk 会话任务缺少用户消息上下文，已跳过。",
+        message: "3 条 OpenClaw DingTalk 历史会话缺少可验证用户上下文，未作为 Task 入库。",
         severity: "warning",
         source: "openclaw",
       }],

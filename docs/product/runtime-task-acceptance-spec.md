@@ -43,7 +43,7 @@ Runs / Work Board 必须让用户看清：
 
 OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task：
 
-- `conversation` Tasks 来自 OpenClaw session JSONL、trajectory JSONL 和 DingTalk state；DingTalk `userMessage` 必须来自 inbound message context。
+- `conversation` Tasks 来自 OpenClaw session JSONL、trajectory JSONL、`model.completed.messagesSnapshot` 和 DingTalk state；DingTalk `userMessage` 必须来自明确用户消息 turn 证据，例如按 `messageId` 精确匹配的 inbound message，或同一 trajectory run 内带 runtime context 的 `messagesSnapshot` user message。
 - `scheduled` Tasks 来自 OpenClaw cron session JSONL 和 trajectory JSONL。
 - `openclaw tasks list` 不得在当前实现中创建产品 Task；它只能作为 diagnostics/raw 对照。
 - 有明确 task id / message id / trajectory id 时生成稳定 `Task.id`。
@@ -52,7 +52,7 @@ OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task
 - 能识别 OpenClaw agent 时写入 `agentId`，且该 `agentId` 必须引用本次采集到的 Agent。
 - Tool calls 当前不上报、不入库；不新增 first-class ToolCall / Execution / Run 实体。
 - Adapter 映射 raw OpenClaw status 到 Lorume `Task.status`，并保留 raw status 到 `raw.openclaw.status`。
-- 无法归属 Agent、缺少 `userMessage` 或只有内部运行证据时跳过，并写 diagnostic warning。
+- 无法归属 Agent、缺少 `userMessage` 或只有内部运行证据时跳过，并写 diagnostic warning；不能用 assembled prompt、session fallback、日志时间邻近或 LLM 推断伪造 DingTalk `userMessage`。
 - `done` conversation 缺少 `agentReply` 可以入库，但必须写 diagnostic warning。
 - OpenClaw session / trajectory 历史数据长期累积时，adapter 仍输出所有符合产品标准的 Task；collector 负责分批上报、ACK cache 和 hash-based 重传，不通过 adapter 窗口丢弃数据。
 

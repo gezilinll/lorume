@@ -304,35 +304,52 @@ function metadataSnapshot(snapshot) {
 
 async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger) {
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
-  if (tasks.length === 0) return;
   const cachePath = resolveTaskSyncCachePath(config);
   const cacheScope = createTaskSyncCacheScope(serverUrl, snapshot.device.id, deviceToken);
   const cache = readTaskSyncCache(cachePath, cacheScope);
+  const currentTaskIds = new Set(tasks.map((task) => String(task.id || "")).filter(Boolean));
+  const removedTaskIds = canTrustTaskPresence(snapshot)
+    ? Object.keys(cache.tasks).filter((taskId) => !currentTaskIds.has(taskId))
+    : [];
   const entries = tasks
     .map((task) => ({ task, hash: createRuntimeTaskHash(task) }))
     .filter((entry) => cache.tasks[entry.task.id]?.hash !== entry.hash);
-  if (entries.length === 0) {
+  if (entries.length === 0 && removedTaskIds.length === 0) {
     logger.info({ deviceId: snapshot.device.id, event: "task_batch_upload_skipped", tasks: tasks.length }, "No changed tasks to upload.");
     return;
   }
-  const batches = createRuntimeTaskBatches(entries, {
+  const batchOptions = {
     batchMaxBytes: positiveInteger(config.taskBatchMaxBytes, DEFAULT_TASK_BATCH_MAX_BYTES),
     batchMaxTasks: positiveInteger(config.taskBatchMaxTasks, DEFAULT_TASK_BATCH_MAX_TASKS),
     collectedAt: snapshot.collectedAt,
     deviceId: snapshot.device.id,
-  });
+  };
+  const batches = sequenceRuntimeTaskBatches([
+    ...createRuntimeTaskBatches(entries, batchOptions),
+    ...createRuntimeTaskRemovalBatches(removedTaskIds, batchOptions),
+  ], batchOptions);
 
   for (const batch of batches) {
     const response = await postTaskBatch(serverUrl, batch, deviceToken);
-    applyTaskBatchAck(cache, response?.acked, batch);
+    applyTaskBatchAck(cache, response?.acked, response?.removed, batch);
     writeTaskSyncCache(cachePath, cache);
   }
   logger.info({
     deviceId: snapshot.device.id,
     event: "task_batch_upload_succeeded",
     batches: batches.length,
+    removedTasks: removedTaskIds.length,
     tasks: entries.length,
   });
+}
+
+function canTrustTaskPresence(snapshot) {
+  const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+  if (tasks.length > 0) return true;
+  const runtimes = Array.isArray(snapshot.runtimes) ? snapshot.runtimes : [];
+  const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
+  return runtimes.some((runtime) => runtime?.collectionStatus === "online") &&
+    agents.some((agent) => agent?.collectionStatus === "online");
 }
 
 function resolveTaskSyncCachePath(config = {}) {
@@ -404,12 +421,16 @@ function writeTaskSyncCache(cachePath, cache) {
   renameSync(tempPath, cachePath);
 }
 
-function applyTaskBatchAck(cache, acked, batch) {
+function applyTaskBatchAck(cache, acked, removed, batch) {
   const ackById = new Map((Array.isArray(acked) ? acked : []).map((entry) => [entry?.id, entry?.hash]));
+  const removedIds = new Set((Array.isArray(removed) ? removed : []).map((entry) => entry?.id).filter(Boolean));
   const lastAckedAt = new Date().toISOString();
   for (const entry of batch.tasks) {
     if (ackById.get(entry.task.id) !== entry.hash) continue;
     cache.tasks[entry.task.id] = { hash: entry.hash, lastAckedAt };
+  }
+  for (const taskId of batch.removedTaskIds ?? []) {
+    if (removedIds.has(taskId)) delete cache.tasks[taskId];
   }
 }
 
@@ -433,31 +454,59 @@ function createRuntimeTaskBatches(entries, options) {
   return batches.map((batch) => ({ ...batch, batchCount: batches.length }));
 }
 
-function finalizeTaskBatch(options, batchIndex, tasks) {
-  const draft = taskBatchDraft(options, batchIndex, tasks);
+function createRuntimeTaskRemovalBatches(removedTaskIds, options) {
+  const orderedIds = [...new Set(removedTaskIds.map((id) => String(id).trim()).filter(Boolean))].sort();
+  const batches = [];
+  let current = [];
+  for (const taskId of orderedIds) {
+    const next = [...current, taskId];
+    if (
+      current.length > 0 &&
+      (next.length > options.batchMaxTasks || byteLength(taskBatchDraft(options, batches.length, [], next)) > options.batchMaxBytes)
+    ) {
+      batches.push(finalizeTaskBatch(options, batches.length, [], current));
+      current = [taskId];
+    } else {
+      current = next;
+    }
+  }
+  if (current.length > 0) batches.push(finalizeTaskBatch(options, batches.length, [], current));
+  return batches.map((batch) => ({ ...batch, batchCount: batches.length }));
+}
+
+function sequenceRuntimeTaskBatches(batches, options) {
+  return batches
+    .map((batch, index) => finalizeTaskBatch(options, index, batch.tasks, batch.removedTaskIds))
+    .map((batch, _index, all) => ({ ...batch, batchCount: all.length }));
+}
+
+function finalizeTaskBatch(options, batchIndex, tasks, removedTaskIds = []) {
+  const draft = taskBatchDraft(options, batchIndex, tasks, removedTaskIds);
   return {
     ...draft,
-    batchId: createBatchId(options, batchIndex, tasks),
+    batchId: createBatchId(options, batchIndex, tasks, removedTaskIds),
   };
 }
 
-function taskBatchDraft(options, batchIndex, tasks) {
+function taskBatchDraft(options, batchIndex, tasks, removedTaskIds = []) {
   return {
     batchCount: 0,
     batchId: "",
     batchIndex,
     collectedAt: options.collectedAt,
     deviceId: options.deviceId,
+    removedTaskIds,
     schemaVersion: TASK_SYNC_SCHEMA_VERSION,
     tasks,
   };
 }
 
-function createBatchId(options, batchIndex, tasks) {
+function createBatchId(options, batchIndex, tasks, removedTaskIds = []) {
   return hashStableJson({
     batchIndex,
     collectedAt: options.collectedAt,
     deviceId: options.deviceId,
+    removedTaskIds,
     tasks: tasks.map((entry) => ({ hash: entry.hash, id: entry.task.id })),
   });
 }

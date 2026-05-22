@@ -77,6 +77,7 @@ describeDb("database schema baseline", () => {
           "created_source_at",
           "updated_source_at",
           "sync_hash",
+          "stale_at",
           "raw",
           "created_at",
           "updated_at",

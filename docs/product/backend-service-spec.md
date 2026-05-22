@@ -77,7 +77,8 @@ Collector 保持主动上报：
 - 当前正式写入路径分为两类：`device_state` metadata snapshot 包含 Device、Runtime、Agent 和 diagnostics；`task_batch` 包含变化 Task。
 - `POST /api/device-state-snapshots` 的 `tasks` 必须为空数组。后端按稳定 ID upsert Device、Runtime 和 Agent。
 - `POST /api/device-task-batches` 按稳定 Task ID upsert Task，并返回 ACK 列表；collector 只有在 ACK 中看到当前 `{ id, hash }` 后才推进本地 task sync cache。
-- 第一版不做删除、不发 tombstone，不清理本轮没有出现的 Runtime、Agent 或 Task。后续如需删除语义，必须先补 spec 和 harness。
+- Task 删除使用 soft tombstone 语义。后端不因普通 collector sync 物理删除 Task；只在认证后的 `task_batch.removedTaskIds` 被 ACK 后标记 stale，默认产品查询 API 过滤 stale rows。
+- Runtime / Agent / Device metadata 仍由 metadata snapshot 路径按当前快照 upsert 和收敛。
 - `inventory` 和 `work_state` 不作为兼容回退保留；对应旧 HTTP 入口、CLI 命令和 DB 表都不属于当前规则。
 - Task 必须引用当前数据库中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录结构化 diagnostic，不能写成悬空任务。
 - 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、结构化 diagnostics、规范化错误码、用户可读错误摘要、`collectedAt` 和 `receivedAt`。
@@ -86,7 +87,7 @@ Collector 保持主动上报：
 - 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
 - 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter `warning` diagnostic 时仍算成功，diagnostic 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报和批量 ACK。Task cache 必须绑定 `schemaVersion`、规范化 `serverUrl`、`deviceId` 和 device token 前 12 位 `tokenPrefix`；注册作用域缺失或不一致时，collector 视为空 cache 并重新分批上报当前可见 Task。
+- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报、soft tombstone 和批量 ACK。Task cache 必须绑定 `schemaVersion`、规范化 `serverUrl`、`deviceId` 和 device token 前 12 位 `tokenPrefix`；注册作用域缺失或不一致时，collector 视为空 cache 并重新分批上报当前可见 Task。
 
 建议节奏：
 

@@ -133,6 +133,54 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
+  it("accepts task removal batches and hides stale tasks from query endpoints", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createDeviceStateSnapshot();
+        const taskId = `${deviceStateSnapshot.agents[0].id}:task:task-1`;
+
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
+        const removalResponse = await postJson(`${baseUrl}/api/device-task-batches`, {
+          schemaVersion: "device-state-v2",
+          deviceId: deviceStateSnapshot.device.id,
+          collectedAt: "2026-05-21T03:05:00.000Z",
+          batchId: "remove-task-1",
+          batchIndex: 0,
+          batchCount: 1,
+          tasks: [],
+          removedTaskIds: [taskId],
+        });
+        const fleetResponse = await fetch(`${baseUrl}/api/runtime-fleet`);
+        const tasksResponse = await fetch(`${baseUrl}/api/runtime-tasks`);
+
+        expect(removalResponse.status).toBe(201);
+        await expect(removalResponse.json()).resolves.toMatchObject({
+          ok: true,
+          removed: [{ id: taskId }],
+          counts: { batches: 1, removedTasks: 1, tasks: 0 },
+        });
+        await expect(fleetResponse.json()).resolves.toMatchObject({
+          summary: { taskCount: 0 },
+          tasks: [],
+        });
+        await expect(tasksResponse.json()).resolves.toMatchObject({
+          items: [],
+          total: 0,
+        });
+        await expect(postgresStore.readEntityCounts()).resolves.toMatchObject({ tasks: 1 });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("records failed collector ingestions for invalid device-state snapshots", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

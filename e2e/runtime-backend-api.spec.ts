@@ -137,6 +137,95 @@ test.describe("Runtime backend API", () => {
     }
   });
 
+  test("accepts stale Task removals uploaded by a real collector process", async ({ request }) => {
+    await expect((await request.get("/healthz")).ok()).toBe(true);
+    const deviceId = "collector-removal-e2e-device";
+    const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
+      deviceId,
+      name: "Collector Removal E2E Token",
+    });
+
+    const collectorHome = mkdtempSync(path.join(tmpdir(), "lorume-backend-e2e-removal-"));
+    const firstFixturePath = path.join(collectorHome, "with-stale-task.json");
+    const secondFixturePath = path.join(collectorHome, "without-stale-task.json");
+    const baseFixture = JSON.parse(readFileSync(fixtureSnapshotPath, "utf8")) as DeviceStateSnapshot;
+    const staleTask = {
+      ...baseFixture.tasks[0],
+      id: "fixture-mac:runtime:openclaw:agent:main:task:stale-1",
+      source: { kind: "openclaw", externalId: "stale-1" },
+      userMessage: "This task should become stale after the next collector run.",
+      updatedAt: "2026-05-20T09:00:00.000Z",
+    };
+    writeFileSync(firstFixturePath, JSON.stringify({
+      ...baseFixture,
+      tasks: [baseFixture.tasks[0], staleTask],
+    }));
+    writeFileSync(secondFixturePath, JSON.stringify({
+      ...baseFixture,
+      tasks: [baseFixture.tasks[0]],
+    }));
+
+    const firstCollector = spawn(process.execPath, [
+      collectorScriptPath,
+      "--server-url",
+      backendBaseUrl,
+      "--device-id",
+      deviceId,
+      "--device-token",
+      deviceToken,
+      "--fixture",
+      firstFixturePath,
+      "--once",
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: collectorHome,
+        LORUME_COLLECTOR_LOG_PATH: path.join(collectorHome, "collector.jsonl"),
+      },
+    });
+
+    const staleTaskId = `${deviceId}:runtime:openclaw:agent:main:task:stale-1`;
+    const cachePath = path.join(collectorHome, ".lorume", "task-sync-cache.json");
+    let secondCollector: ChildProcessWithoutNullStreams | undefined;
+
+    try {
+      await waitForCollectorTask(request, firstCollector, "conversation", {
+        id: staleTaskId,
+        userMessage: "This task should become stale after the next collector run.",
+      });
+      await stopCollector(firstCollector);
+
+      secondCollector = spawn(process.execPath, [
+        collectorScriptPath,
+        "--server-url",
+        backendBaseUrl,
+        "--device-id",
+        deviceId,
+        "--device-token",
+        deviceToken,
+        "--fixture",
+        secondFixturePath,
+        "--once",
+      ], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: collectorHome,
+          LORUME_COLLECTOR_LOG_PATH: path.join(collectorHome, "collector.jsonl"),
+        },
+      });
+
+      await waitForCollectorStaleRemoval(request, secondCollector, deviceId, staleTaskId);
+      const cache = JSON.parse(readFileSync(cachePath, "utf8")) as { tasks?: Record<string, unknown> };
+      expect(cache.tasks).not.toHaveProperty(staleTaskId);
+    } finally {
+      await stopCollector(firstCollector);
+      if (secondCollector) await stopCollector(secondCollector);
+      rmSync(collectorHome, { force: true, recursive: true });
+    }
+  });
+
   test("accepts OpenClaw session Tasks uploaded by a real collector process", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     const deviceId = "collector-openclaw-e2e-device";
@@ -352,6 +441,32 @@ async function waitForCollectorTask(
     return true;
   }).catch((error) => {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nlast tasks:\n${JSON.stringify(lastTasksBody, null, 2)}`);
+  });
+}
+
+async function waitForCollectorStaleRemoval(
+  request: APIRequestContext,
+  collector: ChildProcessWithoutNullStreams,
+  deviceId: string,
+  staleTaskId: string,
+): Promise<void> {
+  let lastState: unknown = null;
+  await pollCollector("collector stale task removal", collector, async () => {
+    const [tasksResponse, ingestionsResponse] = await Promise.all([
+      request.get("/api/runtime-tasks?limit=100"),
+      request.get(`/api/devices/${encodeURIComponent(deviceId)}/ingestions`),
+    ]);
+    if (!tasksResponse.ok() || !ingestionsResponse.ok()) return false;
+    const tasksBody = await tasksResponse.json() as { items?: Array<{ id?: string }>; total?: number };
+    const ingestionsBody = await ingestionsResponse.json() as { ingestions?: Array<{ counts?: { removedTasks?: number }; snapshotType?: string }> };
+    lastState = { ingestionsBody, tasksBody };
+    return tasksBody.total === 1 &&
+      !tasksBody.items?.some((task) => task.id === staleTaskId) &&
+      Boolean(ingestionsBody.ingestions?.some((ingestion) =>
+        ingestion.snapshotType === "task_batch" && ingestion.counts?.removedTasks === 1
+      ));
+  }).catch((error) => {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nlast state:\n${JSON.stringify(lastState, null, 2)}`);
   });
 }
 

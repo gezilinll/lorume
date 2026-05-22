@@ -112,6 +112,8 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 
 OpenClaw adapter 不按数量或字节窗口裁剪符合产品标准的 Task。Adapter 在生成产品 Task 后只按最近活动时间排序，排序时间使用 `updatedAt`，缺失时使用 `createdAt`；所有符合标准的 Task 交给 collector 的 Task batch/hash ACK 机制分批上报。体积控制属于 collector 传输层分批问题，不允许 adapter 静默丢弃已识别的产品 Task。
 
+OpenClaw adapter 只输出当前可见的产品 Task，不输出 tombstone。Collector 负责把当前 Task id 集合与本地 ACK cache 对比，并用 `removedTaskIds` 上报已 ACK 但本轮不可见的 Task。
+
 ### OpenClaw Task 类型
 
 | `taskType` | 识别规则 | 入库规则 |
@@ -158,7 +160,7 @@ Task 必须映射到本次采集到的 Agent。
 | `updatedAt` | session/trajectory last event | `2026-05-21T09:10:33.577Z` |
 | `error` | failed task/tool/trajectory 的用户可读摘要 | `Column 'event_code' cannot be resolved` |
 
-DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation 缺少 `agentReply` 可以入库，但必须写 `warning` diagnostic。
+DingTalk `conversation` 的 `userMessage` 必须来自 inbound message context，不能用 assembled prompt 或 session fallback 伪造。缺少 inbound message context 的 conversation run 不入库，并写 `warning` diagnostic。`done` conversation / scheduled 缺少 `agentReply` 可以入库；如果同时缺少可读 `error` 且没有 OpenClaw 已通过消息工具发送的证据，必须写 `warning` diagnostic。
 
 ### OpenClaw Diagnostics
 
@@ -174,9 +176,10 @@ OpenClaw adapter 不输出逐条原始 warning 字符串。它必须输出结构
 | `openclaw_task_missing_user_message` | `warning` | 已确认是产品任务但缺用户消息，跳过该任务。 |
 | `openclaw_missing_dingtalk_inbound_context` | `warning` | DingTalk 会话任务缺 inbound message context，跳过该任务。 |
 | `openclaw_ambiguous_agent_link` / `openclaw_missing_agent_link` / `openclaw_uncollected_agent_link` | `warning` | 任务无法稳定关联 Agent，跳过该任务。 |
-| `openclaw_missing_agent_reply` | `warning` | `done` 会话任务缺 Agent 回复，任务可入库但标记数据质量缺口。 |
+| `openclaw_missing_agent_reply` | `warning` | 已完成的用户可见会话或定时任务缺少最终 Agent 回复，且没有可读 `error`、没有 OpenClaw `didSendViaMessagingTool` 之类的外部发送证据；任务可入库但标记数据质量缺口。 |
 
 `warning` 只表示数据质量缺口，不把 Device / Runtime / Agent 置为 `error`。OpenClaw 任务自身执行失败进入 `Task.status="failed"` 和 `Task.error`，不算采集链路 error。
+`in_progress`、`cancelled`、带可读 `error` 的 `failed` Task、以及已确认通过消息工具发送回复的 Task 缺少 `agentReply` 不记 `openclaw_missing_agent_reply`。
 
 ## 用户可读规则
 

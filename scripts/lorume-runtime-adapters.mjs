@@ -389,7 +389,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
     const error = openClawTrajectoryError(run) || toolError;
     const sourceExternalId = run.messageId || runId;
     const agentReply = openClawProductAgentReply(run);
-    if (status === "done" && taskType === "conversation" && !agentReply) {
+    if (shouldWarnOpenClawMissingAgentReply({ agentReply, error, run, status, taskType })) {
       diagnostics.add({
         action: "task_ingested_with_gap",
         code: "openclaw_missing_agent_reply",
@@ -446,6 +446,15 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
   for (const agentExternalId of visibleAgentExternalIds) agentExternalIds.add(agentExternalId);
 
   return { tasks: orderedTasks, diagnostics: diagnostics.items(), agentExternalIds: Array.from(agentExternalIds) };
+}
+
+function shouldWarnOpenClawMissingAgentReply({ agentReply, error, run, status, taskType }) {
+  const expectsReply = taskType === "conversation" || taskType === "scheduled";
+  return status === "done" &&
+    expectsReply &&
+    !agentReply &&
+    !error &&
+    !run.didSendViaMessagingTool;
 }
 
 function orderOpenClawProductTasks(tasks) {

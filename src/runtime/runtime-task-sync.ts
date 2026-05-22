@@ -15,6 +15,7 @@ export interface RuntimeTaskBatch {
   batchIndex: number;
   batchCount: number;
   tasks: RuntimeTaskBatchEntry[];
+  removedTaskIds: string[];
 }
 
 export interface RuntimeTaskBatchOptions {
@@ -93,12 +94,14 @@ export function normalizeRuntimeTaskBatch(value: unknown): RuntimeTaskBatch | nu
   if (!Array.isArray(candidate.tasks)) return null;
   const tasks = candidate.tasks.map((entry) => normalizeRuntimeTaskBatchEntry(entry)).filter((entry): entry is RuntimeTaskBatchEntry => Boolean(entry));
   if (tasks.length !== candidate.tasks.length) return null;
+  const removedTaskIds = normalizeRemovedTaskIds(candidate.removedTaskIds);
   return {
     batchCount,
     batchId: candidate.batchId,
     batchIndex,
     collectedAt: candidate.collectedAt,
     deviceId: candidate.deviceId,
+    removedTaskIds,
     schemaVersion: RUNTIME_TASK_SYNC_SCHEMA_VERSION,
     tasks,
   };
@@ -127,6 +130,7 @@ function taskBatchDraft(
     batchIndex,
     collectedAt: options.collectedAt,
     deviceId: options.deviceId,
+    removedTaskIds: [],
     schemaVersion: RUNTIME_TASK_SYNC_SCHEMA_VERSION,
     tasks,
   };
@@ -184,6 +188,11 @@ function normalizeRuntimeTaskBatchEntry(value: unknown): RuntimeTaskBatchEntry |
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeRemovedTaskIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))];
 }
 
 function stableObjectOrNull(value: unknown): unknown {

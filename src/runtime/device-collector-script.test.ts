@@ -392,6 +392,60 @@ console.log(JSON.stringify({
     }
   });
 
+  it("reports previously acknowledged tasks that disappear from a reliable snapshot", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-task-removal-"));
+    const configPath = path.join(configDir, "config.json");
+    const cachePath = path.join(configDir, "task-cache.json");
+    const staleTaskId = "fixture-mac:runtime:openclaw:agent:main:task:stale-1";
+    const collectorServer = await startRecordingSnapshotServer({
+      expectedAuthorization: "Bearer device-token-test",
+    });
+
+    try {
+      writeFileSync(configPath, JSON.stringify({
+        deviceToken: "device-token-test",
+        serverUrl: collectorServer.baseUrl,
+        taskSyncCachePath: cachePath,
+      }));
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--config",
+        configPath,
+      ]);
+
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+      cache.tasks[staleTaskId] = {
+        hash: "previously-acked-hash",
+        lastAckedAt: "2026-05-21T00:00:00.000Z",
+      };
+      writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        fixturePath,
+        "--config",
+        configPath,
+      ]);
+
+      const batches = collectorServer.taskBatches();
+      expect(batches).toHaveLength(2);
+      expect(batches[1]).toMatchObject({
+        deviceId: "fixture-mac",
+        removedTaskIds: [staleTaskId],
+        tasks: [],
+      });
+      expect(JSON.parse(readFileSync(cachePath, "utf8")).tasks).not.toHaveProperty(staleTaskId);
+    } finally {
+      collectorServer.server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("retries transient backend failures when posting device-state snapshots", async () => {
     const { server, receivedSnapshot, baseUrl, requestCount } = await startFlakySnapshotServer();
 
@@ -550,6 +604,9 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
         acked: Array.isArray(parsed.tasks)
           ? parsed.tasks.map((entry: { hash?: string; task?: { id?: string } }) => ({ hash: entry.hash, id: entry.task?.id }))
           : [],
+        removed: Array.isArray(parsed.removedTaskIds)
+          ? parsed.removedTaskIds.map((id: string) => ({ id }))
+          : [],
       }));
     });
   });
@@ -606,6 +663,9 @@ async function startSnapshotServer(options: { expectedAuthorization?: string } =
         ok: true,
         acked: Array.isArray(parsed.tasks)
           ? parsed.tasks.map((entry: { hash?: string; task?: { id?: string } }) => ({ hash: entry.hash, id: entry.task?.id }))
+          : [],
+        removed: Array.isArray(parsed.removedTaskIds)
+          ? parsed.removedTaskIds.map((id: string) => ({ id }))
           : [],
       }));
     });

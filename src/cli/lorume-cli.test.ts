@@ -251,6 +251,78 @@ exit 91
     expect(failedTask).toMatchObject({ status: "failed", taskType: "conversation", error: "tool failed" });
   });
 
+  it("does not warn for missing agentReply when OpenClaw reports messaging delivery", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-reply-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "reply");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeOpenClawTrajectoryFile(sessionDir, "task-done-missing-reply", {
+      finalStatus: "success",
+      prompt: "完成后没有可读回复文本",
+      sessionKey: "agent:main:webchat:reply",
+    });
+    writeFileSync(path.join(sessionDir, "task-done-sent-via-tool.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "task-done-sent-via-tool",
+        sessionKey: "agent:main:webchat:reply",
+        ts: "2026-05-21T04:00:00.000Z",
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "task-done-sent-via-tool",
+        sessionKey: "agent:main:webchat:reply",
+        ts: "2026-05-21T04:01:00.000Z",
+        data: { prompt: "回复通过消息工具发送" },
+      }),
+      JSON.stringify({
+        type: "trace.artifacts",
+        runId: "task-done-sent-via-tool",
+        sessionKey: "agent:main:webchat:reply",
+        ts: "2026-05-21T04:03:00.000Z",
+        data: {
+          didSendViaMessagingTool: true,
+          finalStatus: "success",
+        },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    const warning = output.diagnostics.items.find((item: { code?: string }) => item.code === "openclaw_missing_agent_reply");
+    expect(warning).toMatchObject({
+      count: 1,
+      sampleRefs: ["task-done-missing-reply"],
+      severity: "warning",
+    });
+    expect(output.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "test-device:runtime:openclaw:agent:main:task:task-done-missing-reply", status: "done" }),
+      expect.objectContaining({ id: "test-device:runtime:openclaw:agent:main:task:task-done-sent-via-tool", status: "done" }),
+    ]));
+  });
+
   it("skips OpenClaw trajectory runs when agent ownership is ambiguous", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-ambiguous-task-"));
     const binDir = path.join(root, "bin");

@@ -426,6 +426,47 @@ EOF
     }
   });
 
+  it("classifies done Slock tasks when reply threads are empty or unavailable", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-gap-"));
+    try {
+      server.setJoinedChannelTargets(["#reply-missing"]);
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:empty-thread-task" }),
+        expect.objectContaining({ id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:unavailable-thread-task" }),
+      ]));
+      expect(output.tasks).toHaveLength(2);
+      for (const task of output.tasks) expect(task).not.toHaveProperty("agentReply");
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_thread_empty", severity: "warning", count: 1 }),
+        expect.objectContaining({ code: "slock_agent_reply_thread_unavailable", severity: "warning", count: 1 }),
+      ]));
+      expect(output.diagnostics.items).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_missing_agent_reply" }),
+        expect.objectContaining({ code: "slock_agent_reply_fetch_failed" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("limits Slock agent reply thread reads per collector run without dropping Tasks", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-"));
@@ -2148,6 +2189,42 @@ async function startSlockFixtureServer(): Promise<{
       }));
       return;
     }
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#reply-missing") {
+      sendJson(200, JSON.stringify({
+        channelName: "Reply Missing",
+        messages: [
+          {
+            id: "empty-thread-task",
+            seq: 2,
+            content: "空 thread 的 done 任务",
+            taskNumber: "4001",
+            taskStatus: "done",
+            taskAssigneeId: "agent-local-1",
+            replyCount: 1,
+            senderId: "user-1",
+            senderName: "张良",
+            createdAt: "2026-05-23T01:01:00.000Z",
+            updatedAt: "2026-05-23T01:03:00.000Z",
+          },
+          {
+            id: "unavailable-thread-task",
+            seq: 1,
+            content: "不可读 thread 的 done 任务",
+            taskNumber: "4002",
+            taskStatus: "done",
+            taskAssigneeId: "agent-local-1",
+            replyCount: 1,
+            senderId: "user-1",
+            senderName: "张良",
+            createdAt: "2026-05-23T01:02:00.000Z",
+            updatedAt: "2026-05-23T01:04:00.000Z",
+          },
+        ],
+        has_older: false,
+        has_more: false,
+      }));
+      return;
+    }
     if (url.pathname === "/internal/agent/agent-local-1/history") {
       const budgetThreadKey = url.searchParams.get("channel")?.match(/^#reply-budget:(budget-[abc])$/)?.[1];
       if (budgetThreadKey) {
@@ -2170,6 +2247,14 @@ async function startSlockFixtureServer(): Promise<{
         }));
         return;
       }
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#reply-missing:empty-th") {
+      sendJson(200, JSON.stringify({
+        messages: [],
+        has_older: false,
+        has_more: false,
+      }));
+      return;
     }
     if ((url.pathname === "/internal/agent/agent-local-1/history" || url.pathname === "/internal/agent/agent-local-2/history") && url.searchParams.get("channel") === "#shared-local") {
       sendJson(200, JSON.stringify({

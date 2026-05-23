@@ -1,6 +1,6 @@
 # Runtime Slock Adapter Spec
 
-版本：TinySpec v0.2
+版本：TinySpec v0.3
 
 本文定义 Slock adapter 如何把 Slock 平台的只读证据转换为 Lorume 当前 `Device / Runtime / Agent / Task` 模型。Slock adapter 当前默认启用，但只有能从本机 Slock workspace 和 daemon 进程参数证明本机 Agent、server URL 与 token 时才执行采集；没有这些本机证据时安静跳过。执行后必须按本文的只读数据源、归属证明、分页、映射和 diagnostics 规则采集。
 
@@ -164,10 +164,11 @@ Adapter 负责生成归一化 `Task.status`，但不得覆盖原始 `taskStatus`
 - 每个 collector run 默认最多深读 `10` 条 Slock task thread。该限制只影响 `agentReply` 富化，不允许丢弃符合产品标准的 Task。
 - 预算耗尽时输出 `slock_agent_reply_deferred` info diagnostic；这些 Task 本轮不写入 reply cache，也不写 `slock_missing_agent_reply` warning。后续 collector run 会继续用相同规则补未缓存的 Task。
 - 只有实际成功读取过 task thread 后，才可以写入或刷新 reply cache。不能为预算延期的 Task 写入空 reply cache，避免后续误判为无需富化。
-- `done` Task 缺少 assigned Agent 回复时，Task 可以入库，但写 `slock_missing_agent_reply` warning。
+- `done` Task 缺少 assigned Agent 回复时，Task 可以入库，但必须按可证明原因写入更精确的 warning：thread 为空写 `slock_agent_reply_thread_empty`，thread 404 / 不存在 / 不可读写 `slock_agent_reply_thread_unavailable`，thread 可读但没有 assigned Agent 文本写 `slock_missing_agent_reply`。
 - `in_progress`、`review`、`todo` 缺少 `agentReply` 不写 warning。
-- 如果 thread history 为空，但 task message 本身字段完整，Task 仍可入库。
-- 如果 thread API 读取失败，Task 仍可入库；有旧 cache 时复用旧回复，没有可用回复时保持 `agentReply` 缺失，并写 `slock_agent_reply_fetch_failed` warning。
+- 如果 thread history 为空，但 task message 本身字段完整，Task 仍可入库，并写 `slock_agent_reply_thread_empty` warning。
+- 如果 thread 404 / 不存在 / 不可读，Task 仍可入库，并写 `slock_agent_reply_thread_unavailable` warning。
+- 如果 thread API 出现临时失败或非 404 失败，Task 仍可入库；有旧 cache 时复用旧回复，没有可用回复时保持 `agentReply` 缺失，并写 `slock_agent_reply_fetch_failed` warning。
 
 Reply cache 是 collector 本地状态，不是 Lorume 产品实体。它不能保存 Slock auth token、device token、请求头、原始 thread payload 或完整 profile payload。
 
@@ -184,8 +185,10 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 | `slock_channel_discovery_failed` | `error` | server catalog 读取失败，无法发现 joined channel。 |
 | `slock_missing_user_message` | `warning` | 本机 active profile task 缺少可读 `userMessage`，跳过。 |
 | `slock_agent_reply_deferred` | `info` | 单次 collector run 的 thread 读取预算耗尽；核心 Task 已入库，`agentReply` 等后续 run 补齐。 |
-| `slock_agent_reply_fetch_failed` | `warning` | Task thread reply enrichment 失败；adapter 保留核心 Task。 |
-| `slock_missing_agent_reply` | `warning` | `done` Task 入库但缺少 assigned Agent 回复。 |
+| `slock_agent_reply_fetch_failed` | `warning` | Task thread reply enrichment 出现临时失败或非 404 失败；adapter 保留核心 Task。 |
+| `slock_agent_reply_thread_empty` | `warning` | `done` Task 的 thread 成功读取但为空，无法提取 assigned Agent 回复。 |
+| `slock_agent_reply_thread_unavailable` | `warning` | `done` Task 的 thread 404 / 不存在 / 不可读，无法提取 assigned Agent 回复。 |
+| `slock_missing_agent_reply` | `warning` | `done` Task 的 thread 可读且有内容，但缺少 assigned Agent 回复。 |
 | `slock_unknown_task_status` | `warning` | 出现未映射 raw status。 |
 | `slock_history_pagination_incomplete` | `error` | 命中安全页数、API 错误或分页无法确认完整性。 |
 | `slock_profile_unreadable` | `error` | active profile 读取失败，无法证明本机 Agent 归属。 |
@@ -197,7 +200,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 Slock adapter 必须保持以下最小 harness：
 
-- CLI adapter unit/script test：使用脱敏 fixture 覆盖默认启用、从本机 Slock daemon 参数发现 server URL/token/agent id、真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新、thread 失败不丢 Task、每轮 reply thread 读取预算和预算延期后续 run 继续补齐。
+- CLI adapter unit/script test：使用脱敏 fixture 覆盖默认启用、从本机 Slock daemon 参数发现 server URL/token/agent id、真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新、thread 失败不丢 Task、thread 空 / 不可用的精确 diagnostics、每轮 reply thread 读取预算和预算延期后续 run 继续补齐。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
 - Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。

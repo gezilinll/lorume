@@ -209,7 +209,9 @@ function formatDiagnosticMessage(item) {
     slock_history_pagination_incomplete: `${count} 次 Slock 历史分页无法证明完整。`,
     slock_inactive_workspace_task_ignored: `${count} 条 Slock 任务只匹配到本机 workspace，缺少 active profile，已跳过。`,
     slock_agent_reply_fetch_failed: `${count} 条 Slock Task 的 Agent 回复读取失败，已保留核心 Task。`,
-    slock_missing_agent_reply: `${count} 条已完成 Slock 任务缺少 Agent 回复，已按不完整任务入库。`,
+    slock_agent_reply_thread_empty: `${count} 条已完成 Slock 任务的 thread 为空，无法提取 Agent 回复。`,
+    slock_agent_reply_thread_unavailable: `${count} 条已完成 Slock 任务的 thread 不存在或不可读，无法提取 Agent 回复。`,
+    slock_missing_agent_reply: `${count} 条已完成 Slock 任务的 thread 中缺少 assigned Agent 回复，已按不完整任务入库。`,
     slock_missing_user_message: `${count} 条 Slock 本机任务缺少用户消息，已跳过。`,
     slock_channel_discovery_failed: `${count} 次 Slock joined channel 自动发现失败。`,
     slock_profile_unreadable: `${count} 次 Slock active profile 读取失败。`,
@@ -368,7 +370,7 @@ const SLOCK_HISTORY_MAX_PAGES = 100;
 const SLOCK_HTTP_MAX_ATTEMPTS = 3;
 const SLOCK_HTTP_TIMEOUT_SECONDS = 10;
 const SLOCK_SUPPORTED_RUNTIME_KINDS = new Set(["openclaw", "codex"]);
-const SLOCK_REPLY_CACHE_SCHEMA_VERSION = "slock-reply-v1";
+const SLOCK_REPLY_CACHE_SCHEMA_VERSION = "slock-reply-v2";
 const DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN = 10;
 
 function collectSlockDeviceState(device, collectedAt, config = {}) {
@@ -521,7 +523,9 @@ function collectSlockTasksFromChannel({
     let agentReply = cachedReply?.fingerprint === fingerprint
       ? cachedAgentReply
       : { text: "", updatedAt: undefined };
-    let replyFetchFailed = false;
+    let agentReplyGapCode = cachedReply?.fingerprint === fingerprint && !cachedAgentReply.text
+      ? cleanSlockTaskText(cachedReply.missingReason)
+      : "";
     let replyDeferred = false;
     let shouldWriteReplyCache = false;
     if (shouldFetchSlockAgentReply({ cachedEntry: cachedReply, fingerprint, message })) {
@@ -539,11 +543,17 @@ function collectSlockTasksFromChannel({
           failureDiagnosticCode: "",
         });
         if (thread.incomplete) {
-          replyFetchFailed = true;
           if (cachedAgentReply.text) agentReply = cachedAgentReply;
-          diagnostics.add(slockDiagnostic("slock_agent_reply_fetch_failed", "warning", "task", "task_ingested_with_gap"), messageId);
+          agentReplyGapCode = Number(thread.statusCode) === 404
+            ? "slock_agent_reply_thread_unavailable"
+            : "slock_agent_reply_fetch_failed";
+        } else if (thread.messages.length === 0) {
+          agentReply = { text: "", updatedAt: undefined };
+          agentReplyGapCode = "slock_agent_reply_thread_empty";
+          shouldWriteReplyCache = true;
         } else {
           agentReply = slockLatestAgentReply(thread.messages, assigneeProfile.profile, message);
+          agentReplyGapCode = agentReply.text ? "" : "slock_missing_agent_reply";
           shouldWriteReplyCache = true;
         }
       }
@@ -553,6 +563,7 @@ function collectSlockTasksFromChannel({
         fingerprint,
         agentReply: agentReply.text || "",
         ...(agentReply.updatedAt ? { replyUpdatedAt: agentReply.updatedAt } : {}),
+        ...(agentReplyGapCode && !agentReply.text ? { missingReason: agentReplyGapCode } : {}),
         lastCheckedAt: new Date().toISOString(),
       };
     }
@@ -561,8 +572,8 @@ function collectSlockTasksFromChannel({
     if (status === "unknown") {
       diagnostics.add(slockDiagnostic("slock_unknown_task_status", "warning", "task", "task_ingested_with_gap"), messageId);
     }
-    if (!replyFetchFailed && !replyDeferred && status === "done" && !agentReply.text) {
-      diagnostics.add(slockDiagnostic("slock_missing_agent_reply", "warning", "task", "task_ingested_with_gap"), messageId);
+    if (!replyDeferred && status === "done" && !agentReply.text) {
+      diagnostics.add(slockDiagnostic(agentReplyGapCode || "slock_missing_agent_reply", "warning", "task", "task_ingested_with_gap"), messageId);
     }
 
     const messageUpdatedAt = toIsoTimestamp(message.updatedAt || message.updated_at || message.createdAt || message.created_at);
@@ -970,7 +981,7 @@ function readSlockHistoryPages({ baseUrl, agentId, target, auth, diagnostics, fa
     }, slockAuthForAgent(auth, agentId));
     if (!response.ok || !response.value || typeof response.value !== "object") {
       if (failureDiagnosticCode) diagnostics.add(slockDiagnostic(failureDiagnosticCode, "error", "adapter", "ignored"), target);
-      return { messages: [], channelName, incomplete: true };
+      return { messages: [], channelName, incomplete: true, statusCode: response.statusCode };
     }
 
     const page = response.value;
@@ -984,18 +995,18 @@ function readSlockHistoryPages({ baseUrl, agentId, target, auth, diagnostics, fa
     const shouldContinue = hasExplicitPaginationFlags
       ? Boolean(hasMore || hasOlder)
       : pageMessages.length >= SLOCK_HISTORY_PAGE_LIMIT;
-    if (!shouldContinue) return { messages, channelName, incomplete: false };
+    if (!shouldContinue) return { messages, channelName, incomplete: false, statusCode: response.statusCode };
 
     const nextBefore = slockNextBeforeCursor(pageMessages);
     if (!nextBefore || nextBefore === before) {
       if (failureDiagnosticCode) diagnostics.add(slockDiagnostic(failureDiagnosticCode, "error", "adapter", "ignored"), target);
-      return { messages: [], channelName, incomplete: true };
+      return { messages: [], channelName, incomplete: true, statusCode: response.statusCode };
     }
     before = nextBefore;
   }
 
   if (failureDiagnosticCode) diagnostics.add(slockDiagnostic(failureDiagnosticCode, "error", "adapter", "ignored"), target);
-  return { messages: [], channelName, incomplete: true };
+  return { messages: [], channelName, incomplete: true, statusCode: 0 };
 }
 
 function slockAuthForAgent(auth, agentId) {

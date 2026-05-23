@@ -209,6 +209,7 @@ function formatDiagnosticMessage(item) {
     slock_inactive_workspace_task_ignored: `${count} 条 Slock 任务只匹配到本机 workspace，缺少 active profile，已跳过。`,
     slock_missing_agent_reply: `${count} 条已完成 Slock 任务缺少 Agent 回复，已按不完整任务入库。`,
     slock_missing_user_message: `${count} 条 Slock 本机任务缺少用户消息，已跳过。`,
+    slock_channel_discovery_failed: `${count} 次 Slock joined channel 自动发现失败。`,
     slock_profile_unreadable: `${count} 次 Slock active profile 读取失败。`,
     slock_remote_agent_task_ignored: `${count} 条 Slock 任务指向远端或未知 Agent，已跳过。`,
     slock_unassigned_task_ignored: `${count} 条 Slock 任务缺少 assignee，已跳过。`,
@@ -366,13 +367,13 @@ const SLOCK_SUPPORTED_RUNTIME_KINDS = new Set(["openclaw", "codex"]);
 function collectSlockDeviceState(device, collectedAt, config = {}) {
   const baseUrl = slockConfiguredBaseUrl(config);
   const auth = slockConfiguredAuth(config);
-  const channelTargets = slockConfiguredChannelTargets(config);
-  if (!baseUrl || !auth.token || !channelTargets.length) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
+  const configuredChannelTargets = slockConfiguredChannelTargets(config);
+  if (!baseUrl || !auth.token) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
 
   const diagnostics = createCollectionDiagnosticCollector("slock");
   const runtimesById = new Map();
   const agentsById = new Map();
-  const tasks = [];
+  const tasksById = new Map();
   const profileCache = new Map();
   const workspaceAgentIds = readSlockWorkspaceAgentIds();
   const profileClassifications = new Map();
@@ -398,120 +399,174 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   }
 
   for (const localProfile of localProfiles) {
-    const profile = localProfile.profile;
-    const profileId = localProfile.profileId;
-    const runtimeKind = localProfile.runtimeKind;
-
     const runtime = ensureSlockRuntime(runtimesById, {
       deviceId: device.id,
-      kind: runtimeKind,
+      kind: localProfile.runtimeKind,
       collectedAt,
     });
-    const agent = ensureSlockAgent(agentsById, {
+    localProfile.productAgent = ensureSlockAgent(agentsById, {
       runtimeId: runtime.id,
-      profile,
+      profile: localProfile.profile,
       collectedAt,
     });
+  }
 
-    for (const channelTarget of channelTargets) {
-      const history = readSlockHistoryPages({
-        baseUrl,
-        agentId: profileId,
-        target: channelTarget,
-        auth,
-        diagnostics,
-      });
-      if (history.incomplete) continue;
-
-      const conversationTitle = slockConversationTitle(history.channelName, channelTarget);
-      for (const message of history.messages) {
-        if (!isSlockTaskCandidate(message)) continue;
-        const messageId = slockMessageId(message);
-        if (!messageId) continue;
-
-        const assigneeId = slockTaskAssigneeId(message);
-        if (!assigneeId) {
-          diagnostics.add(slockDiagnostic("slock_unassigned_task_ignored", "info", "task", "task_dropped"), messageId);
-          continue;
-        }
-        if (assigneeId !== profileId) {
-          const classification = slockAssigneeClassification(profileClassifications, workspaceAgentIds, assigneeId);
-          if (classification) diagnostics.add(classification, messageId);
-          continue;
-        }
-
-        const userMessage = cleanSlockTaskText(slockMessageContent(message));
-        if (!userMessage) {
-          diagnostics.add(slockDiagnostic("slock_missing_user_message", "warning", "task", "task_dropped"), messageId);
-          continue;
-        }
-
-        const threadTarget = slockThreadTarget(channelTarget, messageId);
-        const thread = readSlockHistoryPages({
+  if (configuredChannelTargets.length) {
+    for (const localProfile of localProfiles) {
+      for (const channelTarget of configuredChannelTargets) {
+        collectSlockTasksFromChannel({
           baseUrl,
-          agentId: profileId,
-          target: threadTarget,
+          channelTarget,
+          readerAgentId: localProfile.profileId,
+          localProfiles,
+          profileClassifications,
+          workspaceAgentIds,
           auth,
           diagnostics,
+          tasksById,
+          fetchThreadReplies: true,
         });
-        if (thread.incomplete) continue;
-
-        const agentReply = slockLatestAgentReply(thread.messages, profile, message);
-        const rawStatus = slockRawTaskStatus(message);
-        const status = normalizeSlockTaskStatus(rawStatus);
-        if (status === "unknown") {
-          diagnostics.add(slockDiagnostic("slock_unknown_task_status", "warning", "task", "task_ingested_with_gap"), messageId);
-        }
-        if (status === "done" && !agentReply.text) {
-          diagnostics.add(slockDiagnostic("slock_missing_agent_reply", "warning", "task", "task_ingested_with_gap"), messageId);
-        }
-
-        const messageUpdatedAt = toIsoTimestamp(message.updatedAt || message.updated_at || message.createdAt || message.created_at);
-        const lastActivityAt = latestIsoTimestamp(messageUpdatedAt, agentReply.updatedAt);
-        const task = {
-          id: makeProductTaskId(agent.id, messageId),
-          agentId: agent.id,
-          taskType: "conversation",
-          status,
-          userMessage,
-          ...(agentReply.text ? { agentReply: agentReply.text } : {}),
-          adapter: { kind: "slock" },
-          channel: { kind: "slock", externalId: channelTarget },
-          conversation: {
-            title: conversationTitle,
-            externalId: channelTarget,
-            ...(lastActivityAt ? { lastActivityAt } : {}),
-          },
-          ...(slockCreator(message) ? { creator: slockCreator(message) } : {}),
-          assignee: {
-            name: slockProfileDisplayName(profile),
-            externalId: slockProfileId(profile),
-          },
-          raw: {
-            slock: {
-              ...(rawStatus ? { status: rawStatus } : {}),
-              ...(slockTaskNumber(message) ? { taskNumber: slockTaskNumber(message) } : {}),
-              messageId,
-              channelTarget,
-              threadTarget,
-              ...(toIsoTimestamp(message.taskClaimedAt || message.claimedAt) ? { taskClaimedAt: toIsoTimestamp(message.taskClaimedAt || message.claimedAt) } : {}),
-              ...(toIsoTimestamp(message.taskCompletedAt || message.completedAt) ? { taskCompletedAt: toIsoTimestamp(message.taskCompletedAt || message.completedAt) } : {}),
-            },
-          },
-          ...(toIsoTimestamp(message.createdAt || message.created_at) ? { createdAt: toIsoTimestamp(message.createdAt || message.created_at) } : {}),
-          ...(lastActivityAt ? { updatedAt: lastActivityAt } : {}),
-        };
-        tasks.push(task);
       }
+    }
+  } else {
+    const discoveredTargets = new Map();
+    for (const localProfile of localProfiles) {
+      for (const channelTarget of discoverSlockJoinedChannelTargets(baseUrl, localProfile.profileId, auth, diagnostics)) {
+        if (!discoveredTargets.has(channelTarget)) discoveredTargets.set(channelTarget, localProfile.profileId);
+      }
+    }
+    for (const [channelTarget, readerAgentId] of discoveredTargets.entries()) {
+      collectSlockTasksFromChannel({
+        baseUrl,
+        channelTarget,
+        readerAgentId,
+        localProfiles,
+        profileClassifications,
+        workspaceAgentIds,
+        auth,
+        diagnostics,
+        tasksById,
+        fetchThreadReplies: false,
+      });
     }
   }
 
   return {
     runtimes: Array.from(runtimesById.values()),
     agents: Array.from(agentsById.values()),
-    tasks: orderSlockProductTasks(tasks),
+    tasks: orderSlockProductTasks(Array.from(tasksById.values())),
     diagnostics: diagnostics.items(),
   };
+}
+
+function collectSlockTasksFromChannel({
+  baseUrl,
+  channelTarget,
+  readerAgentId,
+  localProfiles,
+  profileClassifications,
+  workspaceAgentIds,
+  auth,
+  diagnostics,
+  tasksById,
+  fetchThreadReplies,
+}) {
+  const history = readSlockHistoryPages({
+    baseUrl,
+    agentId: readerAgentId,
+    target: channelTarget,
+    auth,
+    diagnostics,
+  });
+  if (history.incomplete) return;
+
+  const conversationTitle = slockConversationTitle(history.channelName, channelTarget);
+  for (const message of history.messages) {
+    if (!isSlockTaskCandidate(message)) continue;
+    const messageId = slockMessageId(message);
+    if (!messageId) continue;
+
+    const assigneeId = slockTaskAssigneeId(message);
+    if (!assigneeId) {
+      diagnostics.add(slockDiagnostic("slock_unassigned_task_ignored", "info", "task", "task_dropped"), messageId);
+      continue;
+    }
+
+    const assigneeProfile = localProfiles.find((profile) => profile.profileId === assigneeId);
+    if (!assigneeProfile) {
+      const classification = slockAssigneeClassification(profileClassifications, workspaceAgentIds, assigneeId);
+      if (classification) diagnostics.add(classification, messageId);
+      continue;
+    }
+
+    const userMessage = cleanSlockTaskText(slockMessageContent(message));
+    if (!userMessage) {
+      diagnostics.add(slockDiagnostic("slock_missing_user_message", "warning", "task", "task_dropped"), messageId);
+      continue;
+    }
+
+    const agent = assigneeProfile.productAgent;
+    const threadTarget = slockThreadTarget(channelTarget, messageId);
+    const thread = fetchThreadReplies
+      ? readSlockHistoryPages({
+        baseUrl,
+        agentId: assigneeProfile.profileId,
+        target: threadTarget,
+        auth,
+        diagnostics,
+      })
+      : { messages: [], incomplete: false };
+    if (thread.incomplete) continue;
+
+    const agentReply = fetchThreadReplies
+      ? slockLatestAgentReply(thread.messages, assigneeProfile.profile, message)
+      : { text: "", updatedAt: undefined };
+    const rawStatus = slockRawTaskStatus(message);
+    const status = normalizeSlockTaskStatus(rawStatus);
+    if (status === "unknown") {
+      diagnostics.add(slockDiagnostic("slock_unknown_task_status", "warning", "task", "task_ingested_with_gap"), messageId);
+    }
+    if (fetchThreadReplies && status === "done" && !agentReply.text) {
+      diagnostics.add(slockDiagnostic("slock_missing_agent_reply", "warning", "task", "task_ingested_with_gap"), messageId);
+    }
+
+    const messageUpdatedAt = toIsoTimestamp(message.updatedAt || message.updated_at || message.createdAt || message.created_at);
+    const lastActivityAt = latestIsoTimestamp(messageUpdatedAt, agentReply.updatedAt);
+    const task = {
+      id: makeProductTaskId(agent.id, messageId),
+      agentId: agent.id,
+      taskType: "conversation",
+      status,
+      userMessage,
+      ...(agentReply.text ? { agentReply: agentReply.text } : {}),
+      adapter: { kind: "slock" },
+      channel: { kind: "slock", externalId: channelTarget },
+      conversation: {
+        title: conversationTitle,
+        externalId: channelTarget,
+        ...(lastActivityAt ? { lastActivityAt } : {}),
+      },
+      ...(slockCreator(message) ? { creator: slockCreator(message) } : {}),
+      assignee: {
+        name: slockProfileDisplayName(assigneeProfile.profile),
+        externalId: slockProfileId(assigneeProfile.profile),
+      },
+      raw: {
+        slock: {
+          ...(rawStatus ? { status: rawStatus } : {}),
+          ...(slockTaskNumber(message) ? { taskNumber: slockTaskNumber(message) } : {}),
+          messageId,
+          channelTarget,
+          threadTarget,
+          ...(toIsoTimestamp(message.taskClaimedAt || message.claimedAt) ? { taskClaimedAt: toIsoTimestamp(message.taskClaimedAt || message.claimedAt) } : {}),
+          ...(toIsoTimestamp(message.taskCompletedAt || message.completedAt) ? { taskCompletedAt: toIsoTimestamp(message.taskCompletedAt || message.completedAt) } : {}),
+        },
+      },
+      ...(toIsoTimestamp(message.createdAt || message.created_at) ? { createdAt: toIsoTimestamp(message.createdAt || message.created_at) } : {}),
+      ...(lastActivityAt ? { updatedAt: lastActivityAt } : {}),
+    };
+    tasksById.set(task.id, task);
+  }
 }
 
 function slockConfiguredBaseUrl(config = {}) {
@@ -645,6 +700,34 @@ function readSlockProfile(baseUrl, agentId, auth) {
   if (response.statusCode === 404) return { profile: null, notFound: true };
   if (!response.ok || !response.value || typeof response.value !== "object") return { profile: null, failed: true };
   return { profile: response.value.profile || response.value.agent || response.value };
+}
+
+function discoverSlockJoinedChannelTargets(baseUrl, agentId, auth, diagnostics) {
+  const response = readSlockJson(
+    baseUrl,
+    `/internal/agent/${encodeURIComponent(agentId)}/server`,
+    {},
+    slockAuthForAgent(auth, agentId),
+  );
+  if (!response.ok || !response.value || typeof response.value !== "object") {
+    diagnostics.add(slockDiagnostic("slock_channel_discovery_failed", "error", "adapter", "ignored"), agentId);
+    return [];
+  }
+  const channels = toRecordArray(response.value.channels);
+  return uniqueSlockIds(
+    channels
+      .filter((channel) => channel.joined === true)
+      .map(slockServerChannelTarget),
+  );
+}
+
+function slockServerChannelTarget(channel) {
+  const target = cleanSlockTaskText(channel?.target || channel?.ref);
+  if (target) return target;
+  const name = cleanSlockTaskText(channel?.name);
+  if (name) return name.startsWith("#") ? name : `#${name}`;
+  const id = cleanSlockTaskText(channel?.id);
+  return id ? `#${id}` : "";
 }
 
 function readSlockHistoryPages({ baseUrl, agentId, target, auth, diagnostics }) {

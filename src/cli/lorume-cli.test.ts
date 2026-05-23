@@ -191,6 +191,63 @@ exit 91
     }
   });
 
+  it("discovers joined Slock channels when channel targets are not configured", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-discovered-channels-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          channel: { kind: "slock", externalId: "#daily-work" },
+          conversation: expect.objectContaining({ title: "日常工作", externalId: "#daily-work" }),
+        }),
+      ]);
+      expect(server.requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/server",
+          agentIdHeader: "agent-local-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/history",
+          channel: "#daily-work",
+        }),
+      ]));
+      expect(server.requests).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/history",
+          channel: "#public-not-joined",
+        }),
+      ]));
+      expect(server.requests).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/history",
+          channel: "#daily-work:msg-loca",
+        }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("trusts explicit Slock pagination flags when a history page reaches the request limit", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-exact-limit-"));
@@ -1622,6 +1679,15 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
     }
     if (url.pathname === "/internal/agent/agent-unsupported-1/profile") {
       sendJson(200, readFixture("profile-unsupported-runtime.json"));
+      return;
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/server") {
+      sendJson(200, JSON.stringify({
+        channels: [
+          { name: "daily-work", joined: true },
+          { name: "public-not-joined", joined: false },
+        ],
+      }));
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work") {

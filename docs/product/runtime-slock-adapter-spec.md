@@ -39,7 +39,19 @@ Adapter 必须用只读请求和只读文件读取。真实 Slock CLI API 是 ag
 | `LORUME_SLOCK_BASE_URL` / `LORUME_SLOCK_SERVER_URL` 或 `slockBaseUrl` / `slockServerUrl` | Slock server URL。 |
 | `LORUME_SLOCK_AUTH_TOKEN` / `LORUME_SLOCK_API_KEY` 或对应 config 字段 | 只读请求鉴权 token。缺失时不执行 Slock 采集。 |
 | `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 优先使用的本机 Slock Agent id 列表。未配置时才从 `~/.slock/agents/*` 枚举候选。 |
-| `LORUME_SLOCK_CHANNEL_TARGETS` 或 `slockChannelTargets` | 要读取的 Slock channel / DM / thread target 列表。 |
+| `LORUME_SLOCK_CHANNEL_TARGETS` 或 `slockChannelTargets` | 可选的显式 Slock channel / DM / thread target 列表。配置后只读取这些 target；未配置时 adapter 必须从 Slock server catalog 自动发现当前 active profile 已加入的 channel。 |
+
+## Channel 发现规则
+
+Slock adapter 不能依赖人工维护 channel allowlist 才能发现真实工作任务。规则：
+
+1. 如果显式配置了 `LORUME_SLOCK_CHANNEL_TARGETS` / `slockChannelTargets`，按配置读取，用于小范围验收或定向排障。
+2. 如果没有显式配置，必须对每个本机 active profile 调用 `GET /internal/agent/:agentId/server`，只取 `joined=true` 的 channel。
+3. 自动发现的 target 优先使用 `target` / `ref`，缺失时用 `#${name}`，再缺失时用 `#${id}`。
+4. `joined=false` 的公开可见 channel 只说明该 agent 可以看到目录，不代表当前 agent 正在承载该 channel 的工作，不自动扫描。
+5. 自动发现模式按唯一 channel 去重扫描；同一个 channel 只读取一次 history，再用 message 的 `taskAssigneeId` 归属到本机 active profile，避免被多个本机 Agent 重复读取。
+6. 自动发现模式不逐条读取 task thread。它只用 channel history 生成核心 Task；`agentReply` 留空，后续由显式 target 深扫、增量富化或按需查询补齐。
+7. server catalog 只能用于 channel target 发现和展示辅助，不能替代 profile 归属证明，也不能用 Agent 名称把 Task 归属到本机。
 
 ## 分页规则
 
@@ -136,11 +148,13 @@ Adapter 负责生成归一化 `Task.status`，但不得覆盖原始 `taskStatus`
 
 ## Agent Reply 规则
 
-`agentReply` 是可选字段。Slock adapter 应尽量从 thread history 提取 assigned Agent 的最终或最新回复，但不能为了补齐字段伪造内容。
+`agentReply` 是可选字段。Slock adapter 不能为了补齐字段伪造内容。
 
 规则：
 
-- `done` Task 缺少 assigned Agent 回复时，Task 可以入库，但写 `slock_missing_agent_reply` warning。
+- 显式配置 `LORUME_SLOCK_CHANNEL_TARGETS` / `slockChannelTargets` 的定向深扫模式，可以从 thread history 提取 assigned Agent 的最终或最新回复。
+- 自动发现 joined channel 的默认模式不逐条读取 task thread；生成 Task 时 `agentReply` 留空，避免 full sweep 被 per-task thread 请求放大到分钟级。
+- 定向深扫中，`done` Task 缺少 assigned Agent 回复时，Task 可以入库，但写 `slock_missing_agent_reply` warning。
 - `in_progress`、`review`、`todo` 缺少 `agentReply` 不写 warning。
 - 如果 thread history 为空，但 task message 本身字段完整，Task 仍可入库。
 - 如果 thread API 读取失败，且无法判断 thread 是否完整，本轮 Slock Task 采集应输出 `error` diagnostic，不把部分结果当成完整采集。
@@ -155,6 +169,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 | `slock_unassigned_task_ignored` | `info` | Task 没有 `taskAssigneeId`，无法关联 Lorume Agent。 |
 | `slock_unsupported_runtime_ignored` | `info` | active profile 的 runtime 真实存在，但该值尚未进入 Lorume RuntimeKind 实现和 harness，本轮跳过该 Agent 和其 Task。 |
 | `slock_inactive_workspace_task_ignored` | `warning` | Task 指向本机 workspace 中存在但没有 active profile 的 Agent，不能证明当前设备正在承载。 |
+| `slock_channel_discovery_failed` | `error` | 未配置显式 channel targets 时，server catalog 读取失败，无法发现 joined channel。 |
 | `slock_missing_user_message` | `warning` | 本机 active profile task 缺少可读 `userMessage`，跳过。 |
 | `slock_missing_agent_reply` | `warning` | `done` Task 入库但缺少 assigned Agent 回复。 |
 | `slock_unknown_task_status` | `warning` | 出现未映射 raw status。 |
@@ -167,7 +182,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 Slock adapter 必须保持以下最小 harness：
 
-- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生和 status 映射。
+- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生和 status 映射。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
 - Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。

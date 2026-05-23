@@ -94,6 +94,73 @@ exit 91
     expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
+  it("discovers Slock daemon credentials by default and collects local Slock tasks", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-daemon-discovery-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(path.join(root, ".slock", "agents", "agent-local-1"), { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "openclaw"), `#!/bin/sh
+exit 127
+`);
+    writeExecutable(path.join(binDir, "ps"), `#!/bin/sh
+cat <<'EOF'
+fixture 12345 0.0 0.1 node /Users/fixture/.slock/chat-bridge.js --agent-id agent-local-1 --server-url ${server.baseUrl} --auth-token fixture-token --runtime codex --runtime-actions-only
+EOF
+`);
+
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "",
+          LORUME_SLOCK_SERVER_URL: "",
+          LORUME_SLOCK_BASE_URL: "",
+          LORUME_SLOCK_AUTH_TOKEN: "",
+          LORUME_SLOCK_API_KEY: "",
+          LORUME_SLOCK_AGENT_IDS: "",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+        },
+      });
+
+      expect(output.runtimes).toEqual([
+        expect.objectContaining({ id: "fixture-device:runtime:codex", kind: "codex", name: "Codex" }),
+      ]);
+      expect(output.agents).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1",
+          name: "大卷Bot",
+        }),
+      ]);
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          agentId: "fixture-device:runtime:codex:agent:slock:agent-local-1",
+          userMessage: "帮我整理今天的项目风险",
+          adapter: { kind: "slock" },
+          channel: { kind: "slock", externalId: "#daily-work" },
+        }),
+      ]);
+      expect(server.requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/profile",
+          agentIdHeader: "agent-local-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("collects current-device Slock tasks through authenticated agent-scoped Slock APIs", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-workspace-"));
@@ -184,46 +251,6 @@ exit 91
           authorizationHeader: "Bearer fixture-token",
           slockClientHeader: "lorume-collector",
         }),
-      ]));
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("ignores deprecated Slock channel target configuration and uses discovered joined channels", async () => {
-    const server = await startSlockFixtureServer();
-    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-deprecated-target-"));
-    try {
-      const output = await runCliAsync([
-        "collect",
-        "device-state",
-        "--json",
-        "--device-id",
-        "fixture-device",
-      ], {
-        env: {
-          LORUME_COLLECTOR_HOME: root,
-          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
-          LORUME_SLOCK_SERVER_URL: server.baseUrl,
-          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
-          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
-          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
-        },
-      });
-
-      expect(output.tasks).toEqual([
-        expect.objectContaining({
-          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
-          channel: { kind: "slock", externalId: "#daily-work" },
-        }),
-      ]);
-      expect(server.requests).toEqual(expect.arrayContaining([
-        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/server" }),
-        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/history", channel: "#daily-work" }),
-      ]));
-      expect(server.requests).not.toEqual(expect.arrayContaining([
-        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/history", channel: "#reply-budget" }),
       ]));
     } finally {
       await server.close();

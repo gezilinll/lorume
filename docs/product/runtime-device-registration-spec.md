@@ -1,8 +1,8 @@
 # Runtime & Device Registration Spec
 
-版本：TinySpec v0.7
+版本：TinySpec v0.8
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；Slock adapter 已实现但默认禁用，启用后只读采集当前设备真实承载的 Slock Agent Task；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw 和 Slock；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
@@ -19,7 +19,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
 - 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
-- 默认不采集 Slock、Multica 或 Codex。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，启用后仍只能按其只读 ownership proof 和 Task 映射规则采集。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
+- 不采集 Multica 或独立 Codex adapter。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，默认启用后仍只能按其只读 ownership proof 和 Task 映射规则采集；其中 `codex` 只能作为 Slock profile 的 runtime kind 进入模型，不代表已经实现 Codex adapter。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
 - 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
@@ -33,7 +33,7 @@ flowchart LR
   CLI["lorume CLI"]
   OpenClawAdapter["OpenClaw adapter"]
   OpenClaw["OpenClaw"]
-  SlockAdapter["Slock adapter<br/>disabled by default"]
+  SlockAdapter["Slock adapter<br/>daemon credential discovered"]
   Slock["Slock"]
 
   UI --> Backend
@@ -310,10 +310,10 @@ Task 上报范围：
 Collector / CLI 必须支持 runtime adapter allowlist：
 
 ```sh
-LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
+LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock
 ```
 
-当前默认 allowlist 为 `openclaw`。被禁用的 adapter 不得执行命令、读取目录或生成对象。
+当前默认 allowlist 为 `openclaw,slock`。Slock 默认启用不等于必须存在 Slock；没有本机 Slock workspace 或无法从 Slock daemon 进程参数发现 server URL/token 时，Slock adapter 不生成对象。被禁用的 adapter 不得执行命令、读取目录或生成对象。
 
 ## 安装与卸载
 
@@ -328,7 +328,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
 ## 验收
 
 - `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出带 `collectedAt` 的 `DeviceStateSnapshot`。
-- 默认采集 allowlist 只执行 OpenClaw adapter，不执行 Slock、Multica 或 Codex 命令。
+- 默认采集 allowlist 执行 OpenClaw adapter，并在本机 Slock daemon 凭据和 workspace ownership proof 可用时执行 Slock adapter；不执行 Multica 或独立 Codex adapter。
 - Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。

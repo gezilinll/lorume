@@ -14,7 +14,7 @@ Current source of truth:
 - `docs/product/runtime-device-registration-spec.md`: TinySpec for current device registration, collector, runtime adapters, metadata snapshots, and Task batch sync.
 - `docs/product/runtime-fleet-page-spec.md`: TinySpec for the first Runtime Fleet management page.
 - `docs/product/runtime-openclaw-adapter-spec.md`: TinySpec for current OpenClaw adapter source rules and adapter-to-Task mapping.
-- `docs/product/runtime-slock-adapter-spec.md`: TinySpec for the disabled-by-default Slock adapter source rules, ownership proof, pagination, and adapter-to-Task mapping.
+- `docs/product/runtime-slock-adapter-spec.md`: TinySpec for the default-enabled Slock adapter source rules, daemon credential discovery, ownership proof, pagination, and adapter-to-Task mapping.
 - `docs/product/runtime-task-acceptance-spec.md`: TinySpec for Runs / Work Board Task acceptance.
 - `docs/product/backend-service-spec.md`: TinySpec for the local-first formal backend service, Postgres persistence, collector ingestion, and backend query APIs.
 - `docs/product/cli-device-capability-spec.md`: current rules for the deterministic local `lorume` CLI device capability atoms.

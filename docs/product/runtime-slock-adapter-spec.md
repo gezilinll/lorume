@@ -1,8 +1,8 @@
 # Runtime Slock Adapter Spec
 
-版本：TinySpec v0.1
+版本：TinySpec v0.2
 
-本文定义 Slock adapter 如何把 Slock 平台的只读证据转换为 Lorume 当前 `Device / Runtime / Agent / Task` 模型。Slock adapter 当前默认禁用；启用后必须按本文的只读数据源、归属证明、分页、映射和 diagnostics 规则采集。
+本文定义 Slock adapter 如何把 Slock 平台的只读证据转换为 Lorume 当前 `Device / Runtime / Agent / Task` 模型。Slock adapter 当前默认启用，但只有能从本机 Slock workspace 和 daemon 进程参数证明本机 Agent、server URL 与 token 时才执行采集；没有这些本机证据时安静跳过。执行后必须按本文的只读数据源、归属证明、分页、映射和 diagnostics 规则采集。
 
 ## 模型边界
 
@@ -29,8 +29,9 @@ Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不�
 | Task thread | `GET /internal/agent/:agentId/history?channel=<channelTarget>:<taskMessageId 前 8 位>` | 用于提取 Agent 回复、执行上下文和最近活动时间。 |
 | Server catalog | `GET /internal/agent/:agentId/server` 的 agents 列表 | 当前 payload 只有 `name`、`description`、`status`，缺少稳定 id；不能用它把 Task 归属到本机 Agent。 |
 | 本机 workspace | `~/.slock/agents/*` | 只能作为辅助证据；没有 active profile 时不生成 Agent / Task。 |
+| 本机 Slock daemon 参数 | `ps auxww` 中 Slock daemon / `chat-bridge.js` 进程的 `--server-url`、`--auth-token` / `--api-key`、`--agent-id` | 默认 token 来源。只在 `--agent-id` 能匹配本机 `~/.slock/agents/*` 时使用；不把 token 写入 Lorume config、日志、diagnostics 或 payload。 |
 
-Adapter 必须用只读请求和只读文件读取。真实 Slock CLI API 是 agent-scoped API，请求必须带 `Authorization: Bearer <token>`、`X-Agent-Id: <agentId>` 和 `X-Slock-Client: lorume-collector`；如配置了 server id，再带 `X-Server-Id`。不得写 Slock 数据，不得调用会创建、修改、领取、关闭或重跑任务的接口。
+Adapter 必须用只读请求和只读文件读取。真实 Slock CLI API 是 agent-scoped API，请求必须带 `Authorization: Bearer <token>`、`X-Agent-Id: <agentId>` 和 `X-Slock-Client: lorume-collector`；如显式配置或 daemon 参数提供了 server id，再带 `X-Server-Id`。不得写 Slock 数据，不得调用会创建、修改、领取、关闭或重跑任务的接口。
 
 Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter 必须对这类临时失败做有限重试，再决定是否输出 diagnostics。404 等明确业务结果不重试，因为它代表 profile 或资源不存在。
 
@@ -38,11 +39,13 @@ Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter �
 
 | 配置 | 用途 |
 |---|---|
-| `LORUME_SLOCK_BASE_URL` / `LORUME_SLOCK_SERVER_URL` 或 `slockBaseUrl` / `slockServerUrl` | Slock server URL。 |
-| `LORUME_SLOCK_AUTH_TOKEN` / `LORUME_SLOCK_API_KEY` 或对应 config 字段 | 只读请求鉴权 token。缺失时不执行 Slock 采集。 |
-| `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 优先使用的本机 Slock Agent id 列表。未配置时才从 `~/.slock/agents/*` 枚举候选。 |
+| `LORUME_SLOCK_BASE_URL` / `LORUME_SLOCK_SERVER_URL` 或 `slockBaseUrl` / `slockServerUrl` | 可选显式 Slock server URL；缺失时从本机 Slock daemon 参数发现。 |
+| `LORUME_SLOCK_AUTH_TOKEN` / `LORUME_SLOCK_API_KEY` 或对应 config 字段 | 可选显式只读请求鉴权 token；缺失时从本机 Slock daemon 参数发现。Lorume 不持久化发现到的 token。 |
+| `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 可选显式本机 Slock Agent id 列表。未配置时优先使用 daemon 参数里的本机 `--agent-id`，再从 `~/.slock/agents/*` 枚举候选。 |
 | `LORUME_SLOCK_REPLY_CACHE_PATH` 或 `slockReplyCachePath` | 可选的本地 Agent 回复 cache 路径；只用于减少重复读取 task thread。默认在 collector home 下。 |
 | `LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN` 或 `slockMaxReplyThreadReadsPerRun` | 单次 collector run 最多深读多少条 task thread 来补 `agentReply`。默认 `10`，可设为 `0` 表示本轮只发现 Task、不补 reply。 |
+
+显式配置优先级高于 daemon 自动发现。默认产品路径不要求用户把 Slock token 填入 Lorume 配置；collector 每轮从本机进程参数临时读取，并只用于当轮只读请求。
 
 ## Channel 发现规则
 
@@ -178,7 +181,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 | `slock_unassigned_task_ignored` | `info` | Task 没有 `taskAssigneeId`，无法关联 Lorume Agent。 |
 | `slock_unsupported_runtime_ignored` | `info` | active profile 的 runtime 真实存在，但该值尚未进入 Lorume RuntimeKind 实现和 harness，本轮跳过该 Agent 和其 Task。 |
 | `slock_inactive_workspace_task_ignored` | `warning` | Task 指向本机 workspace 中存在但没有 active profile 的 Agent，不能证明当前设备正在承载。 |
-| `slock_channel_discovery_failed` | `error` | 未配置显式 channel targets 时，server catalog 读取失败，无法发现 joined channel。 |
+| `slock_channel_discovery_failed` | `error` | server catalog 读取失败，无法发现 joined channel。 |
 | `slock_missing_user_message` | `warning` | 本机 active profile task 缺少可读 `userMessage`，跳过。 |
 | `slock_agent_reply_deferred` | `info` | 单次 collector run 的 thread 读取预算耗尽；核心 Task 已入库，`agentReply` 等后续 run 补齐。 |
 | `slock_agent_reply_fetch_failed` | `warning` | Task thread reply enrichment 失败；adapter 保留核心 Task。 |
@@ -194,7 +197,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 Slock adapter 必须保持以下最小 harness：
 
-- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新、thread 失败不丢 Task、每轮 reply thread 读取预算和预算延期后续 run 继续补齐。
+- CLI adapter unit/script test：使用脱敏 fixture 覆盖默认启用、从本机 Slock daemon 参数发现 server URL/token/agent id、真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新、thread 失败不丢 Task、每轮 reply thread 读取预算和预算延期后续 run 继续补齐。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
 - Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。

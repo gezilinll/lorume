@@ -1,6 +1,6 @@
 # Runtime Task Acceptance Spec
 
-版本：TinySpec v1.2
+版本：TinySpec v1.3
 
 本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs / Work Board 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
 
@@ -21,7 +21,7 @@ Runs / Work Board 必须让用户看清：
 | 平台 | 当前状态 | 规则 |
 |---|---|---|
 | OpenClaw | 默认启用 | 可以生成 Runtime、Agent、Task。 |
-| Slock | 默认禁用 | 已有 `docs/product/runtime-slock-adapter-spec.md` 约束 ownership proof、分页和 Task 映射；启用后只读采集当前设备真实承载的 Slock Agent Task。 |
+| Slock | 默认启用 | 已有 `docs/product/runtime-slock-adapter-spec.md` 约束 daemon credential discovery、ownership proof、分页和 Task 映射；只有本机 Slock workspace 与 daemon 参数可证明当前设备真实承载 Agent 时才生成 Task。 |
 | Multica | 默认禁用 | 不执行命令、不读目录、不生成对象。 |
 | Codex | Runtime kind | 当前只作为 Slock profile runtime 的归属类型进入模型；不代表已实现 Codex adapter 或 Codex Task 采集。 |
 

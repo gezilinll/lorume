@@ -6,6 +6,7 @@ import path from "node:path";
 export const COLLECTOR_VERSION = "0.1.0";
 
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
+const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock";
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -36,7 +37,7 @@ function makeProductRuntimeId(deviceId, kind) {
 }
 
 function enabledRuntimeAdapters(config = {}) {
-  const raw = process.env.LORUME_ENABLED_RUNTIME_ADAPTERS || config.enabledRuntimeAdapters || "openclaw";
+  const raw = process.env.LORUME_ENABLED_RUNTIME_ADAPTERS || config.enabledRuntimeAdapters || DEFAULT_ENABLED_RUNTIME_ADAPTERS;
   const values = Array.isArray(raw) ? raw : String(raw).split(",");
   return new Set(values.map((value) => sanitizeId(value)).filter(Boolean));
 }
@@ -371,8 +372,10 @@ const SLOCK_REPLY_CACHE_SCHEMA_VERSION = "slock-reply-v1";
 const DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN = 10;
 
 function collectSlockDeviceState(device, collectedAt, config = {}) {
-  const baseUrl = slockConfiguredBaseUrl(config);
-  const auth = slockConfiguredAuth(config);
+  const workspaceAgentIds = readSlockWorkspaceAgentIds();
+  const daemonConfig = discoverSlockDaemonConfig(workspaceAgentIds);
+  const baseUrl = slockConfiguredBaseUrl(config, daemonConfig);
+  const auth = slockConfiguredAuth(config, daemonConfig);
   if (!baseUrl || !auth.token) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
 
   const diagnostics = createCollectionDiagnosticCollector("slock");
@@ -386,10 +389,9 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   const agentsById = new Map();
   const tasksById = new Map();
   const profileCache = new Map();
-  const workspaceAgentIds = readSlockWorkspaceAgentIds();
   const profileClassifications = new Map();
   const localProfiles = [];
-  const configuredAgentIds = slockConfiguredAgentIds(config);
+  const configuredAgentIds = slockConfiguredAgentIds(config, daemonConfig);
   const requestedAgentIds = uniqueSlockIds(configuredAgentIds.length ? configuredAgentIds : Array.from(workspaceAgentIds));
 
   for (const agentId of requestedAgentIds) {
@@ -602,17 +604,18 @@ function collectSlockTasksFromChannel({
   }
 }
 
-function slockConfiguredBaseUrl(config = {}) {
+function slockConfiguredBaseUrl(config = {}, daemonConfig = {}) {
   return process.env.LORUME_SLOCK_BASE_URL ||
     process.env.LORUME_SLOCK_SERVER_URL ||
     config.slockBaseUrl ||
     config.slockServerUrl ||
     config.slock?.baseUrl ||
     config.slock?.serverUrl ||
+    daemonConfig.baseUrl ||
     "";
 }
 
-function slockConfiguredAuth(config = {}) {
+function slockConfiguredAuth(config = {}, daemonConfig = {}) {
   return {
     token: process.env.LORUME_SLOCK_AUTH_TOKEN ||
       process.env.LORUME_SLOCK_API_KEY ||
@@ -622,18 +625,143 @@ function slockConfiguredAuth(config = {}) {
       config.slock?.authToken ||
       config.slock?.apiKey ||
       config.slock?.token ||
+      daemonConfig.token ||
       "",
     serverId: process.env.LORUME_SLOCK_SERVER_ID ||
       config.slockServerId ||
       config.slock?.serverId ||
+      daemonConfig.serverId ||
       "",
   };
 }
 
-function slockConfiguredAgentIds(config = {}) {
+function slockConfiguredAgentIds(config = {}, daemonConfig = {}) {
   const raw = process.env.LORUME_SLOCK_AGENT_IDS || config.slockAgentIds || config.slock?.agentIds || "";
-  const values = Array.isArray(raw) ? raw : String(raw).split(",");
+  const values = raw ? (Array.isArray(raw) ? raw : String(raw).split(",")) : (daemonConfig.agentIds || []);
   return values.map((value) => String(value).trim()).filter(Boolean);
+}
+
+function discoverSlockDaemonConfig(workspaceAgentIds = new Set()) {
+  if (workspaceAgentIds.size === 0) {
+    return { baseUrl: "", token: "", serverId: "", agentIds: [] };
+  }
+
+  const candidates = readLocalProcessList()
+    .split(/\r?\n/)
+    .map(parseSlockDaemonProcessLine)
+    .filter(Boolean)
+    .filter((candidate) => slockDaemonCandidateMatchesWorkspace(candidate, workspaceAgentIds));
+  if (!candidates.length) return { baseUrl: "", token: "", serverId: "", agentIds: [] };
+
+  const credential = candidates.find((candidate) => candidate.baseUrl && candidate.token) || {};
+  const agentIds = uniqueSlockIds(
+    candidates
+      .flatMap((candidate) => candidate.agentIds || [])
+      .filter((agentId) => slockWorkspaceHasAgent(workspaceAgentIds, agentId)),
+  );
+
+  return {
+    baseUrl: credential.baseUrl || "",
+    token: credential.token || "",
+    serverId: credential.serverId || "",
+    agentIds,
+  };
+}
+
+function readLocalProcessList() {
+  try {
+    return execFileSync("ps", ["auxww"], {
+      encoding: "utf8",
+      maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return "";
+  }
+}
+
+function parseSlockDaemonProcessLine(line) {
+  const value = String(line || "");
+  if (!isSlockDaemonProcessLine(value)) return null;
+
+  const baseUrl = normalizeDiscoveredSlockBaseUrl(
+    processArgValue(value, "server-url") ||
+    processArgValue(value, "base-url") ||
+    processArgValue(value, "url"),
+  );
+  const token = normalizeDiscoveredSlockToken(
+    processArgValue(value, "auth-token") ||
+    processArgValue(value, "api-key") ||
+    processArgValue(value, "token"),
+  );
+  if (!baseUrl || !token) return null;
+
+  const agentId = normalizeDiscoveredSlockAgentId(
+    processArgValue(value, "agent-id") ||
+    processArgValue(value, "agent"),
+  );
+  const serverId = normalizeDiscoveredSlockAgentId(processArgValue(value, "server-id"));
+  return {
+    baseUrl,
+    token,
+    serverId,
+    agentIds: agentId ? [agentId] : [],
+  };
+}
+
+function isSlockDaemonProcessLine(line) {
+  const value = String(line || "");
+  if (!value.includes("--server-url") && !value.includes("--base-url") && !value.includes("--url")) return false;
+  if (!value.includes("--auth-token") && !value.includes("--api-key") && !value.includes("--token")) return false;
+  return value.includes("slock") || value.includes("chat-bridge.js");
+}
+
+function processArgValue(line, name) {
+  const flag = `--${name}`;
+  const escaped = escapeRegExp(flag);
+  const patterns = [
+    new RegExp(`["']${escaped}["']\\s*,\\s*["']([^"']+)["']`),
+    new RegExp(`${escaped}=([^\\s"']+)`),
+    new RegExp(`${escaped}\\s+([^\\s"']+)`),
+  ];
+  for (const pattern of patterns) {
+    const match = String(line || "").match(pattern);
+    if (!match?.[1]) continue;
+    return String(match[1]).trim().replace(/[,\]]+$/g, "");
+  }
+  return "";
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDiscoveredSlockBaseUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? normalizeSlockBaseUrl(raw) : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeDiscoveredSlockToken(value) {
+  const raw = String(value || "").trim();
+  if (raw.length < 8) return "";
+  return /^[A-Za-z0-9._:+=/-]+$/.test(raw) ? raw : "";
+}
+
+function normalizeDiscoveredSlockAgentId(value) {
+  const raw = String(value || "").trim();
+  return raw && /^[A-Za-z0-9._:-]+$/.test(raw) ? raw : "";
+}
+
+function slockDaemonCandidateMatchesWorkspace(candidate, workspaceAgentIds) {
+  if (!workspaceAgentIds.size) return false;
+  if (!candidate.agentIds?.length) return true;
+  return candidate.agentIds.some((agentId) => slockWorkspaceHasAgent(workspaceAgentIds, agentId));
 }
 
 function slockMaxReplyThreadReadsPerRun(config = {}) {

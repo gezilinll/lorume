@@ -57,10 +57,10 @@
 - `tasks`
 - `diagnostics`
 
-当前默认 runtime adapter allowlist 只启用 OpenClaw adapter。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
+当前默认 runtime adapter allowlist 启用 OpenClaw 和 Slock adapter。Slock 只有在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时才执行，否则不生成对象。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
 
 ```sh
-LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw
+LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock
 ```
 
 `DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须输出所有符合产品标准的 Task，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，必须带 `adapter.kind`，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。

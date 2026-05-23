@@ -2,7 +2,7 @@
 
 版本：TinySpec v1.2
 
-本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent` 和 `Task`。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 adapter 是否启用由各自 spec 和 harness 决定。
+本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent` 和 `Task`。OpenClaw adapter 当前默认启用；其他 adapter 是否默认启用由各自 spec 和 harness 决定。
 
 ## 模型边界
 

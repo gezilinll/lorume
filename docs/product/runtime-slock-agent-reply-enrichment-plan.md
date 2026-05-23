@@ -145,7 +145,7 @@ Decision rule:
 - Modify: `src/cli/lorume-cli.test.ts`
 - Modify: `docs/product/runtime-slock-adapter-spec.md`
 
-- [ ] **Step 1: Run focused checks for current baseline**
+- [x] **Step 1: Run focused checks for current baseline**
 
 Run:
 
@@ -163,7 +163,7 @@ check:runtime passes runtime tests
 check:repo: ok
 ```
 
-- [ ] **Step 2: Run full verification before committing**
+- [x] **Step 2: Run full verification before committing**
 
 Run:
 
@@ -177,7 +177,7 @@ Expected:
 verify: ok
 ```
 
-- [ ] **Step 3: Commit the channel discovery fix**
+- [x] **Step 3: Commit the channel discovery fix**
 
 Run:
 
@@ -193,7 +193,7 @@ Expected: one commit containing only the Slock channel discovery correctness fix
 **Files:**
 - Modify: `src/cli/lorume-cli.test.ts`
 
-- [ ] **Step 1: Write failing test for same-run output and second-run cache reuse**
+- [x] **Step 1: Write failing test for same-run output and second-run cache reuse**
 
 Add a test near the existing Slock CLI tests:
 
@@ -247,7 +247,7 @@ it("reuses cached Slock agent replies for unchanged discovered tasks", async () 
 });
 ```
 
-- [ ] **Step 2: Verify the test fails**
+- [x] **Step 2: Verify the test fails**
 
 Run:
 
@@ -262,7 +262,7 @@ Expected: FAIL because no reply cache exists yet and default auto-discovery curr
 **Files:**
 - Modify: `scripts/lorume-runtime-adapters.mjs`
 
-- [ ] **Step 1: Add constants and cache path resolver**
+- [x] **Step 1: Add constants and cache path resolver**
 
 Add near Slock constants:
 
@@ -277,7 +277,7 @@ function resolveSlockReplyCachePath(config = {}) {
 }
 ```
 
-- [ ] **Step 2: Add cache read/write helpers**
+- [x] **Step 2: Add cache read/write helpers**
 
 Add below Slock config helpers:
 
@@ -338,7 +338,7 @@ function writeSlockReplyCache(cachePath, cache) {
 }
 ```
 
-- [ ] **Step 3: Update imports**
+- [x] **Step 3: Update imports**
 
 At the top of `scripts/lorume-runtime-adapters.mjs`, ensure the file imports write helpers:
 
@@ -353,7 +353,7 @@ After implementation, run `npm run check:cli`. If Node reports an unused or dupl
 **Files:**
 - Modify: `scripts/lorume-runtime-adapters.mjs`
 
-- [ ] **Step 1: Add fingerprint helper**
+- [x] **Step 1: Add fingerprint helper**
 
 Add near Slock task helpers:
 
@@ -377,7 +377,7 @@ function slockReplyCount(message) {
 }
 ```
 
-- [ ] **Step 2: Add cache decision helper**
+- [x] **Step 2: Add cache decision helper**
 
 Add below the fingerprint helper:
 
@@ -395,7 +395,7 @@ function shouldFetchSlockAgentReply({ cachedEntry, fingerprint, message }) {
 **Files:**
 - Modify: `scripts/lorume-runtime-adapters.mjs`
 
-- [ ] **Step 1: Load and save reply cache around Slock collection**
+- [x] **Step 1: Load and save reply cache around Slock collection**
 
 In `collectSlockDeviceState`, after base URL and auth validation:
 
@@ -417,7 +417,7 @@ try {
 }
 ```
 
-- [ ] **Step 2: Replace unconditional thread behavior with cache-aware behavior**
+- [x] **Step 2: Replace unconditional thread behavior with cache-aware behavior**
 
 Inside `collectSlockTasksFromChannel`, after the `task` id can be derived:
 
@@ -455,7 +455,7 @@ replyCache.tasks[taskId] = {
 
 Remove the older `fetchThreadReplies` split after this behavior is in place. `LORUME_SLOCK_CHANNEL_TARGETS` should control only scan scope, not reply semantics.
 
-- [ ] **Step 3: Add diagnostics messages**
+- [x] **Step 3: Add diagnostics messages**
 
 Add messages:
 
@@ -469,7 +469,7 @@ slock_reply_cache_write_failed: `${count} 次 Slock Agent 回复缓存写入失�
 **Files:**
 - Modify: `src/cli/lorume-cli.test.ts`
 
-- [ ] **Step 1: Extend fixture server with mutable thread state**
+- [x] **Step 1: Extend fixture server with mutable thread state**
 
 Inside `startSlockFixtureServer`, add local variables:
 
@@ -516,7 +516,7 @@ setThreadReplyText: (value: string) => {
 },
 ```
 
-- [ ] **Step 2: Add failing test for changed `replyCount`**
+- [x] **Step 2: Add failing test for changed `replyCount`**
 
 Add test:
 
@@ -548,7 +548,7 @@ it("refreshes cached Slock agent replies when reply fingerprint changes", async 
 });
 ```
 
-- [ ] **Step 3: Verify test fails before implementation and passes after implementation**
+- [x] **Step 3: Verify test fails before implementation and passes after implementation**
 
 Run:
 
@@ -563,7 +563,7 @@ Expected after implementation: PASS.
 **Files:**
 - Modify: `src/cli/lorume-cli.test.ts`
 
-- [ ] **Step 1: Add fixture hook to fail thread reads**
+- [x] **Step 1: Add fixture hook to fail thread reads**
 
 In `startSlockFixtureServer`, add:
 
@@ -588,7 +588,7 @@ failThreadHistory: () => {
 },
 ```
 
-- [ ] **Step 2: Add failing test**
+- [x] **Step 2: Add failing test**
 
 Add test:
 
@@ -632,7 +632,7 @@ it("keeps Slock Tasks when agent reply thread enrichment fails", async () => {
 });
 ```
 
-- [ ] **Step 3: Run the focused test**
+- [x] **Step 3: Run the focused test**
 
 Run:
 
@@ -647,7 +647,7 @@ Expected after implementation: PASS.
 **Files:**
 - Modify: `docs/product/runtime-slock-adapter-spec.md`
 
-- [ ] **Step 1: Update Agent Reply section**
+- [x] **Step 1: Update Agent Reply section**
 
 Replace the current temporary default-mode wording with:
 
@@ -655,7 +655,7 @@ Replace the current temporary default-mode wording with:
 `agentReply` is cache-aware enrichment. The adapter first discovers core Tasks from channel history, then uses a local reply cache to decide whether to fetch each Task thread in the same collector run. New or changed Tasks fetch thread history; unchanged Tasks reuse cached `agentReply`.
 ```
 
-- [ ] **Step 2: Update Diagnostics table**
+- [x] **Step 2: Update Diagnostics table**
 
 Add:
 
@@ -664,7 +664,7 @@ Add:
 | `slock_reply_cache_write_failed` | `warning` | Local reply cache write failed; adapter still returned Tasks. |
 ```
 
-- [ ] **Step 3: Keep boundaries explicit**
+- [x] **Step 3: Keep boundaries explicit**
 
 Ensure the spec includes exactly this rule:
 
@@ -677,7 +677,7 @@ The reply cache is local collector state and not a Lorume product entity. It mus
 **Files:**
 - No source edits unless a check fails.
 
-- [ ] **Step 1: Run focused CLI tests**
+- [x] **Step 1: Run focused CLI tests**
 
 Run:
 
@@ -691,7 +691,7 @@ Expected:
 all src/cli tests pass with 0 failed tests
 ```
 
-- [ ] **Step 2: Run runtime and repo checks**
+- [x] **Step 2: Run runtime and repo checks**
 
 Run:
 
@@ -707,7 +707,7 @@ check:runtime passes
 check:repo: ok
 ```
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run:
 
@@ -726,7 +726,7 @@ verify: ok
 **Files:**
 - No committed files. Temporary scripts may live under `/tmp` on `gezilinll-claw`.
 
-- [ ] **Step 1: Run default auto-discovery once with an empty Slock reply cache**
+- [x] **Step 1: Run default auto-discovery once with an empty Slock reply cache**
 
 Run a read-only collector command on `gezilinll-claw` with:
 
@@ -746,7 +746,7 @@ agentReply is present for Tasks whose thread read succeeds.
 No auth token appears in stdout, logs, or cache.
 ```
 
-- [ ] **Step 2: Run the same command again with the same cache**
+- [x] **Step 2: Run the same command again with the same cache**
 
 Expected:
 
@@ -756,7 +756,7 @@ Thread request count drops sharply because unchanged Tasks reuse cached replies.
 Output still includes cached agentReply values.
 ```
 
-- [ ] **Step 3: Inspect diagnostics**
+- [x] **Step 3: Inspect diagnostics**
 
 Expected acceptable diagnostics:
 

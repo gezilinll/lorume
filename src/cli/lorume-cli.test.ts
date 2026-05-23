@@ -215,6 +215,7 @@ exit 91
       expect(output.tasks).toEqual([
         expect.objectContaining({
           id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          agentReply: "今天的主要风险是接口稳定性和排期收敛。",
           channel: { kind: "slock", externalId: "#daily-work" },
           conversation: expect.objectContaining({ title: "日常工作", externalId: "#daily-work" }),
         }),
@@ -237,12 +238,170 @@ exit 91
           channel: "#public-not-joined",
         }),
       ]));
-      expect(server.requests).not.toEqual(expect.arrayContaining([
+      expect(server.requests).toEqual(expect.arrayContaining([
         expect.objectContaining({
           pathname: "/internal/agent/agent-local-1/history",
           channel: "#daily-work:msg-loca",
         }),
       ]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reuses cached Slock agent replies for unchanged discovered tasks", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-cache-"));
+    const cachePath = path.join(root, "slock-reply-cache.json");
+    try {
+      const run = () => runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_REPLY_CACHE_PATH: cachePath,
+        },
+      });
+
+      const first = await run();
+      const firstThreadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel === "#daily-work:msg-loca"
+      );
+      expect(first.tasks[0]).toMatchObject({
+        agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+      });
+      expect(firstThreadReads).toHaveLength(1);
+
+      server.requests.length = 0;
+      const second = await run();
+      const secondThreadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel === "#daily-work:msg-loca"
+      );
+      expect(second.tasks[0]).toMatchObject({
+        agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+      });
+      expect(secondThreadReads).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refreshes cached Slock agent replies when reply fingerprint changes", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-refresh-"));
+    const cachePath = path.join(root, "slock-reply-cache.json");
+    try {
+      const env = {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        LORUME_SLOCK_SERVER_URL: server.baseUrl,
+        LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+        LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+        LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        LORUME_SLOCK_REPLY_CACHE_PATH: cachePath,
+      };
+      await runCliAsync(["collect", "device-state", "--json", "--device-id", "fixture-device"], { env });
+      server.setDailyWorkReplyCount(2);
+      server.setThreadReplyText("风险已更新为接口回归和资源锁定。");
+      const output = await runCliAsync(["collect", "device-state", "--json", "--device-id", "fixture-device"], { env });
+      expect(output.tasks[0]).toMatchObject({
+        agentReply: "风险已更新为接口回归和资源锁定。",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps Slock Tasks when agent reply thread enrichment fails", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-failure-"));
+    try {
+      server.failThreadHistory();
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#daily-work",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          userMessage: "帮我整理今天的项目风险",
+        }),
+      ]);
+      expect(output.tasks[0]).not.toHaveProperty("agentReply");
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_fetch_failed", severity: "warning" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("retries transient Slock read-only API failures", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-retry-"));
+    try {
+      server.failProfileOnce();
+      server.failServerDiscoveryOnce();
+      server.failDailyWorkHistoryOnce();
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+        }),
+      ]);
+      expect(output.diagnostics?.items ?? []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_profile_unreadable" }),
+        expect.objectContaining({ code: "slock_channel_discovery_failed" }),
+        expect.objectContaining({ code: "slock_history_pagination_incomplete" }),
+      ]));
+      expect(server.requests.filter((request) => request.pathname === "/internal/agent/agent-local-1/profile")).toHaveLength(2);
+      expect(server.requests.filter((request) => request.pathname === "/internal/agent/agent-local-1/server")).toHaveLength(2);
+      expect(server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel === "#daily-work"
+      ).length).toBeGreaterThan(1);
     } finally {
       await server.close();
     }
@@ -1634,10 +1793,26 @@ function writeExecutable(filePath: string, content: string) {
   chmodSync(filePath, 0o755);
 }
 
-async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: Array<Record<string, string>>; close: () => Promise<void> }> {
+async function startSlockFixtureServer(): Promise<{
+  baseUrl: string;
+  requests: Array<Record<string, string>>;
+  setDailyWorkReplyCount: (value: number) => void;
+  setThreadReplyText: (value: string) => void;
+  failThreadHistory: () => void;
+  failProfileOnce: () => void;
+  failServerDiscoveryOnce: () => void;
+  failDailyWorkHistoryOnce: () => void;
+  close: () => Promise<void>;
+}> {
   const fixtureRoot = path.join(repoRoot, "fixtures", "runtime", "slock");
   const readFixture = (name: string) => readFileSync(path.join(fixtureRoot, name), "utf8");
   const requests: Array<Record<string, string>> = [];
+  let dailyWorkReplyCount = 1;
+  let threadReplyText = "今天的主要风险是接口稳定性和排期收敛。";
+  let failThreadHistory = false;
+  let failProfileOnce = false;
+  let failServerDiscoveryOnce = false;
+  let failDailyWorkHistoryOnce = false;
   const server = createServer((request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     const pathAgentId = url.pathname.match(/^\/internal\/agent\/([^/]+)\//)?.[1] ?? "";
@@ -1663,6 +1838,11 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/profile") {
+      if (failProfileOnce) {
+        failProfileOnce = false;
+        sendJson(503, JSON.stringify({ error: "temporary_profile_unavailable" }));
+        return;
+      }
       sendJson(200, readFixture("profile-active.json"));
       return;
     }
@@ -1682,6 +1862,11 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/server") {
+      if (failServerDiscoveryOnce) {
+        failServerDiscoveryOnce = false;
+        sendJson(503, JSON.stringify({ error: "temporary_server_unavailable" }));
+        return;
+      }
       sendJson(200, JSON.stringify({
         channels: [
           { name: "daily-work", joined: true },
@@ -1691,7 +1876,14 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work") {
-      sendJson(200, readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
+      if (failDailyWorkHistoryOnce) {
+        failDailyWorkHistoryOnce = false;
+        sendJson(503, JSON.stringify({ error: "temporary_history_unavailable" }));
+        return;
+      }
+      const page = JSON.parse(readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
+      if (!url.searchParams.has("before") && page.messages?.[0]) page.messages[0].replyCount = dailyWorkReplyCount;
+      sendJson(200, JSON.stringify(page));
       return;
     }
     if ((url.pathname === "/internal/agent/agent-local-1/history" || url.pathname === "/internal/agent/agent-local-2/history") && url.searchParams.get("channel") === "#shared-local") {
@@ -1733,7 +1925,20 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work:msg-loca") {
-      sendJson(200, readFixture("thread-history.json"));
+      if (failThreadHistory) {
+        sendJson(500, JSON.stringify({ error: "thread_unavailable" }));
+        return;
+      }
+      sendJson(200, JSON.stringify({
+        messages: [{
+          id: "reply-1",
+          senderId: "agent-local-1",
+          senderName: "大卷Bot",
+          content: threadReplyText,
+          createdAt: "2026-05-23T01:04:00.000Z",
+          updatedAt: "2026-05-23T01:05:00.000Z",
+        }],
+      }));
       return;
     }
     if (url.pathname.startsWith("/internal/agent/")) {
@@ -1748,6 +1953,24 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     requests,
+    setDailyWorkReplyCount: (value: number) => {
+      dailyWorkReplyCount = value;
+    },
+    setThreadReplyText: (value: string) => {
+      threadReplyText = value;
+    },
+    failThreadHistory: () => {
+      failThreadHistory = true;
+    },
+    failProfileOnce: () => {
+      failProfileOnce = true;
+    },
+    failServerDiscoveryOnce: () => {
+      failServerDiscoveryOnce = true;
+    },
+    failDailyWorkHistoryOnce: () => {
+      failDailyWorkHistoryOnce = true;
+    },
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }

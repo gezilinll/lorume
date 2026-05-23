@@ -7,7 +7,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 ## 分层原则
 
 - Device 管机器事实、collector 元信息和采集状态。
-- Runtime 管设备上的运行环境，例如 OpenClaw、Slock、Multica、Codex。
+- Runtime 管设备上的运行环境；当前已实现的 Runtime kind 只有 OpenClaw。
 - Agent 管 Runtime 下的工作主体。
 - Task 管 Agent 承接的任务。
 - Runtime Fleet 不把任务忙闲写进 Runtime/Agent 状态。Runtime/Agent 状态只表示 collection status。

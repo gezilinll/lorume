@@ -27,10 +27,9 @@ export interface Task {
   status: TaskStatus;
   userMessage?: string;
   agentReply?: string;
-  source?: { kind?: "openclaw"; externalId?: string };
+  adapter: { kind: "openclaw" };
   channel?: {
-    kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
-    name?: string;
+    kind: "dingtalk" | "webchat";
     externalId?: string;
   };
   conversation?: {
@@ -142,8 +141,7 @@ Task 必须映射到本次采集到的 Agent。
 | `status` | adapter 映射后的 Lorume 状态 | `done` |
 | `userMessage` | 用户消息 turn 证据；scheduled task 使用 cron prompt | `帮我查询示例模型的调用次数、成功次数和失败原因...` |
 | `agentReply` | trajectory `assistantTexts` | `已查询，调用 42 次，失败 3 次。` |
-| `source.kind` | adapter 固定值 | `openclaw` |
-| `source.externalId` | message id 或 trajectory run id | `581a02f8-5fa2-4eb2-bf9d-ae4e68d2ac7a` |
+| `adapter.kind` | adapter 固定值 | `openclaw` |
 | `channel.kind` | `sessionKey` 或 DingTalk state | `dingtalk` |
 | `conversation.title` | sessions index、runtime context、DingTalk target | `示例工作群` |
 | `conversation.externalId` | DingTalk conversation id | `cid+example` |
@@ -191,11 +189,12 @@ OpenClaw adapter 不输出逐条原始 warning 字符串。它必须输出结构
 
 - DingTalk 群聊缺少可读群名时，显示 `DingTalk 群聊`。
 - DingTalk 私聊缺少可读人名时，显示 `DingTalk 私聊`。
-- OpenClaw、Slock、Multica、Codex 是 Runtime 来源，不是用户触点渠道；没有用户触点证据的任务省略 `channel` 和 `conversation`。
+- Runtime kind、Task adapter kind 和用户触点 channel kind 必须分开；没有用户触点证据的任务省略 `channel` 和 `conversation`。
 - 不展示 `cid...`、手机号、open conversation id 或其他不可读外部 id 作为会话名。
 - 没有 `userMessage` 或可解释用户上下文的外部对象不能伪造成任务卡；保留在 diagnostics 或日志中。
 - 未关联 Agent 的 OpenClaw execution、内部 heartbeat、恢复任务、approval followup 等系统事件不进入 Runs。
 - 当前不上报 tool call 明细；后续如要支持，必须先补跨平台数据结构、权限边界和 harness。
+- 当前只枚举已实现的 Task adapter 和 channel kind。未实现的 Slock、Telegram、Slack 等类型不得提前进入模型、fixture 或测试。
 
 ## Collector 边界
 

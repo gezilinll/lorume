@@ -515,6 +515,7 @@ function createRuntimeTaskHash(task) {
   return hashStableJson({
     agentId: task.agentId,
     agentReply: normalizeTaskHashText(task.agentReply),
+    adapter: stableObjectOrNull(task.adapter),
     assignee: stableObjectOrNull(task.assignee),
     channel: stableObjectOrNull(task.channel),
     conversation: stableObjectOrNull(task.conversation),
@@ -523,7 +524,6 @@ function createRuntimeTaskHash(task) {
     error: normalizeTaskHashText(task.error),
     hashVersion: 1,
     id: task.id,
-    source: stableObjectOrNull(task.source),
     status: task.status,
     taskType: task.taskType,
     updatedAt: task.updatedAt ?? null,

@@ -36,7 +36,8 @@ describe("Runtime task query API helpers", () => {
         userMessage: "Check the handoff context",
         agentReply: "I found the handoff owner.",
         status: "in_progress",
-        channel: { kind: "dingtalk", name: "DingTalk 群聊", externalId: "group-1" },
+        adapter: { kind: "openclaw" },
+        channel: { kind: "dingtalk", externalId: "group-1" },
         conversation: { title: "DingTalk 群聊", externalId: "conversation-1" },
         creator: { name: "PMO" },
         assignee: { name: "main" },
@@ -68,9 +69,9 @@ describe("Runtime task query API helpers", () => {
   it("groups Task rows by Task.status in UI/BFF code", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
-        { id: "task-1", agentId: "agent-1", userMessage: "Queued", status: "todo" },
-        { id: "task-2", agentId: "agent-1", userMessage: "Running", status: "in_progress" },
-        { id: "task-3", agentId: "agent-1", userMessage: "Failed", status: "failed", error: "timeout" },
+        { id: "task-1", agentId: "agent-1", userMessage: "Queued", status: "todo", adapter: { kind: "openclaw" } },
+        { id: "task-2", agentId: "agent-1", userMessage: "Running", status: "in_progress", adapter: { kind: "openclaw" } },
+        { id: "task-3", agentId: "agent-1", userMessage: "Failed", status: "failed", error: "timeout", adapter: { kind: "openclaw" } },
       ],
       total: 3,
     });
@@ -93,16 +94,16 @@ describe("Runtime task query API helpers", () => {
   it("lists user-facing channel filters from Task context only", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
-        { id: "task-1", agentId: "agent-1", userMessage: "One", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
-        { id: "task-2", agentId: "agent-1", userMessage: "Two", status: "todo", channel: { kind: "dingtalk", name: "DingTalk 群聊" } },
-        { id: "task-3", agentId: "agent-1", userMessage: "Three", status: "todo", channel: { kind: "slack", name: "#ops" } },
+        { id: "task-1", agentId: "agent-1", userMessage: "One", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
+        { id: "task-2", agentId: "agent-1", userMessage: "Two", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
+        { id: "task-3", agentId: "agent-1", userMessage: "Three", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "webchat" } },
       ],
       total: 3,
     });
 
     expect(listRuntimeTaskChannelOptions(page?.tasks ?? [])).toEqual([
       { label: "DingTalk", value: "dingtalk" },
-      { label: "Slack", value: "slack" },
+      { label: "Web Chat", value: "webchat" },
     ]);
   });
 });

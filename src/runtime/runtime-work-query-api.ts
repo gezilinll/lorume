@@ -169,7 +169,7 @@ function taskBoardItem(task: Task): RuntimeTaskBoardItem {
     ...task,
     assigneeLabel: task.assignee?.name ?? task.agentId,
     channelKindLabel: task.channel?.kind ? channelKindLabels[task.channel.kind] : undefined,
-    channelLabel: task.conversation?.title ?? task.channel?.name,
+    channelLabel: task.conversation?.title,
     creatorLabel: task.creator?.name ?? "未知",
     displayTitle: taskDisplayTitle(task),
     requestExcerpt: task.userMessage ?? task.conversation?.title ?? "未上报用户消息",
@@ -180,7 +180,7 @@ function taskBoardItem(task: Task): RuntimeTaskBoardItem {
 export function taskDisplayTitle(task: Task): string {
   const message = task.userMessage?.replace(/\s+/g, " ").trim();
   if (message) return message.length > 32 ? `${message.slice(0, 32)}...` : message;
-  return task.conversation?.title ?? task.channel?.name ?? "未命名任务";
+  return task.conversation?.title ?? "未命名任务";
 }
 
 function normalizeSearch(value: string): string {
@@ -204,7 +204,6 @@ function matchesSearch(task: Task, query: string): boolean {
     task.agentReply,
     task.status,
     task.channel?.kind,
-    task.channel?.name,
     task.conversation?.title,
     task.creator?.name,
     task.assignee?.name,

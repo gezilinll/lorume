@@ -55,9 +55,11 @@
       "userMessage": "PMO asked OpenClaw to inspect the handoff.",
       "agentReply": "The handoff is ready for review.",
       "status": "todo",
+      "adapter": {
+        "kind": "openclaw"
+      },
       "channel": {
         "kind": "dingtalk",
-        "name": "DingTalk 群聊",
         "externalId": "group-live"
       },
       "conversation": {

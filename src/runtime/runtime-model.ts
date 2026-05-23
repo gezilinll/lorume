@@ -21,7 +21,7 @@ export interface CollectionDiagnostics {
   items: CollectionDiagnosticItem[];
 }
 
-export const RUNTIME_KINDS = ["openclaw", "slock", "multica", "codex"] as const;
+export const RUNTIME_KINDS = ["openclaw"] as const;
 
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
@@ -41,6 +41,14 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const TASK_TYPES = ["conversation", "scheduled"] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];
+
+export const TASK_ADAPTER_KINDS = ["openclaw"] as const;
+
+export type TaskAdapterKind = (typeof TASK_ADAPTER_KINDS)[number];
+
+export const TASK_CHANNEL_KINDS = ["dingtalk", "webchat"] as const;
+
+export type TaskChannelKind = (typeof TASK_CHANNEL_KINDS)[number];
 
 export interface Device {
   id: string;
@@ -96,13 +104,11 @@ export interface Task {
   status: TaskStatus;
   userMessage?: string;
   agentReply?: string;
-  source?: {
-    kind: "openclaw";
-    externalId?: string;
+  adapter: {
+    kind: TaskAdapterKind;
   };
   channel?: {
-    kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
-    name?: string;
+    kind: TaskChannelKind;
     externalId?: string;
   };
   conversation?: {
@@ -149,7 +155,7 @@ export function createDeviceStateSnapshot(input: LooseRecord): DeviceStateSnapsh
   return {
     collectedAt: input.collectedAt,
     device: cleanDevice(input.device || {}),
-    runtimes: Array.isArray(input.runtimes) ? input.runtimes.map(cleanRuntime) : [],
+    runtimes: Array.isArray(input.runtimes) ? input.runtimes.map(cleanRuntime).filter((runtime): runtime is Runtime => Boolean(runtime)) : [],
     agents: Array.isArray(input.agents) ? input.agents.map(cleanAgent) : [],
     tasks: Array.isArray(input.tasks) ? input.tasks.map(cleanTask) : [],
     ...(diagnostics.items.length ? { diagnostics } : {}),
@@ -173,7 +179,8 @@ export function normalizeDeviceStateSnapshot(input: unknown): DeviceStateSnapsho
   )) return null;
   if (snapshot.tasks.some((task) =>
     !isNonEmptyString(task.id) ||
-    !isNonEmptyString(task.agentId)
+    !isNonEmptyString(task.agentId) ||
+    !isTaskAdapterKind(task.adapter?.kind)
   )) return null;
   return snapshot;
 }
@@ -208,11 +215,14 @@ function cleanDevice(value: LooseRecord): Device {
   };
 }
 
-function cleanRuntime(value: LooseRecord): Runtime {
+function cleanRuntime(value: LooseRecord): Runtime | undefined {
+  const kind = normalizeRuntimeKind(value.kind);
+  if (!kind) return undefined;
+
   return {
     id: value.id,
     deviceId: value.deviceId,
-    kind: normalizeRuntimeKind(value.kind),
+    kind,
     name: value.name,
     ...(value.version ? { version: value.version } : {}),
     collectionStatus: normalizeCollectionStatus(value.collectionStatus),
@@ -233,18 +243,18 @@ function cleanAgent(value: LooseRecord): Agent {
 }
 
 function cleanTask(value: LooseRecord): Task {
+  const adapter = cleanTaskAdapter(value.adapter);
   const channel = cleanTaskChannel(value.channel);
   const conversation = channel ? cleanTaskConversation(value.conversation) : undefined;
   const raw = cleanTaskRaw(value.raw);
-  const source = cleanTaskSource(value.source);
-  return {
+  const task = {
     id: value.id,
     agentId: value.agentId,
     taskType: normalizeTaskType(value.taskType),
     status: normalizeTaskStatus(String(value.status ?? "")),
+    ...(adapter ? { adapter } : {}),
     ...(value.userMessage ? { userMessage: value.userMessage } : {}),
     ...(value.agentReply ? { agentReply: value.agentReply } : {}),
-    ...(source ? { source } : {}),
     ...(channel ? { channel } : {}),
     ...(conversation ? { conversation } : {}),
     ...(value.assignee?.name ? { assignee: cleanTaskAssignee(value.assignee) } : {}),
@@ -254,23 +264,17 @@ function cleanTask(value: LooseRecord): Task {
     ...(value.createdAt ? { createdAt: value.createdAt } : {}),
     ...(value.updatedAt ? { updatedAt: value.updatedAt } : {}),
   };
+  return task as Task;
+}
+
+function cleanTaskAdapter(value: LooseRecord | undefined): Task["adapter"] | undefined {
+  if (!value || typeof value !== "object" || !isTaskAdapterKind(value.kind)) return undefined;
+  return { kind: value.kind };
 }
 
 function cleanTaskChannel(value: LooseRecord | undefined): Task["channel"] | undefined {
   if (!value || typeof value !== "object") return undefined;
-  if (value.kind !== "dingtalk" && value.kind !== "webchat" && value.kind !== "telegram" && value.kind !== "slack" && value.kind !== "other") {
-    return undefined;
-  }
-  return {
-    kind: value.kind,
-    ...(value.name ? { name: value.name } : {}),
-    ...(value.externalId ? { externalId: value.externalId } : {}),
-  };
-}
-
-function cleanTaskSource(value: LooseRecord | undefined): Task["source"] | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  if (value.kind !== "openclaw") return undefined;
+  if (!isTaskChannelKind(value.kind)) return undefined;
   return {
     kind: value.kind,
     ...(value.externalId ? { externalId: value.externalId } : {}),
@@ -367,9 +371,17 @@ function isCollectionDiagnosticAction(value: unknown): value is NonNullable<Coll
   return value === "ignored" || value === "task_dropped" || value === "task_ingested_with_gap" || value === "ingestion_failed";
 }
 
-function normalizeRuntimeKind(value: string | undefined): RuntimeKind {
-  if (value === "openclaw" || value === "slock" || value === "multica" || value === "codex") return value;
-  return "openclaw";
+function isTaskAdapterKind(value: unknown): value is TaskAdapterKind {
+  return value === "openclaw";
+}
+
+function isTaskChannelKind(value: unknown): value is TaskChannelKind {
+  return value === "dingtalk" || value === "webchat";
+}
+
+function normalizeRuntimeKind(value: string | undefined): RuntimeKind | undefined {
+  if (value === "openclaw") return value;
+  return undefined;
 }
 
 function cleanNetwork(value: LooseRecord): Device["network"] {

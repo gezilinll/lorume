@@ -193,7 +193,6 @@ describeDb("Postgres runtime store", () => {
               ...snapshot.tasks[0],
               id: `${snapshot.agents[0].id}:task:scheduled-1`,
               raw: { openclaw: { sessionId: "cron-session", status: "success", statusSource: "session" } },
-              source: { kind: "openclaw", externalId: "cron:daily-summary" },
               status: "done",
               taskType: "scheduled",
               userMessage: "Daily summary cron",
@@ -287,7 +286,7 @@ describeDb("Postgres runtime store", () => {
           tasks: [0, 1, 2].map((index) => ({
             ...snapshot.tasks[0],
             id: `${snapshot.tasks[0].id}-${index}`,
-            source: { kind: "openclaw", externalId: `task-${index}` },
+            raw: { openclaw: { messageId: `task-${index}` } },
             userMessage: `Cursor task ${index}`,
             updatedAt: `2026-05-21T10:0${index}:00.000Z`,
           })),

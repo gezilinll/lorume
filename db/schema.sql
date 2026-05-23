@@ -146,7 +146,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   user_message text,
   agent_reply text,
   status text NOT NULL,
-  source_external_id text,
   channel jsonb NOT NULL DEFAULT '{}'::jsonb,
   conversation jsonb NOT NULL DEFAULT '{}'::jsonb,
   creator jsonb,

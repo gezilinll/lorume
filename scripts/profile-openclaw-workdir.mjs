@@ -1088,7 +1088,7 @@ function parseSessionKey(sessionKey) {
   const webchat = /^webchat:(.+)$/.exec(body);
   if (webchat) return { agentExternalId: agentMatch?.[1] || "", channelKind: "webchat", conversationId: webchat[1], taskType: "conversation" };
   const cron = /^cron(?::(.+))?$/.exec(body);
-  if (cron) return { agentExternalId: agentMatch?.[1] || "", channelKind: "other", conversationId: cron[1] || "", taskType: "scheduled" };
+  if (cron) return { agentExternalId: agentMatch?.[1] || "", channelKind: "", conversationId: cron[1] || "", taskType: "scheduled" };
   return { agentExternalId: agentMatch?.[1] || "", channelKind: "", conversationId: "", taskType: "" };
 }
 

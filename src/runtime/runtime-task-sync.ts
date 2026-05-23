@@ -34,6 +34,7 @@ export function createRuntimeTaskHash(task: Task): string {
   return hashStableJson({
     agentId: task.agentId,
     agentReply: normalizeTaskHashText(task.agentReply),
+    adapter: stableObjectOrNull(task.adapter),
     assignee: stableObjectOrNull(task.assignee),
     channel: stableObjectOrNull(task.channel),
     conversation: stableObjectOrNull(task.conversation),
@@ -42,7 +43,6 @@ export function createRuntimeTaskHash(task: Task): string {
     error: normalizeTaskHashText(task.error),
     hashVersion: 1,
     id: task.id,
-    source: stableObjectOrNull(task.source),
     status: task.status,
     taskType: task.taskType,
     updatedAt: task.updatedAt ?? null,
@@ -179,7 +179,7 @@ function normalizeRuntimeTaskBatchEntry(value: unknown): RuntimeTaskBatchEntry |
     agents: [],
     tasks: [candidate.task],
   }).tasks[0];
-  if (!task?.id || !task.agentId) return null;
+  if (!task?.id || !task.agentId || !task.adapter?.kind) return null;
   return {
     hash: candidate.hash,
     task,

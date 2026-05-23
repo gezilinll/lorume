@@ -27,6 +27,7 @@ required_paths=(
   "docs/product/runtime-device-registration-spec.md"
   "docs/product/runtime-fleet-page-spec.md"
   "docs/product/runtime-openclaw-adapter-spec.md"
+  "docs/product/runtime-slock-adapter-spec.md"
   "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
   "docs/product/cli-device-capability-spec.md"
@@ -107,6 +108,7 @@ markdown_files = [
     Path("docs/product/runtime-device-registration-spec.md"),
     Path("docs/product/runtime-fleet-page-spec.md"),
     Path("docs/product/runtime-openclaw-adapter-spec.md"),
+    Path("docs/product/runtime-slock-adapter-spec.md"),
     Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
@@ -136,6 +138,10 @@ forbidden_phrases = [
     ("docs/product/auth-and-access-spec.md", "所有新规则进入 spec、AGENTS 和 harness", "repo-wide rule placement belongs in AGENTS.md, not auth spec"),
     ("docs/product/design/components.md", "Runtime Fleet asset status badges use only `工作中`", "Runtime Fleet asset statuses must be syncing/online/offline/error"),
     ("docs/product/design/page-patterns.md", "object status: `工作中`", "Runtime Fleet object statuses must be syncing/online/offline/error"),
+    ("docs/product/runtime-device-registration-spec.md", "source?: {", "Task provenance must use adapter.kind, not source"),
+    ("docs/product/runtime-openclaw-adapter-spec.md", "source?: {", "Task provenance must use adapter.kind, not source"),
+    ("docs/product/runtime-slock-adapter-spec.md", "source.kind", "Task provenance must use adapter.kind, not source.kind"),
+    ("docs/product/runtime-slock-adapter-spec.md", "channel.name", "Task channel identity belongs in channel.kind; conversation title belongs in conversation.title"),
 ]
 
 if Path("docs/product/runtime-task-probe.md").exists():
@@ -178,9 +184,9 @@ for md_path in markdown_files:
             problems.append(f"{md_path}: missing link target {raw_target} -> {display}")
 
 runtime_device_spec = Path("docs/product/runtime-device-registration-spec.md").read_text(encoding="utf-8")
-expected_runtime_kind = 'export type RuntimeKind = "openclaw" | "slock" | "multica" | "codex";'
+expected_runtime_kind = 'export type RuntimeKind = "openclaw";'
 if expected_runtime_kind not in runtime_device_spec:
-    problems.append("docs/product/runtime-device-registration-spec.md: RuntimeKind must list only openclaw, slock, multica, and codex")
+    problems.append("docs/product/runtime-device-registration-spec.md: RuntimeKind must list only currently implemented runtime kinds")
 
 if "claude_code" in runtime_device_spec:
     problems.append("docs/product/runtime-device-registration-spec.md: claude_code must not be a supported RuntimeKind")

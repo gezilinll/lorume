@@ -2,7 +2,7 @@
 
 版本：TinySpec v0.7
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；Slock 已有 disabled-by-default adapter spec 但没有实现和 harness 前不采集、不执行命令、不读目录，其他 Runtime adapter 在没有对应 spec 和 harness 前也不采集、不执行命令、不读目录。
 
 ## 目标
 
@@ -19,7 +19,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
 - 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
-- 默认不采集 Slock、Multica 或 Codex。Codex 仍可作为未来 Runtime kind 保留；Claude Code 从当前支持列表移除。
+- 默认不采集 Slock、Multica 或 Codex。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，但启用前必须先补实现和 harness。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
 - 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
@@ -73,10 +73,10 @@ Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含�
 
 ### Runtime
 
-Runtime 表示设备上的可识别运行环境。当前支持类型为 `openclaw`、`slock`、`multica`、`codex`，但默认 adapter allowlist 只采集 `openclaw`。
+Runtime 表示设备上的可识别运行环境。当前已实现且可采集的 Runtime kind 只有 `openclaw`。Slock、Multica、Codex 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。
 
 ```ts
-export type RuntimeKind = "openclaw" | "slock" | "multica" | "codex";
+export type RuntimeKind = "openclaw";
 
 export interface Runtime {
   id: string;
@@ -137,10 +137,9 @@ export interface Task {
   userMessage?: string;
   agentReply?: string;
   status: TaskStatus;
-  source?: { kind?: "openclaw"; externalId?: string };
+  adapter: { kind: "openclaw" };
   channel?: {
-    kind: "dingtalk" | "webchat" | "telegram" | "slack" | "other";
-    name?: string;
+    kind: "dingtalk" | "webchat";
     externalId?: string;
   };
   conversation?: {
@@ -167,8 +166,9 @@ export interface Task {
 ```
 
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
-Runtime 名称不能写入 `Task.channel`；如果任务没有 DingTalk、Telegram、Slack 或其他用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
+Runtime 名称不能写入 `Task.channel`；如果任务没有当前已实现的用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
 Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。页面需要标题时，从 `userMessage` 生成短展示标题；需要任务新鲜度时，只看源系统业务时间 `updatedAt` / `createdAt`。
+Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现只支持 `openclaw`；Slock、Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
 
 ## 状态规则
 

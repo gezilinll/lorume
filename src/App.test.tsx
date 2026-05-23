@@ -102,6 +102,7 @@ function jsonResponse(body: unknown, status = 200) {
 function task(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
     agentId: defaultAgentId,
+    adapter: { kind: "openclaw" },
     status: "todo",
     taskType: "conversation",
     ...overrides,
@@ -287,7 +288,8 @@ describe("Console shell", () => {
     const tasks = [
       task({
         assignee: { name: "main" },
-        channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+        channel: { kind: "dingtalk" },
+        conversation: { title: "DingTalk 群聊" },
         creator: { name: "PMO" },
         id: "task-no-execution",
         status: "in_progress",
@@ -454,7 +456,8 @@ describe("Console shell", () => {
         return jsonResponse(taskQueryResponse([
           task({
             assignee: { name: "main" },
-            channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+            channel: { kind: "dingtalk" },
+            conversation: { title: "DingTalk 群聊" },
             creator: { name: "PMO" },
             id: "task-query-1",
             status: "in_progress",

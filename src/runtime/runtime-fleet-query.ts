@@ -16,18 +16,12 @@ import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-dev
 /** Runtime kind labels used by the Runtime Fleet page. */
 export const runtimeKindLabels: Record<RuntimeKind, string> = {
   openclaw: "OpenClaw",
-  slock: "Slock",
-  multica: "Multica",
-  codex: "Codex",
 };
 
 /** Channel labels used when a Task includes user-facing channel context. */
 export const channelKindLabels: Record<NonNullable<Task["channel"]>["kind"], string> = {
   dingtalk: "DingTalk",
   webchat: "Web Chat",
-  telegram: "Telegram",
-  slack: "Slack",
-  other: "Other",
 };
 
 /** Product collection status labels shown for Device, Runtime, and Agent rows. */
@@ -580,7 +574,6 @@ function taskMatches(task: Task, query: string): boolean {
       task.agentReply,
       task.status,
       task.channel?.kind,
-      task.channel?.name,
       task.conversation?.title,
       task.creator?.name,
       task.assignee?.name,

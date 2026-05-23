@@ -506,12 +506,12 @@ async function deleteStaleRuntimeObjects(
 async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, syncHash: string): Promise<void> {
   await client.query(`
     INSERT INTO tasks (
-      id, device_id, agent_id, task_type, user_message, agent_reply, status, source_external_id, channel, conversation,
+      id, device_id, agent_id, task_type, user_message, agent_reply, status, channel, conversation,
       creator, assignee, error, created_source_at, updated_source_at, sync_hash, stale_at, raw, updated_at
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb,
-      $11::jsonb, $12::jsonb, $13, $14, $15, $16, NULL, $17::jsonb, now()
+      $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb,
+      $10::jsonb, $11::jsonb, $12, $13, $14, $15, NULL, $16::jsonb, now()
     )
     ON CONFLICT (id) DO UPDATE SET
       device_id = excluded.device_id,
@@ -520,7 +520,6 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, s
       user_message = excluded.user_message,
       agent_reply = excluded.agent_reply,
       status = excluded.status,
-      source_external_id = excluded.source_external_id,
       channel = excluded.channel,
       conversation = excluded.conversation,
       creator = excluded.creator,
@@ -540,7 +539,6 @@ async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, s
     task.userMessage ?? null,
     task.agentReply ?? null,
     task.status,
-    task.source?.externalId ?? null,
     toJson(task.channel ?? {}),
     toJson(task.conversation ?? {}),
     toJsonOrNull(task.creator),
@@ -662,9 +660,7 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
     conditions.push(`(
       coalesce(t.user_message, '') ILIKE $${values.length}
       OR coalesce(t.agent_reply, '') ILIKE $${values.length}
-      OR coalesce(t.source_external_id, '') ILIKE $${values.length}
       OR coalesce(t.channel->>'kind', '') ILIKE $${values.length}
-      OR coalesce(t.channel->>'name', '') ILIKE $${values.length}
       OR coalesce(t.conversation->>'title', '') ILIKE $${values.length}
       OR coalesce(t.creator->>'name', '') ILIKE $${values.length}
       OR coalesce(t.assignee->>'name', '') ILIKE $${values.length}

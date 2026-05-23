@@ -435,7 +435,8 @@ function createDeviceStateSnapshot(options: {
     }],
     tasks: options.tasks ?? [{
       agentId,
-      channel: { externalId: "group-live", kind: "dingtalk", name: "DingTalk 群聊" },
+      adapter: { kind: "openclaw" },
+      channel: { externalId: "group-live", kind: "dingtalk" },
       createdAt: "2026-05-21T02:55:00.000Z",
       creator: { name: "PMO" },
       id: `${agentId}:task:task-1`,

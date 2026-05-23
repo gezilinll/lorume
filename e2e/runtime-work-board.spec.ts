@@ -29,7 +29,8 @@ const runningTask: Task = {
 const longTask: Task = {
   agentId: defaultAgentId,
   assignee: { name: "main" },
-  channel: { kind: "dingtalk", name: "DingTalk 群聊" },
+  adapter: { kind: "openclaw" },
+  channel: { kind: "dingtalk" },
   conversation: { title: "DingTalk 群聊", lastActivityAt: "2026-05-09T15:55:00.000Z" },
   creator: { name: "AjiHuang" },
   id: `${defaultAgentId}:task:merge-request-184`,

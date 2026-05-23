@@ -191,9 +191,10 @@ exit 91
       agentId: "test-device:runtime:openclaw:agent:main",
       userMessage: "Run a local OpenClaw check",
       status: "in_progress",
-      source: { kind: "openclaw", externalId: "run-webchat-1" },
+      adapter: { kind: "openclaw" },
       taskType: "conversation",
-      channel: { kind: "webchat", name: "OpenClaw Web Chat", externalId: "conversation-local-1" },
+      channel: { kind: "webchat", externalId: "conversation-local-1" },
+      conversation: { title: "OpenClaw Web Chat", externalId: "conversation-local-1" },
       assignee: { name: "main", externalId: "main" },
     });
     expect(output.tasks[0]).not.toHaveProperty("title");
@@ -486,9 +487,9 @@ exit 91
       userMessage: "整理今天项目风险并同步到群里",
       agentReply: "我会整理风险并同步到群里。",
       status: "failed",
-      source: { kind: "openclaw", externalId: "msg-live-1" },
+      adapter: { kind: "openclaw" },
       taskType: "conversation",
-      channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "group-live" },
+      channel: { kind: "dingtalk", externalId: "group-live" },
       conversation: {
         title: "日常工作提醒助手",
         externalId: "group-live",
@@ -591,7 +592,8 @@ exit 91
     expect(output.tasks[0]).toMatchObject({
       userMessage: "记录问题",
       agentReply: "已记录。",
-      channel: { kind: "dingtalk", name: "问题登记群", externalId: "cidZtz9jOwM0xwxYSSK2RF4Uw==" },
+      adapter: { kind: "openclaw" },
+      channel: { kind: "dingtalk", externalId: "cidZtz9jOwM0xwxYSSK2RF4Uw==" },
       conversation: { title: "问题登记群", externalId: "cidZtz9jOwM0xwxYSSK2RF4Uw==" },
       creator: { name: "张良", externalId: "user-canonical-1" },
     });
@@ -646,9 +648,7 @@ exit 91
       taskType: "scheduled",
       userMessage: "[cron:daily-summary] 汇总今天的项目风险",
       status: "done",
-      source: { kind: "openclaw", externalId: "cron-daily-summary" },
-      channel: { kind: "other", name: "OpenClaw Cron", externalId: "daily-summary" },
-      conversation: { title: "daily-summary", externalId: "daily-summary", lastActivityAt: "2026-05-21T04:03:00.000Z" },
+      adapter: { kind: "openclaw" },
       assignee: { name: "main", externalId: "main" },
       raw: {
         openclaw: {
@@ -663,14 +663,11 @@ exit 91
       taskType: "scheduled",
       userMessage: "[cron:weekly-report 工具产研团队昨日日报文档-工具能力合伙人] 生成昨天的团队日报",
       status: "cancelled",
-      channel: { kind: "other", name: "OpenClaw Cron", externalId: "weekly-report" },
-      conversation: {
-        title: "工具产研团队昨日日报文档-工具能力合伙人",
-        externalId: "weekly-report",
-        lastActivityAt: "2026-05-21T04:03:00.000Z",
-      },
+      adapter: { kind: "openclaw" },
       raw: { openclaw: { status: "interrupted" } },
     });
+    expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-daily-summary"))).not.toHaveProperty("channel");
+    expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-daily-summary"))).not.toHaveProperty("conversation");
     expect(output.tasks[0]).not.toHaveProperty("title");
     expect(output.tasks[0]).not.toHaveProperty("description");
   });
@@ -740,9 +737,9 @@ exit 91
       userMessage: "帮我查 Seedance 模型今天的调用次数、成功次数和失败原因",
       agentReply: "Seedance 今天调用 128 次，成功 120 次，失败 8 次。",
       status: "done",
-      source: { kind: "openclaw", externalId: "msg-snapshot-1" },
+      adapter: { kind: "openclaw" },
       taskType: "conversation",
-      channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "group-live" },
+      channel: { kind: "dingtalk", externalId: "group-live" },
       conversation: {
         title: "日常工作提醒助手",
         externalId: "group-live",

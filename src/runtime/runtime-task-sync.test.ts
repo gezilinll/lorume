@@ -15,12 +15,12 @@ function task(overrides: Partial<Task> = {}): Task {
     status: "in_progress",
     userMessage: "  帮我查 Seedance 调用次数\r\n",
     agentReply: "",
+    adapter: { kind: "openclaw" },
     creator: { name: "张良", externalId: "user-1" },
     assignee: { name: "main", externalId: "main" },
-    channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "cid-example" },
+    channel: { kind: "dingtalk", externalId: "cid-example" },
     conversation: { title: "日常工作提醒助手", externalId: "cid-example" },
-    source: { kind: "openclaw", externalId: "msg-1" },
-    raw: { openclaw: { trajectoryRunId: "run-1" } },
+    raw: { openclaw: { messageId: "msg-1", trajectoryRunId: "run-1" } },
     createdAt: "2026-05-22T00:00:00.000Z",
     updatedAt: "2026-05-22T00:00:01.000Z",
     ...overrides,
@@ -44,6 +44,7 @@ describe("runtime task sync", () => {
 
     expect(createRuntimeTaskHash(task({ agentReply: "查到了，应该看 SLS A。" }))).not.toBe(baseHash);
     expect(createRuntimeTaskHash(task({ status: "done" }))).not.toBe(baseHash);
+    expect(createRuntimeTaskHash(task({ adapter: { kind: "openclaw" } }))).toBe(baseHash);
   });
 
   it("splits task batches by count and byte budget with deterministic batch ids", () => {

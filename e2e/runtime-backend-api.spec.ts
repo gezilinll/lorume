@@ -224,7 +224,7 @@ test.describe("Runtime backend API", () => {
     const staleTask = {
       ...baseFixture.tasks[0],
       id: "fixture-mac:runtime:openclaw:agent:main:task:stale-1",
-      source: { kind: "openclaw", externalId: "stale-1" },
+      raw: { openclaw: { messageId: "stale-1" } },
       userMessage: "This task should become stale after the next collector run.",
       updatedAt: "2026-05-20T09:00:00.000Z",
     };
@@ -376,7 +376,7 @@ test.describe("Runtime backend API", () => {
       await waitForCollectorTask(request, collector, "conversation", {
         id: `${deviceId}:runtime:openclaw:agent:main:task:run-openclaw-1`,
         taskType: "conversation",
-        source: { kind: "openclaw", externalId: "msg-seedance-1" },
+        adapter: { kind: "openclaw" },
         userMessage: "帮我查一下 Seedance 模型的调用次数、成功次数、失败次数以及失败次数里因为稿豆不足而失败的次数",
         agentReply: "Seedance 调用情况已查询。",
         creator: { name: "张良", externalId: "user-zhangliang" },
@@ -386,7 +386,7 @@ test.describe("Runtime backend API", () => {
       await waitForCollectorTask(request, collector, "scheduled", {
         id: `${deviceId}:runtime:openclaw:agent:main:task:cron-openclaw-1`,
         taskType: "scheduled",
-        source: { kind: "openclaw", externalId: "cron-openclaw-1" },
+        adapter: { kind: "openclaw" },
       });
       await waitForCollectorHealth(request, collector, deviceId);
     } finally {
@@ -463,7 +463,7 @@ function createLargeTaskSnapshot(taskCount: number): DeviceStateSnapshot {
       return {
         ...baseTask,
         id: `fixture-mac:runtime:openclaw:agent:main:task:bulk-${suffix}`,
-        source: { kind: "openclaw", externalId: `bulk-${suffix}` },
+        raw: { openclaw: { messageId: `bulk-${suffix}` } },
         userMessage: `批量回归任务 ${suffix}: 验证 collector 在真实后端链路中可以稳定分批上报大量 OpenClaw Task。`,
         agentReply: `批量回归任务 ${suffix} 已完成。`,
         status: taskNumber % 17 === 0 ? "in_progress" : "done",
@@ -474,7 +474,6 @@ function createLargeTaskSnapshot(taskCount: number): DeviceStateSnapshot {
         },
         channel: {
           kind: "dingtalk",
-          name: "批量回归测试群",
           externalId: "large-batch-channel",
         },
         updatedAt,

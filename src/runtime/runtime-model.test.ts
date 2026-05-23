@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   COLLECTION_STATUSES,
   RUNTIME_KINDS,
+  TASK_ADAPTER_KINDS,
+  TASK_CHANNEL_KINDS,
   TASK_STATUSES,
   createDeviceStateSnapshot,
   normalizeDeviceStateSnapshot,
@@ -11,7 +13,7 @@ import {
 describe("runtime four-object model", () => {
   it("defines the compact status and runtime kind sets", () => {
     expect(COLLECTION_STATUSES).toEqual(["syncing", "online", "offline", "error"]);
-    expect(RUNTIME_KINDS).toEqual(["openclaw", "slock", "multica", "codex"]);
+    expect(RUNTIME_KINDS).toEqual(["openclaw"]);
     expect(TASK_STATUSES).toEqual([
       "todo",
       "in_progress",
@@ -64,6 +66,7 @@ describe("runtime four-object model", () => {
         toolCalls: [{ id: "exec-1", name: "bash", status: "done" }],
         userMessage: "Handle DingTalk request",
         status: "in_progress",
+        adapter: { kind: "openclaw" },
         lastSeenAt: "2026-05-21T00:00:02.000Z",
         lastRun: { status: "running" },
       }],
@@ -84,9 +87,33 @@ describe("runtime four-object model", () => {
     expect(snapshot.tasks[0]).not.toHaveProperty("toolCalls");
     expect(snapshot.tasks[0]).not.toHaveProperty("lastSeenAt");
     expect(snapshot.tasks[0]).toMatchObject({
+      adapter: { kind: "openclaw" },
       userMessage: "Handle DingTalk request",
       status: "in_progress",
     });
+  });
+
+  it("defines only implemented task adapter and channel kinds", () => {
+    expect(TASK_ADAPTER_KINDS).toEqual(["openclaw"]);
+    expect(TASK_CHANNEL_KINDS).toEqual(["dingtalk", "webchat"]);
+  });
+
+  it("drops unsupported runtime kinds instead of coercing them to OpenClaw", () => {
+    const snapshot = createDeviceStateSnapshot({
+      collectedAt: "2026-05-21T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      runtimes: [{
+        id: "device-1:runtime:codex",
+        deviceId: "device-1",
+        kind: "codex",
+        name: "Codex",
+        collectionStatus: "online",
+      }],
+      agents: [],
+      tasks: [],
+    });
+
+    expect(snapshot.runtimes).toEqual([]);
   });
 
   it("normalizes external task and execution evidence into a single task status", () => {
@@ -118,8 +145,8 @@ describe("runtime four-object model", () => {
         userMessage: "查 Seedance 指标",
         agentReply: "应该查询 SLS 项目和对应日志库。",
         status: "success",
-        source: { kind: "openclaw", externalId: "msg-1" },
-        channel: { kind: "dingtalk", name: "日常工作提醒助手", externalId: "cid-example" },
+        adapter: { kind: "openclaw" },
+        channel: { kind: "dingtalk", externalId: "cid-example" },
         conversation: { title: "日常工作提醒助手", externalId: "cid-example" },
         assignee: { name: "main", externalId: "main" },
         creator: { name: "张良", externalId: "100854680226406967" },
@@ -149,17 +176,20 @@ describe("runtime four-object model", () => {
       status: "done",
       userMessage: "查 Seedance 指标",
       agentReply: "应该查询 SLS 项目和对应日志库。",
-      source: { kind: "openclaw", externalId: "msg-1" },
+      adapter: { kind: "openclaw" },
+      channel: { kind: "dingtalk", externalId: "cid-example" },
       assignee: { name: "main", externalId: "main" },
       creator: { name: "张良", externalId: "100854680226406967" },
       raw: { openclaw: expect.objectContaining({ status: "done", messageId: "msg-1" }) },
     });
+    expect(snapshot.tasks[0]).not.toHaveProperty("source");
+    expect(snapshot.tasks[0].channel).not.toHaveProperty("name");
     expect(snapshot.tasks[0]).not.toHaveProperty("title");
     expect(snapshot.tasks[0]).not.toHaveProperty("description");
     expect(snapshot.tasks[0]).not.toHaveProperty("toolCalls");
   });
 
-  it("drops runtime source names from task channel context", () => {
+  it("drops unsupported task channel context", () => {
     const snapshot = createDeviceStateSnapshot({
       collectedAt: "2026-05-21T00:00:00.000Z",
       device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
@@ -169,8 +199,9 @@ describe("runtime four-object model", () => {
         title: "Local runtime work",
         userMessage: "Local runtime work",
         status: "done",
-        channel: { kind: "openclaw", name: "OpenClaw" },
-        conversation: { title: "OpenClaw" },
+        adapter: { kind: "openclaw" },
+        channel: { kind: "unsupported-channel" },
+        conversation: { title: "Unsupported channel" },
       }],
     });
 
@@ -178,7 +209,7 @@ describe("runtime four-object model", () => {
     expect(snapshot.tasks[0]).not.toHaveProperty("conversation");
   });
 
-  it("normalizes only collectedAt snapshots and does not require a stored task title", () => {
+  it("normalizes only collectedAt snapshots and requires adapter provenance instead of a title", () => {
     expect(normalizeDeviceStateSnapshot({
       observedAt: "2026-05-22T00:00:00.000Z",
       device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
@@ -189,8 +220,15 @@ describe("runtime four-object model", () => {
       collectedAt: "2026-05-22T00:00:00.000Z",
       device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
       tasks: [{ id: "task-1", agentId: "agent-1", status: "done", userMessage: "Hello" }],
+    })).toBeNull();
+
+    expect(normalizeDeviceStateSnapshot({
+      collectedAt: "2026-05-22T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{ id: "task-1", agentId: "agent-1", status: "done", userMessage: "Hello", adapter: { kind: "openclaw" } }],
     })?.tasks[0]).toMatchObject({
       id: "task-1",
+      adapter: { kind: "openclaw" },
       userMessage: "Hello",
     });
   });

@@ -68,7 +68,6 @@ describeDb("database schema baseline", () => {
           "user_message",
           "agent_reply",
           "status",
-          "source_external_id",
           "channel",
           "conversation",
           "creator",

@@ -387,7 +387,6 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
     const status = normalizeOpenClawTrajectoryProductTaskStatus(run);
     const toolError = firstOpenClawFailedToolCallError(run.toolCalls);
     const error = openClawTrajectoryError(run) || toolError;
-    const sourceExternalId = run.messageId || runId;
     const agentReply = openClawProductAgentReply(run);
     if (shouldWarnOpenClawMissingAgentReply({ agentReply, error, run, status, taskType })) {
       diagnostics.add({
@@ -407,10 +406,10 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
       userMessage: userMessageResult.userMessage,
       ...(agentReply ? { agentReply } : {}),
       status,
-      source: { kind: "openclaw", externalId: String(sourceExternalId) },
+      adapter: { kind: "openclaw" },
       ...(channel ? { channel } : {}),
       ...(channel ? { conversation: {
-        title: trajectoryChannel?.conversationTitle || channel.name || channel.kind,
+        title: trajectoryChannel?.conversationTitle || trajectoryChannel?.label || channel.kind,
         ...(trajectoryChannel?.externalId || openClawProductConversationExternalId(run.sessionKey, run.conversationId) ? {
           externalId: trajectoryChannel?.externalId || openClawProductConversationExternalId(run.sessionKey, run.conversationId),
         } : {}),
@@ -518,9 +517,9 @@ function openClawRawTrajectoryStatus(run) {
 }
 
 function openClawProductChannel(channel) {
+  if (channel?.kind !== "dingtalk" && channel?.kind !== "webchat") return undefined;
   return {
-    kind: channel?.kind || "other",
-    ...(channel?.label ? { name: channel.label } : {}),
+    kind: channel.kind,
     ...(channel?.externalId ? { externalId: channel.externalId } : {}),
   };
 }
@@ -1259,24 +1258,9 @@ function openClawChannelFromTrajectoryRun(run, targetsByConversationId) {
     };
   }
   if (session?.channelKind === "cron") {
-    const cron = parseOpenClawCronPrompt(run.prompt);
-    const conversationId = run.conversationId || session.conversationId || cron.id;
-    return {
-      kind: "other",
-      label: "OpenClaw Cron",
-      ...(conversationId ? { externalId: conversationId } : {}),
-      ...(cron.title || conversationId ? { conversationTitle: cron.title || conversationId } : {}),
-    };
+    return undefined;
   }
   return undefined;
-}
-
-function parseOpenClawCronPrompt(prompt) {
-  const match = /^\[cron:([^\]\s]+)(?:\s+([^\]]+))?\]/i.exec(cleanOpenClawPromptText(prompt));
-  return {
-    id: match?.[1] || "",
-    title: match?.[2]?.trim() || "",
-  };
 }
 
 export function collectDeviceStateSnapshot(config = {}, args = {}) {

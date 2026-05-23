@@ -1,6 +1,6 @@
 import { createDeviceStateSnapshot, type Task } from "./runtime-model";
 
-export const RUNTIME_TASK_SYNC_SCHEMA_VERSION = "device-state-v2" as const;
+export const RUNTIME_TASK_SYNC_SCHEMA_VERSION = "device-state-v3" as const;
 
 export interface RuntimeTaskBatchEntry {
   task: Task;

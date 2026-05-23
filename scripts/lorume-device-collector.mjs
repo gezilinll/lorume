@@ -14,7 +14,7 @@ const DEFAULT_LORUME_CLI_PATH = path.join(SCRIPT_DIR, "lorume.mjs");
 const DEFAULT_COLLECTOR_LOG_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TASK_BATCH_MAX_BYTES = 512 * 1024;
 const DEFAULT_TASK_BATCH_MAX_TASKS = 1000;
-const TASK_SYNC_SCHEMA_VERSION = "device-state-v2";
+const TASK_SYNC_SCHEMA_VERSION = "device-state-v3";
 const COLLECTOR_LOG_SECRET_KEYS = new Set([
   "authorization",
   "bearertoken",
@@ -308,8 +308,11 @@ async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, 
   const cacheScope = createTaskSyncCacheScope(serverUrl, snapshot.device.id, deviceToken);
   const cache = readTaskSyncCache(cachePath, cacheScope);
   const currentTaskIds = new Set(tasks.map((task) => String(task.id || "")).filter(Boolean));
+  const currentAdapterKinds = taskAdapterKinds(tasks);
   const removedTaskIds = canTrustTaskPresence(snapshot)
-    ? Object.keys(cache.tasks).filter((taskId) => !currentTaskIds.has(taskId))
+    ? Object.entries(cache.tasks)
+      .filter(([taskId, entry]) => !currentTaskIds.has(taskId) && cacheEntryCoveredByCurrentAdapters(entry, currentAdapterKinds))
+      .map(([taskId]) => taskId)
     : [];
   const entries = tasks
     .map((task) => ({ task, hash: createRuntimeTaskHash(task) }))
@@ -350,6 +353,21 @@ function canTrustTaskPresence(snapshot) {
   const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
   return runtimes.some((runtime) => runtime?.collectionStatus === "online") &&
     agents.some((agent) => agent?.collectionStatus === "online");
+}
+
+function taskAdapterKinds(tasks) {
+  return new Set(tasks.map(taskAdapterKind).filter(Boolean));
+}
+
+function taskAdapterKind(task) {
+  const kind = task?.adapter?.kind;
+  return typeof kind === "string" && kind.trim() ? kind.trim() : "";
+}
+
+function cacheEntryCoveredByCurrentAdapters(entry, currentAdapterKinds) {
+  if (currentAdapterKinds.size === 0) return false;
+  const adapterKind = typeof entry?.adapterKind === "string" ? entry.adapterKind.trim() : "";
+  return adapterKind ? currentAdapterKinds.has(adapterKind) : false;
 }
 
 function resolveTaskSyncCachePath(config = {}) {
@@ -427,7 +445,7 @@ function applyTaskBatchAck(cache, acked, removed, batch) {
   const lastAckedAt = new Date().toISOString();
   for (const entry of batch.tasks) {
     if (ackById.get(entry.task.id) !== entry.hash) continue;
-    cache.tasks[entry.task.id] = { hash: entry.hash, lastAckedAt };
+    cache.tasks[entry.task.id] = { adapterKind: taskAdapterKind(entry.task), hash: entry.hash, lastAckedAt };
   }
   for (const taskId of batch.removedTaskIds ?? []) {
     if (removedIds.has(taskId)) delete cache.tasks[taskId];

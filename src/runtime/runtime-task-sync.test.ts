@@ -81,7 +81,7 @@ describe("runtime task sync", () => {
       batchCount: 2,
       collectedAt: "2026-05-22T00:00:10.000Z",
       deviceId: "device-1",
-      schemaVersion: "device-state-v2",
+      schemaVersion: "device-state-v3",
     });
     expect(batches[0].tasks.map((entry) => entry.task.id)).toEqual([
       "agent-1:task:msg-1",
@@ -98,7 +98,7 @@ describe("runtime task sync", () => {
 
   it("normalizes inbound task batches and strips removed task fields", () => {
     const batch = normalizeRuntimeTaskBatch({
-      schemaVersion: "device-state-v2",
+      schemaVersion: "device-state-v3",
       deviceId: "device-1",
       collectedAt: "2026-05-22T00:00:10.000Z",
       batchId: "batch-1",
@@ -130,7 +130,7 @@ describe("runtime task sync", () => {
 
   it("normalizes removed task ids in runtime task batches", () => {
     const batch = normalizeRuntimeTaskBatch({
-      schemaVersion: "device-state-v2",
+      schemaVersion: "device-state-v3",
       deviceId: "device-1",
       collectedAt: "2026-05-22T00:00:10.000Z",
       batchId: "batch-removed-1",

@@ -146,7 +146,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
         await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
         const removalResponse = await postJson(`${baseUrl}/api/device-task-batches`, {
-          schemaVersion: "device-state-v2",
+          schemaVersion: "device-state-v3",
           deviceId: deviceStateSnapshot.device.id,
           collectedAt: "2026-05-21T03:05:00.000Z",
           batchId: "remove-task-1",

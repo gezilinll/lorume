@@ -136,7 +136,7 @@ describeDb("Postgres runtime store", () => {
         await store.upsertRuntimeTaskBatch(createFixtureTaskBatch(snapshot));
 
         const removalResult = await store.upsertRuntimeTaskBatch({
-          schemaVersion: "device-state-v2",
+          schemaVersion: "device-state-v3",
           deviceId: snapshot.device.id,
           collectedAt: "2026-05-22T00:10:00.000Z",
           batchId: "remove-one-task",

@@ -595,7 +595,7 @@ function classifySlockProfileResult({ device, agentId, profileResult, workspaceA
 
 function slockAssigneeClassification(profileClassifications, workspaceAgentIds, assigneeId) {
   const classification = profileClassifications.get(String(assigneeId));
-  if (classification?.diagnostic) return null;
+  if (classification) return null;
   const code = slockWorkspaceHasAgent(workspaceAgentIds, assigneeId)
     ? "slock_inactive_workspace_task_ignored"
     : "slock_remote_agent_task_ignored";

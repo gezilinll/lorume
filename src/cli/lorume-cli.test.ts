@@ -225,6 +225,49 @@ exit 91
     }
   });
 
+  it("does not warn when a Slock task is assigned to another active local agent", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-local-peer-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1,agent-local-2",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#shared-local",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-shared-local-1",
+          agentId: "fixture-device:runtime:codex:agent:slock:agent-local-1",
+        }),
+      ]);
+      expect(server.requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-2/history",
+          channel: "#shared-local",
+        }),
+      ]));
+      expect(output.diagnostics?.items ?? []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_remote_agent_task_ignored" }),
+        expect.objectContaining({ code: "slock_inactive_workspace_task_ignored" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("does not create product Tasks from OpenClaw tasks list output", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-"));
     const binDir = path.join(root, "bin");
@@ -1566,12 +1609,47 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
       sendJson(200, readFixture("profile-active.json"));
       return;
     }
+    if (url.pathname === "/internal/agent/agent-local-2/profile") {
+      sendJson(200, JSON.stringify({
+        id: "agent-local-2",
+        displayName: "小卷Bot",
+        name: "xiaojuan-bot",
+        runtime: "codex",
+        status: "active",
+        computerHostname: "fixture-device.local",
+      }));
+      return;
+    }
     if (url.pathname === "/internal/agent/agent-unsupported-1/profile") {
       sendJson(200, readFixture("profile-unsupported-runtime.json"));
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work") {
       sendJson(200, readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
+      return;
+    }
+    if ((url.pathname === "/internal/agent/agent-local-1/history" || url.pathname === "/internal/agent/agent-local-2/history") && url.searchParams.get("channel") === "#shared-local") {
+      sendJson(200, JSON.stringify({
+        channelName: "共享频道",
+        messages: [{
+          id: "msg-shared-local-1",
+          seq: 2,
+          content: "请整理共享频道风险",
+          taskNumber: "2001",
+          taskStatus: "done",
+          taskAssigneeId: "agent-local-1",
+          senderId: "user-1",
+          senderName: "张良",
+          createdAt: "2026-05-23T01:00:00.000Z",
+          updatedAt: "2026-05-23T01:03:00.000Z",
+        }],
+        has_older: false,
+        has_more: false,
+      }));
+      return;
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#shared-local:msg-shar") {
+      sendJson(200, readFixture("thread-history.json"));
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#exact-limit" && !url.searchParams.has("before")) {

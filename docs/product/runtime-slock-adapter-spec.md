@@ -68,6 +68,7 @@ Task thread target 使用 task message 的稳定 id 派生，而不是直接使�
 | 分类 | 判定 | 处理 |
 |---|---|---|
 | `local_active_task` | `taskAssigneeId` 能匹配本机 active profile id，且 profile runtime 可映射为 Lorume Runtime | 生成 Lorume Task。 |
+| `local_peer_task` | 当前读取 agent 能看见该 Task，但 `taskAssigneeId` 指向另一个本机 active profile | 当前 agent 不生成 Task，也不写 remote/workspace warning；由被指派的本机 Agent 负责生成。 |
 | `local_workspace_task` | `taskAssigneeId` 只在 `~/.slock/agents/*` 中出现，没有 active profile | 不生成 Task；写 `slock_inactive_workspace_task_ignored`。 |
 | `remote_or_unknown_task` | `taskAssigneeId` 在 channel/thread 中可见，但没有本机 active profile | 不生成 Task；写 `slock_remote_agent_task_ignored`。 |
 | `unassigned_task` | 缺少 `taskAssigneeId` | 不生成 Task；写 `slock_unassigned_task_ignored`。 |

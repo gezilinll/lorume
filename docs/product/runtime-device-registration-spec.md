@@ -247,11 +247,12 @@ HTTP 上报规则：
 
 - `POST /api/device-state-snapshots` 只接收 Device、Runtime、Agent 和 diagnostics；`tasks` 必须为空数组。
 - `POST /api/device-task-batches` 接收 Task 批次，每条 Task 带 collector 计算出的稳定 hash，也可以包含 `removedTaskIds`。
-- `removedTaskIds` 表示这些 Task 曾经在当前 collector cache scope 中被后端 ACK，但本轮 adapter snapshot 已不再出现。
+- Metadata snapshot 只按稳定 ID upsert Device、Runtime 和 Agent。由于 collector 允许按 adapter allowlist 做局部采集，后端不得把某个 metadata snapshot 里缺席的 Runtime 或 Agent 解释为删除；Runtime / Agent 下线或 tombstone 规则必须有独立 spec 和 harness 后再引入。
+- `removedTaskIds` 表示这些 Task 曾经在当前 collector cache scope 中被后端 ACK，但本轮已启用且本轮实际覆盖的 adapter snapshot 已不再出现。局部 adapter 采集不得移除其他 adapter 曾经 ACK 的 Task。
 - 后端按稳定 ID upsert 当前对象；收到 `removedTaskIds` 后只做 soft tombstone，例如设置 `stale_at`，不物理删除 Task，也不改变 `Task.status`。
 - Runtime Fleet 和 Runs 默认查询只返回未 tombstone 的当前可见 Task。如果同一个 Task 后续重新出现，upsert 必须清除 tombstone，让它重新可见。
 - Collector 本地 ACK cache 必须绑定当前注册作用域：`schemaVersion`、规范化 `serverUrl`、`deviceId` 和 `deviceToken` 的前 12 位 `tokenPrefix`。作用域缺失或不一致时，collector 必须把本地 cache 视为空并重新按批次上报当前可见 Task。
-- Collector 本地只缓存已被后端 ACK 的 `{ id, hash, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化、本地未 ACK、注册作用域不匹配、或本轮已从 adapter snapshot 消失的 Task id。
+- Collector 本地只缓存已被后端 ACK 的 `{ id, hash, adapterKind, lastAckedAt }`。下一轮采集重新计算当前 Task hash，只上传 hash 变化、本地未 ACK、注册作用域不匹配、或本轮已从同 adapter snapshot 消失的 Task id。
 - Collector 必须等后端返回 removal ACK 后，才从本地 ACK cache 删除对应 Task id。
 - `collectedAt` 表示设备端本轮采集完成时间；`receivedAt` 表示后端收到请求时间。
 - `diagnostics.items` 只存结构化聚合，不存逐条原始字符串。`debug` / `info` 是内部过滤摘要，`warning` 是数据质量缺口，`error` 是采集链路失败。

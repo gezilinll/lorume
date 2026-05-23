@@ -184,7 +184,6 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         for (const agent of snapshot.agents) {
           await upsertDeviceStateAgent(client, agent);
         }
-        await deleteStaleRuntimeObjects(client, snapshot);
 
         const counts = {
           agents: snapshot.agents.length,
@@ -483,24 +482,6 @@ async function upsertDeviceStateAgent(client: pg.PoolClient, agent: Agent): Prom
     toDate(agent.lastSeenAt),
     toJson(agent),
   ]);
-}
-
-async function deleteStaleRuntimeObjects(
-  client: pg.PoolClient,
-  snapshot: { device: { id: string }; runtimes: Array<{ id: string }>; agents: Array<{ id: string }> },
-): Promise<void> {
-  const runtimeIds = snapshot.runtimes.map((runtime) => runtime.id);
-  const agentIds = snapshot.agents.map((agent) => agent.id);
-  await client.query(`
-    DELETE FROM agents
-    WHERE runtime_id IN (SELECT id FROM runtimes WHERE device_id = $1)
-      AND NOT (id = ANY($2::text[]))
-  `, [snapshot.device.id, agentIds]);
-  await client.query(`
-    DELETE FROM runtimes
-    WHERE device_id = $1
-      AND NOT (id = ANY($2::text[]))
-  `, [snapshot.device.id, runtimeIds]);
 }
 
 async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, syncHash: string): Promise<void> {

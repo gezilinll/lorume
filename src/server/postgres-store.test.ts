@@ -124,6 +124,33 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
+  it("keeps existing runtime metadata when a later snapshot covers a different adapter", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch(snapshot));
+        await store.upsertDeviceStateSnapshot(createSlockMetadataSnapshot(snapshot));
+
+        const fleet = await store.readRuntimeFleet();
+        expect(fleet.summary).toEqual({ agentCount: 2, deviceCount: 1, runtimeCount: 2, taskCount: 2 });
+        expect(fleet.runtimes.map((runtime) => runtime.kind).sort()).toEqual(["codex", "openclaw"]);
+        await expect(store.readEntityCounts()).resolves.toMatchObject({
+          agents: 2,
+          runtimes: 2,
+          tasks: 2,
+        });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("soft tombstones removed task ids and restores them when they reappear", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -326,4 +353,27 @@ function createFixtureTaskBatch(snapshot: DeviceStateSnapshot) {
   })[0];
   if (!batch) throw new Error("fixture task batch should not be empty");
   return batch;
+}
+
+function createSlockMetadataSnapshot(snapshot: DeviceStateSnapshot): DeviceStateSnapshot {
+  return createDeviceStateSnapshot({
+    collectedAt: "2026-05-23T14:30:00.000Z",
+    device: snapshot.device,
+    runtimes: [{
+      collectionStatus: "online",
+      deviceId: snapshot.device.id,
+      id: `${snapshot.device.id}:runtime:codex`,
+      kind: "codex",
+      lastSeenAt: "2026-05-23T14:30:00.000Z",
+      name: "Codex",
+    }],
+    agents: [{
+      collectionStatus: "online",
+      id: `${snapshot.device.id}:runtime:codex:agent:slock:agent-local-1`,
+      lastSeenAt: "2026-05-23T14:30:00.000Z",
+      name: "大卷Bot",
+      runtimeId: `${snapshot.device.id}:runtime:codex`,
+    }],
+    tasks: [],
+  });
 }

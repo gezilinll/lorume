@@ -48,7 +48,7 @@ Slock history API 的分页不能只看 `hasOlder`。真实 Slock CLI 证据中 
 实现规则：
 
 1. 对 channel history 和 thread history 都按 `before` 游标向前翻页。
-2. 继续翻页条件为 `hasMore=true`、`has_more=true`、`hasOlder=true`、`has_older=true` 或当前页数量达到请求 limit。
+2. 如果响应里出现 `hasMore` / `has_more` / `hasOlder` / `has_older` 任一明确分页标志，必须信任这些标志；只有完全没有分页标志时，才用当前页数量达到请求 limit 作为继续翻页的兜底条件。
 3. 下一页游标使用当前页最小 `seq`。
 4. Adapter 不允许按固定数量或固定字节数静默截断符合产品标准的 Task；体积控制交给 collector Task batch、ACK cache 和 hash 重传。
 5. 如果为防止无限循环设置内部安全页数，命中该安全上限时必须输出 `error` diagnostic，本轮 Slock Task 不应被当成完整采集结果。

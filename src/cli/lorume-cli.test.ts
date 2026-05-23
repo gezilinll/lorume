@@ -191,6 +191,40 @@ exit 91
     }
   });
 
+  it("trusts explicit Slock pagination flags when a history page reaches the request limit", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-exact-limit-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#exact-limit",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.runtimes).toEqual([
+        expect.objectContaining({ id: "fixture-device:runtime:codex", kind: "codex" }),
+      ]);
+      expect(output.tasks).toEqual([]);
+      expect(output.diagnostics?.items ?? []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_history_pagination_incomplete" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("does not create product Tasks from OpenClaw tasks list output", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-task-"));
     const binDir = path.join(root, "bin");
@@ -1538,6 +1572,20 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: A
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work") {
       sendJson(200, readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
+      return;
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#exact-limit" && !url.searchParams.has("before")) {
+      sendJson(200, JSON.stringify({
+        channelName: "exact-limit",
+        messages: Array.from({ length: 100 }, (_, index) => ({
+          id: `noise-${index}`,
+          seq: 100 - index,
+          content: `noise ${index}`,
+          createdAt: "2026-05-23T01:00:00.000Z",
+        })),
+        has_older: false,
+        has_more: false,
+      }));
       return;
     }
     if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work:msg-loca") {

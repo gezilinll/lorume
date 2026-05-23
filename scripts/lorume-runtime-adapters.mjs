@@ -668,13 +668,12 @@ function readSlockHistoryPages({ baseUrl, agentId, target, auth, diagnostics }) 
     const pageMessages = toRecordArray(page.messages || page.items || page.records);
     messages.push(...pageMessages);
 
-    const shouldContinue = Boolean(
-      page.hasMore ||
-      page.has_more ||
-      page.hasOlder ||
-      page.has_older ||
-      pageMessages.length >= SLOCK_HISTORY_PAGE_LIMIT
-    );
+    const hasMore = slockPaginationFlag(page.hasMore ?? page.has_more);
+    const hasOlder = slockPaginationFlag(page.hasOlder ?? page.has_older);
+    const hasExplicitPaginationFlags = hasMore !== undefined || hasOlder !== undefined;
+    const shouldContinue = hasExplicitPaginationFlags
+      ? Boolean(hasMore || hasOlder)
+      : pageMessages.length >= SLOCK_HISTORY_PAGE_LIMIT;
     if (!shouldContinue) return { messages, channelName, incomplete: false };
 
     const nextBefore = slockNextBeforeCursor(pageMessages);
@@ -746,6 +745,14 @@ function slockNextBeforeCursor(messages) {
     .filter((value) => Number.isFinite(value));
   if (!seqs.length) return "";
   return String(Math.min(...seqs));
+}
+
+function slockPaginationFlag(value) {
+  if (value === true || value === false) return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return undefined;
 }
 
 function isSlockTaskCandidate(message) {

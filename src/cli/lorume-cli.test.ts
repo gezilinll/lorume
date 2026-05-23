@@ -94,7 +94,7 @@ exit 91
     expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
-  it("collects current-device Slock tasks from profile, channel, and thread evidence", async () => {
+  it("collects current-device Slock tasks through authenticated agent-scoped Slock APIs", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-workspace-"));
     mkdirSync(path.join(root, ".slock", "agents", "agent-workspace-1"), { recursive: true });
@@ -109,7 +109,9 @@ exit 91
         env: {
           LORUME_COLLECTOR_HOME: root,
           LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
-          LORUME_SLOCK_BASE_URL: server.baseUrl,
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1,agent-unsupported-1",
           LORUME_SLOCK_CHANNEL_TARGETS: "#daily-work",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         },
@@ -155,6 +157,34 @@ exit 91
         expect.objectContaining({ code: "slock_remote_agent_task_ignored", count: 1, severity: "info" }),
         expect.objectContaining({ code: "slock_unassigned_task_ignored", count: 1, severity: "info" }),
         expect.objectContaining({ code: "slock_unsupported_runtime_ignored", count: 1, severity: "info" }),
+      ]));
+      expect(server.requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/profile",
+          agentIdHeader: "agent-local-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/history",
+          channel: "#daily-work",
+          agentIdHeader: "agent-local-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-local-1/history",
+          channel: "#daily-work:msg-loca",
+          agentIdHeader: "agent-local-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
+        expect.objectContaining({
+          pathname: "/internal/agent/agent-unsupported-1/profile",
+          agentIdHeader: "agent-unsupported-1",
+          authorizationHeader: "Bearer fixture-token",
+          slockClientHeader: "lorume-collector",
+        }),
       ]));
     } finally {
       await server.close();
@@ -1470,16 +1500,34 @@ function writeExecutable(filePath: string, content: string) {
   chmodSync(filePath, 0o755);
 }
 
-async function startSlockFixtureServer(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+async function startSlockFixtureServer(): Promise<{ baseUrl: string; requests: Array<Record<string, string>>; close: () => Promise<void> }> {
   const fixtureRoot = path.join(repoRoot, "fixtures", "runtime", "slock");
   const readFixture = (name: string) => readFileSync(path.join(fixtureRoot, name), "utf8");
+  const requests: Array<Record<string, string>> = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
+    const pathAgentId = url.pathname.match(/^\/internal\/agent\/([^/]+)\//)?.[1] ?? "";
+    const requestRecord = {
+      pathname: url.pathname,
+      channel: url.searchParams.get("channel") ?? url.searchParams.get("target") ?? "",
+      agentIdHeader: String(request.headers["x-agent-id"] || ""),
+      authorizationHeader: String(request.headers.authorization || ""),
+      slockClientHeader: String(request.headers["x-slock-client"] || ""),
+    };
+    requests.push(requestRecord);
     const sendJson = (statusCode: number, body: string) => {
       response.writeHead(statusCode, { "content-type": "application/json" });
       response.end(body);
     };
 
+    if (pathAgentId && (
+      requestRecord.agentIdHeader !== pathAgentId ||
+      requestRecord.authorizationHeader !== "Bearer fixture-token" ||
+      requestRecord.slockClientHeader !== "lorume-collector"
+    )) {
+      sendJson(401, JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
     if (url.pathname === "/internal/agent/agent-local-1/profile") {
       sendJson(200, readFixture("profile-active.json"));
       return;
@@ -1488,16 +1536,16 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; close: () =
       sendJson(200, readFixture("profile-unsupported-runtime.json"));
       return;
     }
-    if (url.pathname.startsWith("/internal/agent/")) {
-      sendJson(404, JSON.stringify({ error: "not_found" }));
-      return;
-    }
-    if (url.pathname === "/api/channel-history") {
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work") {
       sendJson(200, readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
       return;
     }
-    if (url.pathname === "/api/thread-history") {
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#daily-work:msg-loca") {
       sendJson(200, readFixture("thread-history.json"));
+      return;
+    }
+    if (url.pathname.startsWith("/internal/agent/")) {
+      sendJson(404, JSON.stringify({ error: "not_found" }));
       return;
     }
     sendJson(404, JSON.stringify({ error: "not_found" }));
@@ -1507,6 +1555,7 @@ async function startSlockFixtureServer(): Promise<{ baseUrl: string; close: () =
   const address = server.address() as AddressInfo;
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }

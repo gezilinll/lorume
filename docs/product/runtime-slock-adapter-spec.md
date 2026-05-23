@@ -10,7 +10,7 @@ Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不�
 
 因此 Slock adapter 的边界是：
 
-- 可以从 Slock profile、server、channel history 和 task thread 中读取只读证据。
+- 可以从 Slock agent-scoped profile、server、channel history 和 task thread 中读取只读证据。
 - 只能把当前设备真实承载的 active Slock Agent 转成 Lorume Agent。
 - Runtime 由 Slock profile 的 `runtime` 派生；不要仅因为数据来自 Slock 就生成 `Runtime.kind="slock"`，也不要把 profile runtime 写死成某个单一值。
 - Slock channel / thread 是 Task 的用户触点上下文，不是新的 Conversation、Channel、Execution 或 Run 一等实体。
@@ -22,24 +22,33 @@ Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不�
 
 | 用途 | Slock 来源 | 规则 |
 |---|---|---|
-| 本机 Agent 归属 | `/internal/agent/:agentId/profile` | 只有能返回 active profile，且 profile 的 `computerHostname` 匹配当前设备时，才算当前设备真实承载的 Agent。 |
+| 本机 Agent 归属 | `GET /internal/agent/:agentId/profile` | 只有能返回 active profile，且 profile 的 `computerHostname` 匹配当前设备时，才算当前设备真实承载的 Agent。 |
 | Runtime | profile 的 `runtime`、`model`、主机信息 | `runtime` 来自 Slock profile 原始值；该值必须是 Lorume 已支持的 Runtime kind，未知、缺失或尚未覆盖 harness 时跳过该 Agent 和其 Task，并输出 diagnostics。 |
 | Agent 名称 | profile 的 `displayName` / `name` | 作为 Lorume Agent `name`。server catalog 的同名信息只能补充 diagnostics，不能替代 profile 归属证明。 |
-| Task 候选 | channel history 中带 `taskNumber` / `taskStatus` / `taskAssigneeId` 的 message | 每条 task message 是一个候选 Task。 |
-| Task thread | 对应 task message 的 thread history | 用于提取 Agent 回复、执行上下文和最近活动时间。 |
-| Server catalog | `/internal/agent/:agentId/server` 的 agents 列表 | 当前 payload 只有 `name`、`description`、`status`，缺少稳定 id；不能用它把 Task 归属到本机 Agent。 |
+| Task 候选 | `GET /internal/agent/:agentId/history?channel=<target>` 中带 `taskNumber` / `taskStatus` / `taskAssigneeId` 的 message | 每条 task message 是一个候选 Task；只有 `taskAssigneeId` 等于当前 active profile id 时才入库。 |
+| Task thread | `GET /internal/agent/:agentId/history?channel=<channelTarget>:<taskMessageId 前 8 位>` | 用于提取 Agent 回复、执行上下文和最近活动时间。 |
+| Server catalog | `GET /internal/agent/:agentId/server` 的 agents 列表 | 当前 payload 只有 `name`、`description`、`status`，缺少稳定 id；不能用它把 Task 归属到本机 Agent。 |
 | 本机 workspace | `~/.slock/agents/*` | 只能作为辅助证据；没有 active profile 时不生成 Agent / Task。 |
 
-Adapter 必须用只读请求和只读文件读取。不得写 Slock 数据，不得调用会创建、修改、领取、关闭或重跑任务的接口。
+Adapter 必须用只读请求和只读文件读取。真实 Slock CLI API 是 agent-scoped API，请求必须带 `Authorization: Bearer <token>`、`X-Agent-Id: <agentId>` 和 `X-Slock-Client: lorume-collector`；如配置了 server id，再带 `X-Server-Id`。不得写 Slock 数据，不得调用会创建、修改、领取、关闭或重跑任务的接口。
+
+当前 adapter 配置输入为：
+
+| 配置 | 用途 |
+|---|---|
+| `LORUME_SLOCK_BASE_URL` / `LORUME_SLOCK_SERVER_URL` 或 `slockBaseUrl` / `slockServerUrl` | Slock server URL。 |
+| `LORUME_SLOCK_AUTH_TOKEN` / `LORUME_SLOCK_API_KEY` 或对应 config 字段 | 只读请求鉴权 token。缺失时不执行 Slock 采集。 |
+| `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 优先使用的本机 Slock Agent id 列表。未配置时才从 `~/.slock/agents/*` 枚举候选。 |
+| `LORUME_SLOCK_CHANNEL_TARGETS` 或 `slockChannelTargets` | 要读取的 Slock channel / DM / thread target 列表。 |
 
 ## 分页规则
 
-Slock history API 的分页不能只看 `hasOlder`。真实设备 profiling 显示，部分 100 条消息页面会返回 `hasOlder=false` 但 `hasMore=true`，继续用 `before=<当前页最小 seq>` 仍能读到更早数据。
+Slock history API 的分页不能只看 `hasOlder`。真实 Slock CLI 证据中 history payload 可能使用 `hasMore` / `hasOlder` 或 `has_more` / `has_older`；部分 100 条消息页面会返回 older=false 但 more=true，继续用 `before=<当前页最小 seq>` 仍能读到更早数据。
 
 实现规则：
 
 1. 对 channel history 和 thread history 都按 `before` 游标向前翻页。
-2. 继续翻页条件为 `hasMore=true`、`hasOlder=true` 或当前页数量达到请求 limit。
+2. 继续翻页条件为 `hasMore=true`、`has_more=true`、`hasOlder=true`、`has_older=true` 或当前页数量达到请求 limit。
 3. 下一页游标使用当前页最小 `seq`。
 4. Adapter 不允许按固定数量或固定字节数静默截断符合产品标准的 Task；体积控制交给 collector Task batch、ACK cache 和 hash 重传。
 5. 如果为防止无限循环设置内部安全页数，命中该安全上限时必须输出 `error` diagnostic，本轮 Slock Task 不应被当成完整采集结果。
@@ -157,7 +166,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 Slock adapter 必须保持以下最小 harness：
 
-- CLI adapter unit/script test：使用脱敏 fixture 覆盖 active profile、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生和 status 映射。
+- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生和 status 映射。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
 - Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。

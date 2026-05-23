@@ -181,7 +181,7 @@ export interface Task {
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
 Runtime 名称不能写入 `Task.channel`；如果任务没有当前已实现的用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
 Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。页面需要标题时，从 `userMessage` 生成短展示标题；需要任务新鲜度时，只看源系统业务时间 `updatedAt` / `createdAt`。
-Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现支持 `openclaw`，Slock 集成落地时同步支持 `slock`；Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
+Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现支持 `openclaw` 和 `slock`；Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
 
 ## 状态规则
 

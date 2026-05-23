@@ -41,6 +41,6 @@
       "createdAt": "2026-05-23T01:03:00.000Z"
     }
   ],
-  "hasOlder": false,
-  "hasMore": true
+  "has_older": false,
+  "has_more": true
 }

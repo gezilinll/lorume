@@ -34,7 +34,7 @@ Runs / Work Board 必须让用户看清：
 - Task 状态只用 `Task.status` 表达，不拆成 status / executionStatus 两套。
 - Adapter 负责把平台原始状态映射为 `Task.status`，但必须在 Task raw/evidence 中保留平台原始状态。
 - Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。前端/BFF 展示标题从 `userMessage` 派生。
-- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前支持 `openclaw`，Slock 集成落地时同步支持 `slock`；未实现的 adapter 或 channel kind 不提前进入枚举。
+- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前支持 `openclaw` 和 `slock`；未实现的 adapter 或 channel kind 不提前进入枚举。
 - Runtime 和 Agent 只展示 `collectionStatus`，不保存工作忙闲。
 - Runs Channel 筛选只能使用 Task 中实际出现的用户触达渠道，不能把 Runtime kind 或 adapter kind 当作渠道。
 - 不能把裸 execution、adapter capability gap、监听缺口或诊断项伪造成任务卡。

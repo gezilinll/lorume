@@ -368,6 +368,7 @@ const SLOCK_HTTP_MAX_ATTEMPTS = 3;
 const SLOCK_HTTP_TIMEOUT_SECONDS = 10;
 const SLOCK_SUPPORTED_RUNTIME_KINDS = new Set(["openclaw", "codex"]);
 const SLOCK_REPLY_CACHE_SCHEMA_VERSION = "slock-reply-v1";
+const DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN = 10;
 
 function collectSlockDeviceState(device, collectedAt, config = {}) {
   const baseUrl = slockConfiguredBaseUrl(config);
@@ -379,6 +380,9 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   const replyCachePath = resolveSlockReplyCachePath(config);
   const replyCacheScope = createSlockReplyCacheScope(baseUrl, device.id);
   const replyCache = readSlockReplyCache(replyCachePath, replyCacheScope);
+  const replyThreadReadBudget = {
+    remaining: slockMaxReplyThreadReadsPerRun(config),
+  };
   const runtimesById = new Map();
   const agentsById = new Map();
   const tasksById = new Map();
@@ -433,6 +437,7 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
           diagnostics,
           tasksById,
           replyCache,
+          replyThreadReadBudget,
         });
       }
     }
@@ -455,6 +460,7 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
         diagnostics,
         tasksById,
         replyCache,
+        replyThreadReadBudget,
       });
     }
   }
@@ -487,6 +493,7 @@ function collectSlockTasksFromChannel({
   diagnostics,
   tasksById,
   replyCache,
+  replyThreadReadBudget,
 }) {
   const history = readSlockHistoryPages({
     baseUrl,
@@ -527,38 +534,53 @@ function collectSlockTasksFromChannel({
     const threadTarget = slockThreadTarget(channelTarget, messageId);
     const fingerprint = slockReplyFingerprint(message);
     const cachedReply = replyCache.tasks[taskId];
-    let agentReply = cachedReply?.agentReply
+    const cachedAgentReply = cachedReply?.agentReply
       ? { text: cleanSlockTaskText(cachedReply.agentReply), updatedAt: toIsoTimestamp(cachedReply.replyUpdatedAt) }
       : { text: "", updatedAt: undefined };
+    let agentReply = cachedReply?.fingerprint === fingerprint
+      ? cachedAgentReply
+      : { text: "", updatedAt: undefined };
     let replyFetchFailed = false;
+    let replyDeferred = false;
+    let shouldWriteReplyCache = false;
     if (shouldFetchSlockAgentReply({ cachedEntry: cachedReply, fingerprint, message })) {
-      const thread = readSlockHistoryPages({
-        baseUrl,
-        agentId: assigneeProfile.profileId,
-        target: threadTarget,
-        auth,
-        diagnostics,
-        failureDiagnosticCode: "",
-      });
-      if (thread.incomplete) {
-        replyFetchFailed = true;
-        diagnostics.add(slockDiagnostic("slock_agent_reply_fetch_failed", "warning", "task", "task_ingested_with_gap"), messageId);
+      if (replyThreadReadBudget.remaining <= 0) {
+        replyDeferred = true;
+        diagnostics.add(slockDiagnostic("slock_agent_reply_deferred", "info", "task", "task_ingested_with_gap"), messageId);
       } else {
-        agentReply = slockLatestAgentReply(thread.messages, assigneeProfile.profile, message);
+        replyThreadReadBudget.remaining -= 1;
+        const thread = readSlockHistoryPages({
+          baseUrl,
+          agentId: assigneeProfile.profileId,
+          target: threadTarget,
+          auth,
+          diagnostics,
+          failureDiagnosticCode: "",
+        });
+        if (thread.incomplete) {
+          replyFetchFailed = true;
+          if (cachedAgentReply.text) agentReply = cachedAgentReply;
+          diagnostics.add(slockDiagnostic("slock_agent_reply_fetch_failed", "warning", "task", "task_ingested_with_gap"), messageId);
+        } else {
+          agentReply = slockLatestAgentReply(thread.messages, assigneeProfile.profile, message);
+          shouldWriteReplyCache = true;
+        }
       }
     }
-    replyCache.tasks[taskId] = {
-      fingerprint,
-      agentReply: agentReply.text || "",
-      ...(agentReply.updatedAt ? { replyUpdatedAt: agentReply.updatedAt } : {}),
-      lastCheckedAt: new Date().toISOString(),
-    };
+    if (shouldWriteReplyCache) {
+      replyCache.tasks[taskId] = {
+        fingerprint,
+        agentReply: agentReply.text || "",
+        ...(agentReply.updatedAt ? { replyUpdatedAt: agentReply.updatedAt } : {}),
+        lastCheckedAt: new Date().toISOString(),
+      };
+    }
     const rawStatus = slockRawTaskStatus(message);
     const status = normalizeSlockTaskStatus(rawStatus);
     if (status === "unknown") {
       diagnostics.add(slockDiagnostic("slock_unknown_task_status", "warning", "task", "task_ingested_with_gap"), messageId);
     }
-    if (!replyFetchFailed && status === "done" && !agentReply.text) {
+    if (!replyFetchFailed && !replyDeferred && status === "done" && !agentReply.text) {
       diagnostics.add(slockDiagnostic("slock_missing_agent_reply", "warning", "task", "task_ingested_with_gap"), messageId);
     }
 
@@ -639,6 +661,16 @@ function slockConfiguredChannelTargets(config = {}) {
   const raw = process.env.LORUME_SLOCK_CHANNEL_TARGETS || config.slockChannelTargets || config.slock?.channelTargets || "";
   const values = Array.isArray(raw) ? raw : String(raw).split(",");
   return values.map((value) => String(value).trim()).filter(Boolean);
+}
+
+function slockMaxReplyThreadReadsPerRun(config = {}) {
+  const raw = process.env.LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN ??
+    config.slockMaxReplyThreadReadsPerRun ??
+    config.slock?.maxReplyThreadReadsPerRun;
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN;
+  return Math.floor(value);
 }
 
 function resolveSlockReplyCachePath(config = {}) {

@@ -361,6 +361,149 @@ exit 91
     }
   });
 
+  it("limits Slock agent reply thread reads per collector run without dropping Tasks", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "1",
+        },
+      });
+
+      const threadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel.startsWith("#reply-budget:budget-")
+      );
+      const repliedTasks = output.tasks.filter((task: { agentReply?: string }) => task.agentReply);
+
+      expect(output.tasks).toHaveLength(3);
+      expect(repliedTasks).toEqual([
+        expect.objectContaining({ userMessage: "预算任务 A", agentReply: "预算任务 A 的执行回复" }),
+      ]);
+      expect(threadReads).toHaveLength(1);
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_deferred", severity: "info", count: 2 }),
+      ]));
+      expect(output.diagnostics.items).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_missing_agent_reply" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("continues deferred Slock agent reply enrichment on later collector runs", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-cache-"));
+    const cachePath = path.join(root, "slock-reply-cache.json");
+    try {
+      const env = {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+        LORUME_SLOCK_SERVER_URL: server.baseUrl,
+        LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+        LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+        LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
+        LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        LORUME_SLOCK_REPLY_CACHE_PATH: cachePath,
+        LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "1",
+      };
+
+      const first = await runCliAsync(["collect", "device-state", "--json", "--device-id", "fixture-device"], { env });
+      expect(first.tasks.filter((task: { agentReply?: string }) => task.agentReply)).toHaveLength(1);
+
+      server.requests.length = 0;
+      const second = await runCliAsync(["collect", "device-state", "--json", "--device-id", "fixture-device"], { env });
+      const secondThreadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel.startsWith("#reply-budget:budget-")
+      );
+      expect(secondThreadReads).toHaveLength(1);
+      expect(second.tasks.filter((task: { agentReply?: string }) => task.agentReply)).toHaveLength(2);
+      expect(second.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_deferred", severity: "info", count: 1 }),
+      ]));
+
+      server.requests.length = 0;
+      const third = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          ...env,
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "10",
+        },
+      });
+      const thirdThreadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel.startsWith("#reply-budget:budget-")
+      );
+      expect(thirdThreadReads).toHaveLength(1);
+      expect(third.tasks.filter((task: { agentReply?: string }) => task.agentReply)).toHaveLength(3);
+      expect(third.diagnostics?.items ?? []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_deferred" }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("allows Slock reply thread reads to be disabled for a collector run", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-zero-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "0",
+        },
+      });
+
+      const threadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel.startsWith("#reply-budget:budget-")
+      );
+
+      expect(output.tasks).toHaveLength(3);
+      for (const task of output.tasks) expect(task).not.toHaveProperty("agentReply");
+      expect(threadReads).toHaveLength(0);
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_deferred", severity: "info", count: 3 }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("retries transient Slock read-only API failures", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-retry-"));
@@ -1885,6 +2028,78 @@ async function startSlockFixtureServer(): Promise<{
       if (!url.searchParams.has("before") && page.messages?.[0]) page.messages[0].replyCount = dailyWorkReplyCount;
       sendJson(200, JSON.stringify(page));
       return;
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/history" && url.searchParams.get("channel") === "#reply-budget") {
+      sendJson(200, JSON.stringify({
+        channelName: "Reply Budget",
+        messages: [
+          {
+            id: "budget-a-task",
+            seq: 3,
+            content: "预算任务 A",
+            taskNumber: "3001",
+            taskStatus: "done",
+            taskAssigneeId: "agent-local-1",
+            replyCount: 1,
+            senderId: "user-1",
+            senderName: "张良",
+            createdAt: "2026-05-23T01:01:00.000Z",
+            updatedAt: "2026-05-23T01:03:00.000Z",
+          },
+          {
+            id: "budget-b-task",
+            seq: 2,
+            content: "预算任务 B",
+            taskNumber: "3002",
+            taskStatus: "done",
+            taskAssigneeId: "agent-local-1",
+            replyCount: 1,
+            senderId: "user-1",
+            senderName: "张良",
+            createdAt: "2026-05-23T01:02:00.000Z",
+            updatedAt: "2026-05-23T01:04:00.000Z",
+          },
+          {
+            id: "budget-c-task",
+            seq: 1,
+            content: "预算任务 C",
+            taskNumber: "3003",
+            taskStatus: "done",
+            taskAssigneeId: "agent-local-1",
+            replyCount: 1,
+            senderId: "user-1",
+            senderName: "张良",
+            createdAt: "2026-05-23T01:03:00.000Z",
+            updatedAt: "2026-05-23T01:05:00.000Z",
+          },
+        ],
+        has_older: false,
+        has_more: false,
+      }));
+      return;
+    }
+    if (url.pathname === "/internal/agent/agent-local-1/history") {
+      const budgetThreadKey = url.searchParams.get("channel")?.match(/^#reply-budget:(budget-[abc])$/)?.[1];
+      if (budgetThreadKey) {
+        const label = budgetThreadKey === "budget-a"
+          ? "预算任务 A"
+          : budgetThreadKey === "budget-b"
+            ? "预算任务 B"
+            : "预算任务 C";
+        sendJson(200, JSON.stringify({
+          messages: [{
+            id: `${budgetThreadKey}-reply`,
+            senderId: "agent-local-1",
+            senderName: "大卷Bot",
+            content: `${label} 的执行回复`,
+            createdAt: "2026-05-23T01:06:00.000Z",
+            updatedAt: "2026-05-23T01:07:00.000Z",
+          }],
+          has_older: false,
+          has_more: false,
+        }));
+        return;
+      }
     }
     if ((url.pathname === "/internal/agent/agent-local-1/history" || url.pathname === "/internal/agent/agent-local-2/history") && url.searchParams.get("channel") === "#shared-local") {
       sendJson(200, JSON.stringify({

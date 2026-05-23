@@ -43,6 +43,7 @@ Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter �
 | `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 优先使用的本机 Slock Agent id 列表。未配置时才从 `~/.slock/agents/*` 枚举候选。 |
 | `LORUME_SLOCK_CHANNEL_TARGETS` 或 `slockChannelTargets` | 可选的显式 Slock channel / DM / thread target 列表。配置后只读取这些 target；未配置时 adapter 必须从 Slock server catalog 自动发现当前 active profile 已加入的 channel。 |
 | `LORUME_SLOCK_REPLY_CACHE_PATH` 或 `slockReplyCachePath` | 可选的本地 Agent 回复 cache 路径；只用于减少重复读取 task thread。默认在 collector home 下。 |
+| `LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN` 或 `slockMaxReplyThreadReadsPerRun` | 单次 collector run 最多深读多少条 task thread 来补 `agentReply`。默认 `10`，可设为 `0` 表示本轮只发现 Task、不补 reply。 |
 
 ## Channel 发现规则
 
@@ -53,7 +54,7 @@ Slock adapter 不能依赖人工维护 channel allowlist 才能发现真实工�
 3. 自动发现的 target 优先使用 `target` / `ref`，缺失时用 `#${name}`，再缺失时用 `#${id}`。
 4. `joined=false` 的公开可见 channel 只说明该 agent 可以看到目录，不代表当前 agent 正在承载该 channel 的工作，不自动扫描。
 5. 自动发现模式按唯一 channel 去重扫描；同一个 channel 只读取一次 history，再用 message 的 `taskAssigneeId` 归属到本机 active profile，避免被多个本机 Agent 重复读取。
-6. 自动发现模式仍以 channel history 生成核心 Task；`agentReply` 通过本地 reply cache 做同轮增量富化。新 Task 或 reply 相关指纹变化时读取 task thread，未变化时复用 cache。
+6. 自动发现模式仍以 channel history 生成核心 Task；`agentReply` 通过本地 reply cache 和每轮 thread 读取预算做增量富化。新 Task 或 reply 相关指纹变化时，在预算内读取 task thread；未变化时复用 cache；超出预算时核心 Task 照常入库，本轮不补 `agentReply`。
 7. server catalog 只能用于 channel target 发现和展示辅助，不能替代 profile 归属证明，也不能用 Agent 名称把 Task 归属到本机。
 
 ## 分页规则
@@ -158,6 +159,9 @@ Adapter 负责生成归一化 `Task.status`，但不得覆盖原始 `taskStatus`
 - `agentReply` 是 cache-aware enrichment。Adapter 先从 channel history 发现核心 Task，再使用本地 reply cache 判断是否在同一 collector run 读取 task thread。新 Task 或 reply 相关字段变化时读取 thread history；未变化时复用缓存的 `agentReply`。
 - Reply fingerprint 只覆盖稳定且能表示 thread/reply 变化的源字段：message id、`taskAssigneeId`、raw task status、`replyCount`、thread id、task message `updatedAt`、`taskClaimedAt`、`taskCompletedAt`。collector 采集时间不进入 fingerprint。
 - `replyCount === 0` 且没有 cache 时不读取 thread；`replyCount` 缺失时首轮读取一次 thread，因为源数据无法证明没有回复。
+- 每个 collector run 默认最多深读 `10` 条 Slock task thread。该限制只影响 `agentReply` 富化，不允许丢弃符合产品标准的 Task。
+- 预算耗尽时输出 `slock_agent_reply_deferred` info diagnostic；这些 Task 本轮不写入 reply cache，也不写 `slock_missing_agent_reply` warning。后续 collector run 会继续用相同规则补未缓存的 Task。
+- 只有实际成功读取过 task thread 后，才可以写入或刷新 reply cache。不能为预算延期的 Task 写入空 reply cache，避免后续误判为无需富化。
 - `done` Task 缺少 assigned Agent 回复时，Task 可以入库，但写 `slock_missing_agent_reply` warning。
 - `in_progress`、`review`、`todo` 缺少 `agentReply` 不写 warning。
 - 如果 thread history 为空，但 task message 本身字段完整，Task 仍可入库。
@@ -177,6 +181,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 | `slock_inactive_workspace_task_ignored` | `warning` | Task 指向本机 workspace 中存在但没有 active profile 的 Agent，不能证明当前设备正在承载。 |
 | `slock_channel_discovery_failed` | `error` | 未配置显式 channel targets 时，server catalog 读取失败，无法发现 joined channel。 |
 | `slock_missing_user_message` | `warning` | 本机 active profile task 缺少可读 `userMessage`，跳过。 |
+| `slock_agent_reply_deferred` | `info` | 单次 collector run 的 thread 读取预算耗尽；核心 Task 已入库，`agentReply` 等后续 run 补齐。 |
 | `slock_agent_reply_fetch_failed` | `warning` | Task thread reply enrichment 失败；adapter 保留核心 Task。 |
 | `slock_missing_agent_reply` | `warning` | `done` Task 入库但缺少 assigned Agent 回复。 |
 | `slock_unknown_task_status` | `warning` | 出现未映射 raw status。 |
@@ -190,7 +195,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 Slock adapter 必须保持以下最小 harness：
 
-- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新和 thread 失败不丢 Task。
+- CLI adapter unit/script test：使用脱敏 fixture 覆盖真实 agent-scoped Slock API 路径、鉴权头、active profile、joined channel 自动发现、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生、status 映射、临时只读 API 失败重试、reply cache 复用、reply fingerprint 变化刷新、thread 失败不丢 Task、每轮 reply thread 读取预算和预算延期后续 run 继续补齐。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
 - Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。

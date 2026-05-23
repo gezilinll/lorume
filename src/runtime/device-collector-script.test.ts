@@ -80,8 +80,6 @@ console.log(JSON.stringify({
       "test-device",
       "--ws-url",
       "ws://lorume.local/api/device-control/ws",
-      "--slock-server-url",
-      "https://api.slock.ai",
       "--once",
       "--no-service",
       "--fixture",
@@ -99,8 +97,8 @@ console.log(JSON.stringify({
     expect(config).toMatchObject({
       deviceId: "test-device",
       wsUrl: "ws://lorume.local/api/device-control/ws",
-      slockServerUrl: "https://api.slock.ai",
     });
+    expect(config).not.toHaveProperty("slockServerUrl");
     expect(snapshot.device.id).toBe("test-device");
     expect(snapshot.device).not.toHaveProperty("name");
     expect(snapshot.device).not.toHaveProperty("status");

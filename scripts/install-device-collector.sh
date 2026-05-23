@@ -12,7 +12,6 @@ Options:
   --ws-url <url>          Optional Lorume device control WebSocket URL
   --device-id <id>        Device id to register
   --device-token <token>  Lorume device token for ingestion and control
-  --slock-server-url <url> Optional Slock server URL for task-board discovery
   --interval-ms <ms>      Collector interval for service mode (default: 60000)
   --once                  Run a one-time collection after install
   --no-service            Do not install launchd/systemd service
@@ -29,7 +28,6 @@ SERVER_URL=""
 WS_URL=""
 DEVICE_ID=""
 DEVICE_TOKEN=""
-SLOCK_SERVER_URL=""
 INTERVAL_MS="60000"
 ONCE="false"
 NO_SERVICE="false"
@@ -60,10 +58,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --device-token)
       DEVICE_TOKEN="$2"
-      shift 2
-      ;;
-    --slock-server-url)
-      SLOCK_SERVER_URL="$2"
       shift 2
       ;;
     --interval-ms)
@@ -221,17 +215,16 @@ install -m 0755 "$SOURCE_COLLECTOR" "$INSTALL_DIR/lorume-device-collector.mjs"
 install -m 0755 "$SOURCE_CLI" "$INSTALL_DIR/lorume.mjs"
 install -m 0644 "$SOURCE_RUNTIME_ADAPTERS" "$INSTALL_DIR/lorume-runtime-adapters.mjs"
 
-"$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_TOKEN" "$SLOCK_SERVER_URL" "$INTERVAL_MS" <<'NODE'
+"$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_TOKEN" "$INTERVAL_MS" <<'NODE'
 const fs = require("node:fs");
 
-const [configPath, installDir, serverUrl, wsUrl, deviceId, deviceToken, slockServerUrl, intervalMs] = process.argv.slice(2);
+const [configPath, installDir, serverUrl, wsUrl, deviceId, deviceToken, intervalMs] = process.argv.slice(2);
 const config = {
   installDir,
   serverUrl,
   wsUrl,
   deviceId,
   deviceToken,
-  slockServerUrl,
   intervalMs: Number(intervalMs),
   createdAt: new Date().toISOString(),
 };

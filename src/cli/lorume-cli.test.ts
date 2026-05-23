@@ -58,7 +58,7 @@ if [ "$1" = "status" ]; then
 fi
 printf '{}\\n'
 `);
-    for (const command of ["multica", "slock", "codex", "claude"]) {
+    for (const command of ["multica", "slock", "codex"]) {
       writeExecutable(path.join(binDir, command), `#!/bin/sh
 printf '${command}\\n' >> ${JSON.stringify(disabledCallsPath)}
 exit 91

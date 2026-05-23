@@ -137,6 +137,78 @@ test.describe("Runtime backend API", () => {
     }
   });
 
+  test("ingests large Task snapshots from a real collector process in acknowledged batches", async ({ request }) => {
+    test.setTimeout(60_000);
+    await expect((await request.get("/healthz")).ok()).toBe(true);
+    const deviceId = "collector-large-batch-e2e-device";
+    const taskCount = 2144;
+    const { deviceToken } = await createLoggedInOrganizationAndDeviceToken(request, {
+      deviceId,
+      name: "Collector Large Batch E2E Token",
+    });
+
+    const collectorHome = mkdtempSync(path.join(tmpdir(), "lorume-backend-e2e-large-"));
+    const largeFixturePath = path.join(collectorHome, "large-task-snapshot.json");
+    writeFileSync(largeFixturePath, JSON.stringify(createLargeTaskSnapshot(taskCount), null, 2));
+    const collector = spawn(process.execPath, [
+      collectorScriptPath,
+      "--server-url",
+      backendBaseUrl,
+      "--device-id",
+      deviceId,
+      "--device-token",
+      deviceToken,
+      "--fixture",
+      largeFixturePath,
+      "--once",
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        LORUME_COLLECTOR_HOME: collectorHome,
+        LORUME_COLLECTOR_LOG_PATH: path.join(collectorHome, "collector.jsonl"),
+      },
+    });
+
+    try {
+      await waitForCollectorExit(collector, "large collector ingestion");
+
+      const fleetResponse = await request.get("/api/runtime-fleet");
+      expect(fleetResponse.status()).toBe(200);
+      const fleetBody = await fleetResponse.json() as { summary?: { taskCount?: number } };
+      expect(fleetBody.summary?.taskCount).toBe(taskCount);
+
+      const tasksResponse = await request.get("/api/runtime-tasks?limit=1");
+      expect(tasksResponse.status()).toBe(200);
+      const tasksBody = await tasksResponse.json() as { items?: Array<{ id?: string }>; total?: number };
+      expect(tasksBody.total).toBe(taskCount);
+      expect(tasksBody.items).toHaveLength(1);
+      expect(tasksBody.items?.[0]?.id).toBe(`${deviceId}:runtime:openclaw:agent:main:task:bulk-2144`);
+
+      const ingestionsResponse = await request.get(`/api/devices/${encodeURIComponent(deviceId)}/ingestions`);
+      expect(ingestionsResponse.status()).toBe(200);
+      const ingestionsBody = await ingestionsResponse.json() as {
+        ingestions?: Array<{ counts?: { tasks?: number }; snapshotType?: string; status?: string }>;
+      };
+      const taskBatchIngestions = ingestionsBody.ingestions?.filter((ingestion) =>
+        ingestion.snapshotType === "task_batch"
+      ) ?? [];
+      expect(taskBatchIngestions.length).toBeGreaterThan(1);
+      expect(taskBatchIngestions.every((ingestion) => ingestion.status === "succeeded")).toBe(true);
+      expect(taskBatchIngestions.reduce((sum, ingestion) => sum + Number(ingestion.counts?.tasks ?? 0), 0)).toBe(taskCount);
+
+      const cache = JSON.parse(readFileSync(path.join(collectorHome, ".lorume", "task-sync-cache.json"), "utf8")) as {
+        tasks?: Record<string, unknown>;
+      };
+      expect(Object.keys(cache.tasks ?? {})).toHaveLength(taskCount);
+
+      await waitForCollectorHealth(request, collector, deviceId);
+    } finally {
+      await stopCollector(collector);
+      rmSync(collectorHome, { force: true, recursive: true });
+    }
+  });
+
   test("accepts stale Task removals uploaded by a real collector process", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     const deviceId = "collector-removal-e2e-device";
@@ -378,6 +450,39 @@ async function postTaskBatches(
   }
 }
 
+function createLargeTaskSnapshot(taskCount: number): DeviceStateSnapshot {
+  const baseFixture = JSON.parse(readFileSync(fixtureSnapshotPath, "utf8")) as DeviceStateSnapshot;
+  const baseTask = baseFixture.tasks[0];
+  return {
+    ...baseFixture,
+    collectedAt: "2026-05-22T08:00:00.000Z",
+    tasks: Array.from({ length: taskCount }, (_, index) => {
+      const taskNumber = index + 1;
+      const suffix = String(taskNumber).padStart(4, "0");
+      const updatedAt = new Date(Date.UTC(2026, 4, 22, 8, 0, index)).toISOString();
+      return {
+        ...baseTask,
+        id: `fixture-mac:runtime:openclaw:agent:main:task:bulk-${suffix}`,
+        source: { kind: "openclaw", externalId: `bulk-${suffix}` },
+        userMessage: `批量回归任务 ${suffix}: 验证 collector 在真实后端链路中可以稳定分批上报大量 OpenClaw Task。`,
+        agentReply: `批量回归任务 ${suffix} 已完成。`,
+        status: taskNumber % 17 === 0 ? "in_progress" : "done",
+        conversation: {
+          title: "批量回归测试群",
+          externalId: "large-batch-conversation",
+          lastActivityAt: updatedAt,
+        },
+        channel: {
+          kind: "dingtalk",
+          name: "批量回归测试群",
+          externalId: "large-batch-channel",
+        },
+        updatedAt,
+      };
+    }),
+  };
+}
+
 async function expectDeviceDiagnostics(
   request: APIRequestContext,
   deviceId: string,
@@ -492,6 +597,35 @@ async function pollCollector(
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`${label} timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+}
+
+async function waitForCollectorExit(
+  collector: ChildProcessWithoutNullStreams,
+  label: string,
+  timeoutMs = 45_000,
+): Promise<void> {
+  let stdout = "";
+  let stderr = "";
+  collector.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  collector.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      collector.kill("SIGTERM");
+      reject(new Error(`${label} timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+    }, timeoutMs);
+    collector.once("close", (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${label} failed with exit ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+    });
+  });
 }
 
 async function stopCollector(collector: ChildProcessWithoutNullStreams): Promise<void> {

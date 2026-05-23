@@ -41,7 +41,6 @@ Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter �
 | `LORUME_SLOCK_BASE_URL` / `LORUME_SLOCK_SERVER_URL` 或 `slockBaseUrl` / `slockServerUrl` | Slock server URL。 |
 | `LORUME_SLOCK_AUTH_TOKEN` / `LORUME_SLOCK_API_KEY` 或对应 config 字段 | 只读请求鉴权 token。缺失时不执行 Slock 采集。 |
 | `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 优先使用的本机 Slock Agent id 列表。未配置时才从 `~/.slock/agents/*` 枚举候选。 |
-| `LORUME_SLOCK_CHANNEL_TARGETS` 或 `slockChannelTargets` | 可选的显式 Slock channel / DM / thread target 列表。配置后只读取这些 target；未配置时 adapter 必须从 Slock server catalog 自动发现当前 active profile 已加入的 channel。 |
 | `LORUME_SLOCK_REPLY_CACHE_PATH` 或 `slockReplyCachePath` | 可选的本地 Agent 回复 cache 路径；只用于减少重复读取 task thread。默认在 collector home 下。 |
 | `LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN` 或 `slockMaxReplyThreadReadsPerRun` | 单次 collector run 最多深读多少条 task thread 来补 `agentReply`。默认 `10`，可设为 `0` 表示本轮只发现 Task、不补 reply。 |
 
@@ -49,13 +48,13 @@ Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter �
 
 Slock adapter 不能依赖人工维护 channel allowlist 才能发现真实工作任务。规则：
 
-1. 如果显式配置了 `LORUME_SLOCK_CHANNEL_TARGETS` / `slockChannelTargets`，按配置读取，用于小范围验收或定向排障。
-2. 如果没有显式配置，必须对每个本机 active profile 调用 `GET /internal/agent/:agentId/server`，只取 `joined=true` 的 channel。
-3. 自动发现的 target 优先使用 `target` / `ref`，缺失时用 `#${name}`，再缺失时用 `#${id}`。
-4. `joined=false` 的公开可见 channel 只说明该 agent 可以看到目录，不代表当前 agent 正在承载该 channel 的工作，不自动扫描。
-5. 自动发现模式按唯一 channel 去重扫描；同一个 channel 只读取一次 history，再用 message 的 `taskAssigneeId` 归属到本机 active profile，避免被多个本机 Agent 重复读取。
-6. 自动发现模式仍以 channel history 生成核心 Task；`agentReply` 通过本地 reply cache 和每轮 thread 读取预算做增量富化。新 Task 或 reply 相关指纹变化时，在预算内读取 task thread；未变化时复用 cache；超出预算时核心 Task 照常入库，本轮不补 `agentReply`。
-7. server catalog 只能用于 channel target 发现和展示辅助，不能替代 profile 归属证明，也不能用 Agent 名称把 Task 归属到本机。
+1. 必须对每个本机 active profile 调用 `GET /internal/agent/:agentId/server`，只取 `joined=true` 的 channel。
+2. 自动发现的 target 优先使用 `target` / `ref`，缺失时用 `#${name}`，再缺失时用 `#${id}`。
+3. `joined=false` 的公开可见 channel 只说明该 agent 可以看到目录，不代表当前 agent 正在承载该 channel 的工作，不自动扫描。
+4. 按唯一 channel 去重扫描；同一个 channel 只读取一次 history，再用 message 的 `taskAssigneeId` 归属到本机 active profile，避免被多个本机 Agent 重复读取。
+5. Channel history 生成核心 Task；`agentReply` 通过本地 reply cache 和每轮 thread 读取预算做增量富化。新 Task 或 reply 相关指纹变化时，在预算内读取 task thread；未变化时复用 cache；超出预算时核心 Task 照常入库，本轮不补 `agentReply`。
+6. server catalog 只能用于 channel target 发现和展示辅助，不能替代 profile 归属证明，也不能用 Agent 名称把 Task 归属到本机。
+7. 不提供显式 channel target override。小范围验收、性能 profiling 或特殊复现应通过测试 fixture 或临时只读 profiling 脚本控制输入，不进入 collector 产品配置和长期 spec。
 
 ## 分页规则
 

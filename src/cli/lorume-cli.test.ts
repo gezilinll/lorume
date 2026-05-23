@@ -112,7 +112,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1,agent-unsupported-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#daily-work",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         },
       });
@@ -185,6 +184,46 @@ exit 91
           authorizationHeader: "Bearer fixture-token",
           slockClientHeader: "lorume-collector",
         }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("ignores deprecated Slock channel target configuration and uses discovered joined channels", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-deprecated-target-"));
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          channel: { kind: "slock", externalId: "#daily-work" },
+        }),
+      ]);
+      expect(server.requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/server" }),
+        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/history", channel: "#daily-work" }),
+      ]));
+      expect(server.requests).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ pathname: "/internal/agent/agent-local-1/history", channel: "#reply-budget" }),
       ]));
     } finally {
       await server.close();
@@ -341,7 +380,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#daily-work",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         },
       });
@@ -365,6 +403,7 @@ exit 91
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-"));
     try {
+      server.setJoinedChannelTargets(["#reply-budget"]);
       const output = await runCliAsync([
         "collect",
         "device-state",
@@ -378,7 +417,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
           LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "1",
         },
@@ -411,13 +449,13 @@ exit 91
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-cache-"));
     const cachePath = path.join(root, "slock-reply-cache.json");
     try {
+      server.setJoinedChannelTargets(["#reply-budget"]);
       const env = {
         LORUME_COLLECTOR_HOME: root,
         LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
         LORUME_SLOCK_SERVER_URL: server.baseUrl,
         LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
         LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-        LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
         LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         LORUME_SLOCK_REPLY_CACHE_PATH: cachePath,
         LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "1",
@@ -469,6 +507,7 @@ exit 91
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-zero-"));
     try {
+      server.setJoinedChannelTargets(["#reply-budget"]);
       const output = await runCliAsync([
         "collect",
         "device-state",
@@ -482,7 +521,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#reply-budget",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
           LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "0",
         },
@@ -554,6 +592,7 @@ exit 91
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-exact-limit-"));
     try {
+      server.setJoinedChannelTargets(["#exact-limit"]);
       const output = await runCliAsync([
         "collect",
         "device-state",
@@ -567,7 +606,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#exact-limit",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         },
       });
@@ -588,6 +626,7 @@ exit 91
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-local-peer-"));
     try {
+      server.setJoinedChannelTargets(["#shared-local"]);
       const output = await runCliAsync([
         "collect",
         "device-state",
@@ -601,7 +640,6 @@ exit 91
           LORUME_SLOCK_SERVER_URL: server.baseUrl,
           LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
           LORUME_SLOCK_AGENT_IDS: "agent-local-1,agent-local-2",
-          LORUME_SLOCK_CHANNEL_TARGETS: "#shared-local",
           LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
         },
       });
@@ -612,12 +650,11 @@ exit 91
           agentId: "fixture-device:runtime:codex:agent:slock:agent-local-1",
         }),
       ]);
-      expect(server.requests).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          pathname: "/internal/agent/agent-local-2/history",
-          channel: "#shared-local",
-        }),
-      ]));
+      const sharedLocalHistoryReads = server.requests.filter((request) =>
+        request.pathname.endsWith("/history") &&
+        request.channel === "#shared-local"
+      );
+      expect(sharedLocalHistoryReads).toHaveLength(1);
       expect(output.diagnostics?.items ?? []).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ code: "slock_remote_agent_task_ignored" }),
         expect.objectContaining({ code: "slock_inactive_workspace_task_ignored" }),
@@ -1939,6 +1976,7 @@ function writeExecutable(filePath: string, content: string) {
 async function startSlockFixtureServer(): Promise<{
   baseUrl: string;
   requests: Array<Record<string, string>>;
+  setJoinedChannelTargets: (targets: string[]) => void;
   setDailyWorkReplyCount: (value: number) => void;
   setThreadReplyText: (value: string) => void;
   failThreadHistory: () => void;
@@ -1950,6 +1988,7 @@ async function startSlockFixtureServer(): Promise<{
   const fixtureRoot = path.join(repoRoot, "fixtures", "runtime", "slock");
   const readFixture = (name: string) => readFileSync(path.join(fixtureRoot, name), "utf8");
   const requests: Array<Record<string, string>> = [];
+  let joinedChannelTargets = ["#daily-work"];
   let dailyWorkReplyCount = 1;
   let threadReplyText = "今天的主要风险是接口稳定性和排期收敛。";
   let failThreadHistory = false;
@@ -2004,7 +2043,7 @@ async function startSlockFixtureServer(): Promise<{
       sendJson(200, readFixture("profile-unsupported-runtime.json"));
       return;
     }
-    if (url.pathname === "/internal/agent/agent-local-1/server") {
+    if (url.pathname === "/internal/agent/agent-local-1/server" || url.pathname === "/internal/agent/agent-local-2/server") {
       if (failServerDiscoveryOnce) {
         failServerDiscoveryOnce = false;
         sendJson(503, JSON.stringify({ error: "temporary_server_unavailable" }));
@@ -2012,8 +2051,12 @@ async function startSlockFixtureServer(): Promise<{
       }
       sendJson(200, JSON.stringify({
         channels: [
-          { name: "daily-work", joined: true },
-          { name: "public-not-joined", joined: false },
+          ...joinedChannelTargets.map((target) => ({
+            name: target.replace(/^#/, ""),
+            target,
+            joined: true,
+          })),
+          { name: "public-not-joined", target: "#public-not-joined", joined: false },
         ],
       }));
       return;
@@ -2168,6 +2211,9 @@ async function startSlockFixtureServer(): Promise<{
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     requests,
+    setJoinedChannelTargets: (targets: string[]) => {
+      joinedChannelTargets = targets;
+    },
     setDailyWorkReplyCount: (value: number) => {
       dailyWorkReplyCount = value;
     },

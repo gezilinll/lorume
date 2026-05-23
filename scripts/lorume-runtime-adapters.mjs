@@ -373,7 +373,6 @@ const DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN = 10;
 function collectSlockDeviceState(device, collectedAt, config = {}) {
   const baseUrl = slockConfiguredBaseUrl(config);
   const auth = slockConfiguredAuth(config);
-  const configuredChannelTargets = slockConfiguredChannelTargets(config);
   if (!baseUrl || !auth.token) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
 
   const diagnostics = createCollectionDiagnosticCollector("slock");
@@ -423,46 +422,26 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
     });
   }
 
-  if (configuredChannelTargets.length) {
-    for (const localProfile of localProfiles) {
-      for (const channelTarget of configuredChannelTargets) {
-        collectSlockTasksFromChannel({
-          baseUrl,
-          channelTarget,
-          readerAgentId: localProfile.profileId,
-          localProfiles,
-          profileClassifications,
-          workspaceAgentIds,
-          auth,
-          diagnostics,
-          tasksById,
-          replyCache,
-          replyThreadReadBudget,
-        });
-      }
+  const discoveredTargets = new Map();
+  for (const localProfile of localProfiles) {
+    for (const channelTarget of discoverSlockJoinedChannelTargets(baseUrl, localProfile.profileId, auth, diagnostics)) {
+      if (!discoveredTargets.has(channelTarget)) discoveredTargets.set(channelTarget, localProfile.profileId);
     }
-  } else {
-    const discoveredTargets = new Map();
-    for (const localProfile of localProfiles) {
-      for (const channelTarget of discoverSlockJoinedChannelTargets(baseUrl, localProfile.profileId, auth, diagnostics)) {
-        if (!discoveredTargets.has(channelTarget)) discoveredTargets.set(channelTarget, localProfile.profileId);
-      }
-    }
-    for (const [channelTarget, readerAgentId] of discoveredTargets.entries()) {
-      collectSlockTasksFromChannel({
-        baseUrl,
-        channelTarget,
-        readerAgentId,
-        localProfiles,
-        profileClassifications,
-        workspaceAgentIds,
-        auth,
-        diagnostics,
-        tasksById,
-        replyCache,
-        replyThreadReadBudget,
-      });
-    }
+  }
+  for (const [channelTarget, readerAgentId] of discoveredTargets.entries()) {
+    collectSlockTasksFromChannel({
+      baseUrl,
+      channelTarget,
+      readerAgentId,
+      localProfiles,
+      profileClassifications,
+      workspaceAgentIds,
+      auth,
+      diagnostics,
+      tasksById,
+      replyCache,
+      replyThreadReadBudget,
+    });
   }
 
   try {
@@ -653,12 +632,6 @@ function slockConfiguredAuth(config = {}) {
 
 function slockConfiguredAgentIds(config = {}) {
   const raw = process.env.LORUME_SLOCK_AGENT_IDS || config.slockAgentIds || config.slock?.agentIds || "";
-  const values = Array.isArray(raw) ? raw : String(raw).split(",");
-  return values.map((value) => String(value).trim()).filter(Boolean);
-}
-
-function slockConfiguredChannelTargets(config = {}) {
-  const raw = process.env.LORUME_SLOCK_CHANNEL_TARGETS || config.slockChannelTargets || config.slock?.channelTargets || "";
   const values = Array.isArray(raw) ? raw : String(raw).split(",");
   return values.map((value) => String(value).trim()).filter(Boolean);
 }

@@ -21,7 +21,7 @@ export interface CollectionDiagnostics {
   items: CollectionDiagnosticItem[];
 }
 
-export const RUNTIME_KINDS = ["openclaw"] as const;
+export const RUNTIME_KINDS = ["openclaw", "codex"] as const;
 
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
@@ -42,11 +42,11 @@ export const TASK_TYPES = ["conversation", "scheduled"] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];
 
-export const TASK_ADAPTER_KINDS = ["openclaw"] as const;
+export const TASK_ADAPTER_KINDS = ["openclaw", "slock"] as const;
 
 export type TaskAdapterKind = (typeof TASK_ADAPTER_KINDS)[number];
 
-export const TASK_CHANNEL_KINDS = ["dingtalk", "webchat"] as const;
+export const TASK_CHANNEL_KINDS = ["dingtalk", "webchat", "slock"] as const;
 
 export type TaskChannelKind = (typeof TASK_CHANNEL_KINDS)[number];
 
@@ -132,6 +132,15 @@ export interface Task {
       sessionKey?: string;
       messageId?: string;
       trajectoryRunId?: string;
+    };
+    slock?: {
+      status?: string;
+      taskNumber?: string;
+      messageId?: string;
+      channelTarget?: string;
+      threadTarget?: string;
+      taskClaimedAt?: string;
+      taskCompletedAt?: string;
     };
   };
   error?: string;
@@ -298,7 +307,11 @@ function cleanTaskAssignee(value: LooseRecord): NonNullable<Task["assignee"]> {
 function cleanTaskRaw(value: LooseRecord | undefined): Task["raw"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const openclaw = cleanOpenClawRaw(value.openclaw);
-  return openclaw ? { openclaw } : undefined;
+  const slock = cleanSlockRaw(value.slock);
+  return openclaw || slock ? {
+    ...(openclaw ? { openclaw } : {}),
+    ...(slock ? { slock } : {}),
+  } : undefined;
 }
 
 function cleanOpenClawRaw(value: LooseRecord | undefined): NonNullable<NonNullable<Task["raw"]>["openclaw"]> | undefined {
@@ -310,6 +323,20 @@ function cleanOpenClawRaw(value: LooseRecord | undefined): NonNullable<NonNullab
     ...(value.sessionKey ? { sessionKey: String(value.sessionKey) } : {}),
     ...(value.messageId ? { messageId: String(value.messageId) } : {}),
     ...(value.trajectoryRunId ? { trajectoryRunId: String(value.trajectoryRunId) } : {}),
+  };
+  return Object.keys(output).length ? output : undefined;
+}
+
+function cleanSlockRaw(value: LooseRecord | undefined): NonNullable<NonNullable<Task["raw"]>["slock"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const output = {
+    ...(value.status ? { status: String(value.status) } : {}),
+    ...(value.taskNumber ? { taskNumber: String(value.taskNumber) } : {}),
+    ...(value.messageId ? { messageId: String(value.messageId) } : {}),
+    ...(value.channelTarget ? { channelTarget: String(value.channelTarget) } : {}),
+    ...(value.threadTarget ? { threadTarget: String(value.threadTarget) } : {}),
+    ...(value.taskClaimedAt ? { taskClaimedAt: String(value.taskClaimedAt) } : {}),
+    ...(value.taskCompletedAt ? { taskCompletedAt: String(value.taskCompletedAt) } : {}),
   };
   return Object.keys(output).length ? output : undefined;
 }
@@ -372,15 +399,15 @@ function isCollectionDiagnosticAction(value: unknown): value is NonNullable<Coll
 }
 
 function isTaskAdapterKind(value: unknown): value is TaskAdapterKind {
-  return value === "openclaw";
+  return value === "openclaw" || value === "slock";
 }
 
 function isTaskChannelKind(value: unknown): value is TaskChannelKind {
-  return value === "dingtalk" || value === "webchat";
+  return value === "dingtalk" || value === "webchat" || value === "slock";
 }
 
 function normalizeRuntimeKind(value: string | undefined): RuntimeKind | undefined {
-  if (value === "openclaw") return value;
+  if (value === "openclaw" || value === "codex") return value;
   return undefined;
 }
 

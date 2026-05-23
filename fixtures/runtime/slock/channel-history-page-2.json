@@ -1,0 +1,15 @@
+{
+  "channelName": "日常工作",
+  "messages": [
+    {
+      "id": "msg-unassigned-1",
+      "seq": 17,
+      "content": "未分配任务",
+      "taskNumber": "1004",
+      "taskStatus": "todo",
+      "createdAt": "2026-05-23T00:59:00.000Z"
+    }
+  ],
+  "hasOlder": false,
+  "hasMore": false
+}

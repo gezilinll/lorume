@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "id": "reply-1",
+      "senderId": "agent-local-1",
+      "senderName": "大卷Bot",
+      "content": "今天的主要风险是接口稳定性和排期收敛。",
+      "createdAt": "2026-05-23T01:04:00.000Z",
+      "updatedAt": "2026-05-23T01:05:00.000Z"
+    }
+  ]
+}

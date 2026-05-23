@@ -85,8 +85,21 @@ describe("runtime fleet query", () => {
   });
 
   it("lists only supported runtime kinds present in the current snapshot", () => {
-    expect(listRuntimeFleetRuntimeKindOptions(snapshot)).toEqual([
+    expect(listRuntimeFleetRuntimeKindOptions({
+      ...snapshot,
+      runtimes: [
+        ...snapshot.runtimes,
+        {
+          id: "fixture-mac:runtime:codex",
+          deviceId: "fixture-mac",
+          kind: "codex",
+          name: "Codex",
+          collectionStatus: "online",
+        },
+      ],
+    })).toEqual([
       { label: "OpenClaw", value: "openclaw" },
+      { label: "Codex", value: "codex" },
     ]);
   });
 

@@ -331,6 +331,61 @@ console.log(JSON.stringify({
     }
   });
 
+  it("posts Slock tasks through task batches instead of metadata snapshots", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-slock-task-batch-config-"));
+    const configPath = path.join(configDir, "config.json");
+    const cachePath = path.join(configDir, "task-cache.json");
+    const slockFixturePath = path.join(configDir, "slock-snapshot.json");
+    const { server, receivedSnapshot, receivedTaskBatch, baseUrl } = await startSnapshotServer({
+      expectedAuthorization: "Bearer device-token-test",
+    });
+    writeFileSync(configPath, JSON.stringify({
+      deviceToken: "device-token-test",
+      serverUrl: baseUrl,
+      taskSyncCachePath: cachePath,
+    }));
+    writeFileSync(slockFixturePath, JSON.stringify(createSlockTaskSnapshot()));
+
+    try {
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        slockFixturePath,
+        "--config",
+        configPath,
+      ]);
+      const snapshot = await receivedSnapshot;
+      const taskBatch = await receivedTaskBatch as {
+        tasks: Array<{ hash: string; task?: { id?: string; adapter?: { kind?: string }; channel?: { kind?: string }; raw?: { slock?: unknown } } }>;
+      };
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+
+      expect(snapshot.tasks).toEqual([]);
+      expect(taskBatch).toMatchObject({
+        deviceId: "slock-device",
+        schemaVersion: "device-state-v2",
+        tasks: [expect.objectContaining({
+          hash: expect.any(String),
+          task: expect.objectContaining({
+            id: "slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+            adapter: { kind: "slock" },
+            channel: { kind: "slock", externalId: "#daily-work" },
+            raw: { slock: expect.objectContaining({ messageId: "msg-local-1", status: "done" }) },
+          }),
+        })],
+      });
+      const entry = taskBatch.tasks[0];
+      expect(cache.tasks["slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1"]).toMatchObject({
+        hash: entry.hash,
+        lastAckedAt: expect.any(String),
+      });
+    } finally {
+      server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("resends tasks when the task sync cache belongs to a different registration scope", async () => {
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-task-cache-scope-"));
     const configPath = path.join(configDir, "config.json");
@@ -538,6 +593,53 @@ console.log(JSON.stringify({
     }
   });
 });
+
+function createSlockTaskSnapshot() {
+  const collectedAt = "2026-05-23T01:10:00.000Z";
+  return {
+    collectedAt,
+    device: {
+      architecture: "arm64",
+      collectionStatus: "online",
+      collector: { version: "0.1.0" },
+      hostname: "slock.local",
+      id: "slock-device",
+      lastSeenAt: collectedAt,
+      os: "darwin",
+    },
+    runtimes: [{
+      collectionStatus: "online",
+      deviceId: "slock-device",
+      id: "slock-device:runtime:codex",
+      kind: "codex",
+      lastSeenAt: collectedAt,
+      name: "Codex",
+    }],
+    agents: [{
+      collectionStatus: "online",
+      id: "slock-device:runtime:codex:agent:slock:agent-local-1",
+      lastSeenAt: collectedAt,
+      name: "大卷Bot",
+      runtimeId: "slock-device:runtime:codex",
+    }],
+    tasks: [{
+      adapter: { kind: "slock" },
+      agentId: "slock-device:runtime:codex:agent:slock:agent-local-1",
+      agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+      assignee: { name: "大卷Bot", externalId: "agent-local-1" },
+      channel: { kind: "slock", externalId: "#daily-work" },
+      conversation: { title: "日常工作", externalId: "#daily-work", lastActivityAt: "2026-05-23T01:05:00.000Z" },
+      createdAt: "2026-05-23T01:00:00.000Z",
+      creator: { name: "张良", externalId: "user-1" },
+      id: "slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+      raw: { slock: { messageId: "msg-local-1", status: "done", taskNumber: "1001" } },
+      status: "done",
+      taskType: "conversation",
+      updatedAt: "2026-05-23T01:05:00.000Z",
+      userMessage: "帮我整理今天的项目风险",
+    }],
+  };
+}
 
 function runNodeScript(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Promise<string> {
   return runCommand(process.execPath, args, options);

@@ -1,0 +1,8 @@
+{
+  "id": "agent-local-1",
+  "displayName": "大卷Bot",
+  "name": "dajuan-bot",
+  "runtime": "codex",
+  "status": "active",
+  "computerHostname": "fixture-device.local"
+}

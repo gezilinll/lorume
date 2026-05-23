@@ -1,0 +1,8 @@
+{
+  "id": "agent-unsupported-1",
+  "displayName": "未来Bot",
+  "name": "future-bot",
+  "runtime": "future-runtime",
+  "status": "active",
+  "computerHostname": "fixture-device.local"
+}

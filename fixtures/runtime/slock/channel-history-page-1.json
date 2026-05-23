@@ -1,0 +1,46 @@
+{
+  "channelName": "日常工作",
+  "messages": [
+    {
+      "id": "msg-local-1",
+      "seq": 20,
+      "content": "帮我整理今天的项目风险",
+      "taskNumber": "1001",
+      "taskStatus": "done",
+      "taskAssigneeId": "agent-local-1",
+      "senderId": "user-1",
+      "senderName": "张良",
+      "createdAt": "2026-05-23T01:00:00.000Z",
+      "updatedAt": "2026-05-23T01:03:00.000Z"
+    },
+    {
+      "id": "msg-remote-1",
+      "seq": 19,
+      "content": "远端 Agent 的任务",
+      "taskNumber": "1002",
+      "taskStatus": "in_progress",
+      "taskAssigneeId": "agent-remote-1",
+      "createdAt": "2026-05-23T01:01:00.000Z"
+    },
+    {
+      "id": "msg-unsupported-1",
+      "seq": 18,
+      "content": "未来 runtime 的任务",
+      "taskNumber": "1003",
+      "taskStatus": "todo",
+      "taskAssigneeId": "agent-unsupported-1",
+      "createdAt": "2026-05-23T01:02:00.000Z"
+    },
+    {
+      "id": "msg-workspace-1",
+      "seq": 16,
+      "content": "只有 workspace 证据的任务",
+      "taskNumber": "1005",
+      "taskStatus": "todo",
+      "taskAssigneeId": "agent-workspace-1",
+      "createdAt": "2026-05-23T01:03:00.000Z"
+    }
+  ],
+  "hasOlder": false,
+  "hasMore": true
+}

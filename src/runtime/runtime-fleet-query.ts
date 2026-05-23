@@ -15,12 +15,14 @@ import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-dev
 
 /** Runtime kind labels used by the Runtime Fleet page. */
 export const runtimeKindLabels: Record<RuntimeKind, string> = {
+  codex: "Codex",
   openclaw: "OpenClaw",
 };
 
 /** Channel labels used when a Task includes user-facing channel context. */
 export const channelKindLabels: Record<NonNullable<Task["channel"]>["kind"], string> = {
   dingtalk: "DingTalk",
+  slock: "Slock",
   webchat: "Web Chat",
 };
 

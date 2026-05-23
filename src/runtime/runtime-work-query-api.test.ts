@@ -97,12 +97,14 @@ describe("Runtime task query API helpers", () => {
         { id: "task-1", agentId: "agent-1", userMessage: "One", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
         { id: "task-2", agentId: "agent-1", userMessage: "Two", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
         { id: "task-3", agentId: "agent-1", userMessage: "Three", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "webchat" } },
+        { id: "task-4", agentId: "agent-1", userMessage: "Four", status: "todo", adapter: { kind: "slock" }, channel: { kind: "slock" } },
       ],
-      total: 3,
+      total: 4,
     });
 
     expect(listRuntimeTaskChannelOptions(page?.tasks ?? [])).toEqual([
       { label: "DingTalk", value: "dingtalk" },
+      { label: "Slock", value: "slock" },
       { label: "Web Chat", value: "webchat" },
     ]);
   });

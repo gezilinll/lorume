@@ -47,6 +47,20 @@ describe("runtime task sync", () => {
     expect(createRuntimeTaskHash(task({ adapter: { kind: "openclaw" } }))).toBe(baseHash);
   });
 
+  it("keeps hash stable when only Slock raw evidence changes", () => {
+    const first = task({
+      adapter: { kind: "slock" },
+      channel: { kind: "slock", externalId: "#daily-work" },
+      raw: { slock: { messageId: "msg-1", status: "done" } },
+    });
+    const second = task({
+      ...first,
+      raw: { slock: { messageId: "msg-1", status: "in_progress" } },
+    });
+
+    expect(createRuntimeTaskHash(first)).toBe(createRuntimeTaskHash(second));
+  });
+
   it("splits task batches by count and byte budget with deterministic batch ids", () => {
     const tasks = [
       task({ id: "agent-1:task:msg-1", userMessage: "first", updatedAt: "2026-05-22T00:00:03.000Z" }),

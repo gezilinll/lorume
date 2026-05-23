@@ -1,5 +1,7 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +92,73 @@ exit 91
     expect(output.agents[0]).not.toHaveProperty("sourceRefs");
     expect(output.agents[0]).not.toHaveProperty("load");
     expect(existsSync(disabledCallsPath)).toBe(false);
+  });
+
+  it("collects current-device Slock tasks from profile, channel, and thread evidence", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-workspace-"));
+    mkdirSync(path.join(root, ".slock", "agents", "agent-workspace-1"), { recursive: true });
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_BASE_URL: server.baseUrl,
+          LORUME_SLOCK_CHANNEL_TARGETS: "#daily-work",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+        },
+      });
+
+      expect(output.runtimes).toEqual([
+        expect.objectContaining({ id: "fixture-device:runtime:codex", kind: "codex", name: "Codex" }),
+      ]);
+      expect(output.agents).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1",
+          name: "大卷Bot",
+          runtimeId: "fixture-device:runtime:codex",
+        }),
+      ]);
+      expect(output.tasks).toEqual([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+          agentId: "fixture-device:runtime:codex:agent:slock:agent-local-1",
+          userMessage: "帮我整理今天的项目风险",
+          agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+          status: "done",
+          adapter: { kind: "slock" },
+          channel: { kind: "slock", externalId: "#daily-work" },
+          conversation: { title: "日常工作", externalId: "#daily-work", lastActivityAt: "2026-05-23T01:05:00.000Z" },
+          creator: { name: "张良", externalId: "user-1" },
+          assignee: { name: "大卷Bot", externalId: "agent-local-1" },
+          raw: {
+            slock: {
+              status: "done",
+              taskNumber: "1001",
+              messageId: "msg-local-1",
+              channelTarget: "#daily-work",
+              threadTarget: "#daily-work:msg-loca",
+            },
+          },
+          createdAt: "2026-05-23T01:00:00.000Z",
+          updatedAt: "2026-05-23T01:05:00.000Z",
+        }),
+      ]);
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_inactive_workspace_task_ignored", count: 1, severity: "warning" }),
+        expect.objectContaining({ code: "slock_remote_agent_task_ignored", count: 1, severity: "info" }),
+        expect.objectContaining({ code: "slock_unassigned_task_ignored", count: 1, severity: "info" }),
+        expect.objectContaining({ code: "slock_unsupported_runtime_ignored", count: 1, severity: "info" }),
+      ]));
+    } finally {
+      await server.close();
+    }
   });
 
   it("does not create product Tasks from OpenClaw tasks list output", () => {
@@ -1312,6 +1381,21 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Reco
   }));
 }
 
+function runCliAsync(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Promise<Record<string, any>> {
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, [cliPath, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...options.env },
+    }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr || error.message));
+        return;
+      }
+      resolve(JSON.parse(stdout));
+    });
+  });
+}
+
 function spawnCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     encoding: "utf8",
@@ -1384,4 +1468,45 @@ function writeOpenClawTrajectoryFile(
 function writeExecutable(filePath: string, content: string) {
   writeFileSync(filePath, content);
   chmodSync(filePath, 0o755);
+}
+
+async function startSlockFixtureServer(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const fixtureRoot = path.join(repoRoot, "fixtures", "runtime", "slock");
+  const readFixture = (name: string) => readFileSync(path.join(fixtureRoot, name), "utf8");
+  const server = createServer((request, response) => {
+    const url = new URL(request.url || "/", "http://127.0.0.1");
+    const sendJson = (statusCode: number, body: string) => {
+      response.writeHead(statusCode, { "content-type": "application/json" });
+      response.end(body);
+    };
+
+    if (url.pathname === "/internal/agent/agent-local-1/profile") {
+      sendJson(200, readFixture("profile-active.json"));
+      return;
+    }
+    if (url.pathname === "/internal/agent/agent-unsupported-1/profile") {
+      sendJson(200, readFixture("profile-unsupported-runtime.json"));
+      return;
+    }
+    if (url.pathname.startsWith("/internal/agent/")) {
+      sendJson(404, JSON.stringify({ error: "not_found" }));
+      return;
+    }
+    if (url.pathname === "/api/channel-history") {
+      sendJson(200, readFixture(url.searchParams.has("before") ? "channel-history-page-2.json" : "channel-history-page-1.json"));
+      return;
+    }
+    if (url.pathname === "/api/thread-history") {
+      sendJson(200, readFixture("thread-history.json"));
+      return;
+    }
+    sendJson(404, JSON.stringify({ error: "not_found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
 }

@@ -21,9 +21,9 @@ Runs / Work Board 必须让用户看清：
 | 平台 | 当前状态 | 规则 |
 |---|---|---|
 | OpenClaw | 默认启用 | 可以生成 Runtime、Agent、Task。 |
-| Slock | 默认禁用 | 已有 `docs/product/runtime-slock-adapter-spec.md` 约束 ownership proof、分页和 Task 映射；实现和 harness 未补齐前不执行命令、不读目录、不生成对象。 |
+| Slock | 默认禁用 | 已有 `docs/product/runtime-slock-adapter-spec.md` 约束 ownership proof、分页和 Task 映射；启用后只读采集当前设备真实承载的 Slock Agent Task。 |
 | Multica | 默认禁用 | 不执行命令、不读目录、不生成对象。 |
-| Codex | 未来类型 | 当前默认不采集，且不进入当前 RuntimeKind 枚举。 |
+| Codex | Runtime kind | 当前只作为 Slock profile runtime 的归属类型进入模型；不代表已实现 Codex adapter 或 Codex Task 采集。 |
 
 新增平台前必须先补产品 spec、adapter contract 和 harness。
 
@@ -34,7 +34,7 @@ Runs / Work Board 必须让用户看清：
 - Task 状态只用 `Task.status` 表达，不拆成 status / executionStatus 两套。
 - Adapter 负责把平台原始状态映射为 `Task.status`，但必须在 Task raw/evidence 中保留平台原始状态。
 - Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。前端/BFF 展示标题从 `userMessage` 派生。
-- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前只支持 `openclaw`；未实现的 adapter 或 channel kind 不提前进入枚举。
+- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前支持 `openclaw`，Slock 集成落地时同步支持 `slock`；未实现的 adapter 或 channel kind 不提前进入枚举。
 - Runtime 和 Agent 只展示 `collectionStatus`，不保存工作忙闲。
 - Runs Channel 筛选只能使用 Task 中实际出现的用户触达渠道，不能把 Runtime kind 或 adapter kind 当作渠道。
 - 不能把裸 execution、adapter capability gap、监听缺口或诊断项伪造成任务卡。

@@ -184,7 +184,7 @@ for md_path in markdown_files:
             problems.append(f"{md_path}: missing link target {raw_target} -> {display}")
 
 runtime_device_spec = Path("docs/product/runtime-device-registration-spec.md").read_text(encoding="utf-8")
-expected_runtime_kind = 'export type RuntimeKind = "openclaw";'
+expected_runtime_kind = 'export type RuntimeKind = "openclaw" | "codex";'
 if expected_runtime_kind not in runtime_device_spec:
     problems.append("docs/product/runtime-device-registration-spec.md: RuntimeKind must list only currently implemented runtime kinds")
 

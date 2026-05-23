@@ -13,7 +13,7 @@ import {
 describe("runtime four-object model", () => {
   it("defines the compact status and runtime kind sets", () => {
     expect(COLLECTION_STATUSES).toEqual(["syncing", "online", "offline", "error"]);
-    expect(RUNTIME_KINDS).toEqual(["openclaw"]);
+    expect(RUNTIME_KINDS).toEqual(["openclaw", "codex"]);
     expect(TASK_STATUSES).toEqual([
       "todo",
       "in_progress",
@@ -94,26 +94,71 @@ describe("runtime four-object model", () => {
   });
 
   it("defines only implemented task adapter and channel kinds", () => {
-    expect(TASK_ADAPTER_KINDS).toEqual(["openclaw"]);
-    expect(TASK_CHANNEL_KINDS).toEqual(["dingtalk", "webchat"]);
+    expect(TASK_ADAPTER_KINDS).toEqual(["openclaw", "slock"]);
+    expect(TASK_CHANNEL_KINDS).toEqual(["dingtalk", "webchat", "slock"]);
   });
 
-  it("drops unsupported runtime kinds instead of coercing them to OpenClaw", () => {
+  it("accepts implemented Slock adapter, channel, and raw fields", () => {
+    const snapshot = createDeviceStateSnapshot({
+      collectedAt: "2026-05-23T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{
+        id: "device-1:runtime:codex:agent:slock:agent-1:task:msg-1",
+        agentId: "device-1:runtime:codex:agent:slock:agent-1",
+        taskType: "conversation",
+        status: "done",
+        userMessage: "整理项目周报",
+        agentReply: "已完成周报草稿。",
+        adapter: { kind: "slock" },
+        channel: { kind: "slock", externalId: "#daily-work" },
+        conversation: { title: "日常工作", externalId: "#daily-work" },
+        assignee: { name: "大卷Bot", externalId: "agent-1" },
+        raw: {
+          slock: {
+            status: "done",
+            taskNumber: "123",
+            messageId: "msg-1",
+            channelTarget: "#daily-work",
+            threadTarget: "#daily-work:msg-1",
+            taskClaimedAt: "2026-05-23T01:00:00.000Z",
+            taskCompletedAt: "2026-05-23T01:05:00.000Z",
+          },
+        },
+      }],
+    });
+
+    expect(snapshot.tasks[0]).toMatchObject({
+      adapter: { kind: "slock" },
+      channel: { kind: "slock", externalId: "#daily-work" },
+      raw: { slock: { status: "done", messageId: "msg-1" } },
+    });
+  });
+
+  it("accepts Slock profile runtime kinds only when they are implemented", () => {
     const snapshot = createDeviceStateSnapshot({
       collectedAt: "2026-05-21T00:00:00.000Z",
       device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
-      runtimes: [{
-        id: "device-1:runtime:codex",
-        deviceId: "device-1",
-        kind: "codex",
-        name: "Codex",
-        collectionStatus: "online",
-      }],
+      runtimes: [
+        {
+          id: "device-1:runtime:codex",
+          deviceId: "device-1",
+          kind: "codex",
+          name: "Codex",
+          collectionStatus: "online",
+        },
+        {
+          id: "device-1:runtime:unsupported",
+          deviceId: "device-1",
+          kind: "unsupported",
+          name: "Unsupported",
+          collectionStatus: "online",
+        },
+      ],
       agents: [],
       tasks: [],
     });
 
-    expect(snapshot.runtimes).toEqual([]);
+    expect(snapshot.runtimes.map((runtime) => runtime.kind)).toEqual(["codex"]);
   });
 
   it("normalizes external task and execution evidence into a single task status", () => {

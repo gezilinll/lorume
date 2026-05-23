@@ -181,6 +181,47 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
+  it("persists Slock task batches and serves Slock task queries", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createSlockDeviceStateSnapshot();
+
+        const response = await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
+        const taskBatchResponse = await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
+        const tasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?channelKind=slock`);
+
+        expect(response.status).toBe(201);
+        expect(taskBatchResponse.status).toBe(201);
+        await expect(taskBatchResponse.json()).resolves.toMatchObject({
+          acked: [{ id: "slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1", hash: expect.any(String) }],
+          deviceId: "slock-device",
+          ok: true,
+        });
+        await expect(tasksResponse.json()).resolves.toMatchObject({
+          items: [
+            expect.objectContaining({
+              adapter: { kind: "slock" },
+              agentId: "slock-device:runtime:codex:agent:slock:agent-local-1",
+              channel: { kind: "slock", externalId: "#daily-work" },
+              id: "slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+              raw: { slock: expect.objectContaining({ messageId: "msg-local-1", status: "done" }) },
+              status: "done",
+            }),
+          ],
+          total: 1,
+        });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("records failed collector ingestions for invalid device-state snapshots", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -448,7 +489,55 @@ function createDeviceStateSnapshot(options: {
   };
 }
 
-function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot>) {
+function createSlockDeviceStateSnapshot() {
+  const collectedAt = "2026-05-23T01:10:00.000Z";
+  return {
+    collectedAt,
+    device: {
+      architecture: "arm64",
+      collectionStatus: "online",
+      collector: { version: "0.1.0" },
+      hostname: "slock.local",
+      id: "slock-device",
+      lastSeenAt: collectedAt,
+      os: "darwin",
+      user: { username: "tester" },
+    },
+    runtimes: [{
+      collectionStatus: "online",
+      deviceId: "slock-device",
+      id: "slock-device:runtime:codex",
+      kind: "codex",
+      lastSeenAt: collectedAt,
+      name: "Codex",
+    }],
+    agents: [{
+      collectionStatus: "online",
+      id: "slock-device:runtime:codex:agent:slock:agent-local-1",
+      lastSeenAt: collectedAt,
+      name: "大卷Bot",
+      runtimeId: "slock-device:runtime:codex",
+    }],
+    tasks: [{
+      adapter: { kind: "slock" },
+      agentId: "slock-device:runtime:codex:agent:slock:agent-local-1",
+      agentReply: "今天的主要风险是接口稳定性和排期收敛。",
+      assignee: { name: "大卷Bot", externalId: "agent-local-1" },
+      channel: { kind: "slock", externalId: "#daily-work" },
+      conversation: { title: "日常工作", externalId: "#daily-work", lastActivityAt: "2026-05-23T01:05:00.000Z" },
+      createdAt: "2026-05-23T01:00:00.000Z",
+      creator: { name: "张良", externalId: "user-1" },
+      id: "slock-device:runtime:codex:agent:slock:agent-local-1:task:msg-local-1",
+      raw: { slock: { messageId: "msg-local-1", status: "done", taskNumber: "1001" } },
+      status: "done",
+      taskType: "conversation",
+      updatedAt: "2026-05-23T01:05:00.000Z",
+      userMessage: "帮我整理今天的项目风险",
+    }],
+  };
+}
+
+function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot> | ReturnType<typeof createSlockDeviceStateSnapshot>) {
   const batch = createRuntimeTaskBatches(snapshot.tasks as any, {
     batchMaxBytes: 1_000_000,
     batchMaxTasks: 1_000,

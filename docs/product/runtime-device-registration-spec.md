@@ -2,13 +2,13 @@
 
 版本：TinySpec v0.7
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；Slock 已有 disabled-by-default adapter spec 但没有实现和 harness 前不采集、不执行命令、不读目录，其他 Runtime adapter 在没有对应 spec 和 harness 前也不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 只启用 OpenClaw；Slock adapter 已实现但默认禁用，启用后只读采集当前设备真实承载的 Slock Agent Task；其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
 - 通过一条本地安装命令在设备上安装 Lorume Device Collector。
 - Collector 作为设备侧常驻 Device Agent 运行，设备主动连接 Lorume。
-- Collector 只读采集本机事实和 OpenClaw 运行资产。
+- Collector 只读采集本机事实和已启用 adapter 覆盖的运行资产。
 - 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
 - Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
 - WebSocket 控制面只支持设备主动 `hello`、`heartbeat` 和连接健康判定；不下发采集、探测、调度或任意命令。
@@ -19,7 +19,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
 - 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
-- 默认不采集 Slock、Multica 或 Codex。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，但启用前必须先补实现和 harness。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
+- 默认不采集 Slock、Multica 或 Codex。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，启用后仍只能按其只读 ownership proof 和 Task 映射规则采集。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
 - 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
@@ -33,6 +33,8 @@ flowchart LR
   CLI["lorume CLI"]
   OpenClawAdapter["OpenClaw adapter"]
   OpenClaw["OpenClaw"]
+  SlockAdapter["Slock adapter<br/>disabled by default"]
+  Slock["Slock"]
 
   UI --> Backend
   Collector --> Backend
@@ -40,6 +42,8 @@ flowchart LR
   Collector --> CLI
   CLI --> OpenClawAdapter
   OpenClawAdapter --> OpenClaw
+  CLI -. allowlist .-> SlockAdapter
+  SlockAdapter -. read-only .-> Slock
 ```
 
 ## 四大对象
@@ -73,10 +77,10 @@ Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含�
 
 ### Runtime
 
-Runtime 表示设备上的可识别运行环境。当前已实现且可采集的 Runtime kind 只有 `openclaw`。Slock、Multica、Codex 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。
+Runtime 表示设备上的可识别运行环境。当前 RuntimeKind 支持 `openclaw` 和 `codex`：`openclaw` 可由 OpenClaw adapter 采集，`codex` 目前只作为 Slock profile runtime 的可归属类型进入模型，不代表 Lorume 已经实现 Codex adapter、Codex CLI 采集或 Codex Task 采集。Slock、Multica 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。
 
 ```ts
-export type RuntimeKind = "openclaw";
+export type RuntimeKind = "openclaw" | "codex";
 
 export interface Runtime {
   id: string;
@@ -137,9 +141,9 @@ export interface Task {
   userMessage?: string;
   agentReply?: string;
   status: TaskStatus;
-  adapter: { kind: "openclaw" };
+  adapter: { kind: "openclaw" | "slock" };
   channel?: {
-    kind: "dingtalk" | "webchat";
+    kind: "dingtalk" | "webchat" | "slock";
     externalId?: string;
   };
   conversation?: {
@@ -158,6 +162,15 @@ export interface Task {
       messageId?: string;
       trajectoryRunId?: string;
     };
+    slock?: {
+      status?: string;
+      taskNumber?: string;
+      messageId?: string;
+      channelTarget?: string;
+      threadTarget?: string;
+      taskClaimedAt?: string;
+      taskCompletedAt?: string;
+    };
   };
   error?: string;
   createdAt?: string;
@@ -168,7 +181,7 @@ export interface Task {
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
 Runtime 名称不能写入 `Task.channel`；如果任务没有当前已实现的用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
 Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。页面需要标题时，从 `userMessage` 生成短展示标题；需要任务新鲜度时，只看源系统业务时间 `updatedAt` / `createdAt`。
-Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现只支持 `openclaw`；Slock、Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
+Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现支持 `openclaw`，Slock 集成落地时同步支持 `slock`；Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
 
 ## 状态规则
 

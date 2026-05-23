@@ -2,17 +2,17 @@
 
 版本：TinySpec v0.1
 
-本文定义 Slock adapter 如何把 Slock 平台的只读证据转换为 Lorume 当前 `Device / Runtime / Agent / Task` 模型。Slock adapter 当前仍默认禁用；启用前必须先补实现和 harness。本 spec 只定义可实现的目标规则，不代表当前 collector 已经采集 Slock。
+本文定义 Slock adapter 如何把 Slock 平台的只读证据转换为 Lorume 当前 `Device / Runtime / Agent / Task` 模型。Slock adapter 当前默认禁用；启用后必须按本文的只读数据源、归属证明、分页、映射和 diagnostics 规则采集。
 
 ## 模型边界
 
-Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不自动等同于 Lorume 的执行 Runtime。Slock profile 中的 `runtime` 字段才表示该 Agent 在当前设备上的执行 Runtime；真实样本中本机 active profile 的 raw runtime 为 `codex`，但当前 Lorume 已实现 RuntimeKind 只有 `openclaw`，因此启用 Slock adapter 时必须同步落地 Codex Runtime 支持或明确跳过这些 Agent。
+Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不自动等同于 Lorume 的执行 Runtime。Slock profile 中的 `runtime` 字段才表示该 Agent 在当前设备上的执行 Runtime。Slock adapter 必须使用 profile 的真实 runtime 值派生 Lorume Runtime，不能写死为 `codex` 或 `slock`。Lorume 侧只接收已经进入实现、spec 和 harness 的 runtime kind；当前可接收 `openclaw` 和 `codex`，其中 `codex` 只作为 Slock profile runtime 的归属类型。如果真实 Slock 数据出现新的 runtime 值，必须在同一变更中补该 runtime kind 的模型、fixture 和 harness 后才能入库。
 
 因此 Slock adapter 的边界是：
 
 - 可以从 Slock profile、server、channel history 和 task thread 中读取只读证据。
 - 只能把当前设备真实承载的 active Slock Agent 转成 Lorume Agent。
-- Runtime 由 Slock profile 的 `runtime` 派生，例如 `codex`；不要仅因为数据来自 Slock 就生成 `Runtime.kind="slock"`。
+- Runtime 由 Slock profile 的 `runtime` 派生；不要仅因为数据来自 Slock 就生成 `Runtime.kind="slock"`，也不要把 profile runtime 写死成某个单一值。
 - Slock channel / thread 是 Task 的用户触点上下文，不是新的 Conversation、Channel、Execution 或 Run 一等实体。
 - 远端可见 Agent、未分配 Task、只有本机 workspace 但没有 active profile 的 Agent 不进入产品 Task，只进入 diagnostics 聚合。
 
@@ -23,7 +23,7 @@ Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不�
 | 用途 | Slock 来源 | 规则 |
 |---|---|---|
 | 本机 Agent 归属 | `/internal/agent/:agentId/profile` | 只有能返回 active profile，且 profile 的 `computerHostname` 匹配当前设备时，才算当前设备真实承载的 Agent。 |
-| Runtime | profile 的 `runtime`、`model`、主机信息 | `runtime` 必须是 Lorume 已支持的 Runtime kind；当前样本的 raw 值为 `codex`，启用前必须先让该 Runtime kind 进入实现和 harness，未知或缺失时跳过该 Agent 和其 Task。 |
+| Runtime | profile 的 `runtime`、`model`、主机信息 | `runtime` 来自 Slock profile 原始值；该值必须是 Lorume 已支持的 Runtime kind，未知、缺失或尚未覆盖 harness 时跳过该 Agent 和其 Task，并输出 diagnostics。 |
 | Agent 名称 | profile 的 `displayName` / `name` | 作为 Lorume Agent `name`。server catalog 的同名信息只能补充 diagnostics，不能替代 profile 归属证明。 |
 | Task 候选 | channel history 中带 `taskNumber` / `taskStatus` / `taskAssigneeId` 的 message | 每条 task message 是一个候选 Task。 |
 | Task thread | 对应 task message 的 thread history | 用于提取 Agent 回复、执行上下文和最近活动时间。 |
@@ -70,8 +70,8 @@ Task thread target 使用 task message 的稳定 id 派生，而不是直接使�
 | Lorume 字段 | Slock 来源 | 规则 |
 |---|---|---|
 | `Runtime.id` | `deviceId` + profile runtime | `${deviceId}:runtime:${profile.runtime}`。同一设备同一 runtime 只生成一个 Runtime。 |
-| `Runtime.kind` | profile `runtime` | 必须是 Lorume 已支持的 Runtime kind。当前真实样本 raw 值为 `codex`，但它尚未进入当前实现枚举。 |
-| `Runtime.name` | runtime kind | 使用已实现 Runtime kind 的用户可读名称。不要写成 `Slock`，除非 profile runtime 本身就是 `slock` 且已有实现证据。 |
+| `Runtime.kind` | profile `runtime` | 使用 Slock profile 的真实 runtime 值，但该值必须先成为 Lorume 已支持 Runtime kind。 |
+| `Runtime.name` | runtime kind | 使用该 runtime kind 的用户可读名称。不要写成 `Slock`，除非 profile runtime 本身就是 `slock` 且已有实现证据。 |
 | `Agent.id` | runtime id + Slock profile id | `${runtimeId}:agent:slock:${profile.id}`，避免和同一 Runtime 下其他来源的 Agent 冲突。 |
 | `Agent.runtimeId` | Runtime id | 指向 profile runtime 派生出的 Runtime。 |
 | `Agent.name` | profile `displayName` / `name` | 优先 displayName，缺失时用 name。 |
@@ -81,7 +81,7 @@ Slock `model`、`computerId`、`computerName`、`computerHostname`、server cata
 
 ## Task 映射
 
-启用 Slock adapter 时，Task model 必须在同一变更中增加 `adapter.kind="slock"`、`channel.kind="slock"` 和 `raw.slock`，并补齐实现和 harness。Slock 未实现前不提前把 `slock` 写入生产枚举、fixture 或测试。Slock Task 不新增 `runtimeId`、`run`、`execution`、`toolCalls`、`title`、`description` 或 `lastSeenAt`。
+Slock adapter 使用 `adapter.kind="slock"`、`channel.kind="slock"` 和 `raw.slock`。Slock Task 不新增 `runtimeId`、`run`、`execution`、`toolCalls`、`title`、`description` 或 `lastSeenAt`。
 
 | Lorume Task 字段 | Slock 来源 | 规则 |
 |---|---|---|
@@ -143,6 +143,7 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 |---|---|---|
 | `slock_remote_agent_task_ignored` | `info` | Task 指向远端或未知设备 Agent，当前设备不入库。 |
 | `slock_unassigned_task_ignored` | `info` | Task 没有 `taskAssigneeId`，无法关联 Lorume Agent。 |
+| `slock_unsupported_runtime_ignored` | `info` | active profile 的 runtime 真实存在，但该值尚未进入 Lorume RuntimeKind 实现和 harness，本轮跳过该 Agent 和其 Task。 |
 | `slock_inactive_workspace_task_ignored` | `warning` | Task 指向本机 workspace 中存在但没有 active profile 的 Agent，不能证明当前设备正在承载。 |
 | `slock_missing_user_message` | `warning` | 本机 active profile task 缺少可读 `userMessage`，跳过。 |
 | `slock_missing_agent_reply` | `warning` | `done` Task 入库但缺少 assigned Agent 回复。 |
@@ -154,11 +155,11 @@ Slock adapter 只输出结构化聚合 diagnostics，不输出逐条原始 warni
 
 ## Harness
 
-启用 Slock adapter 的同一变更必须补以下最小 harness：
+Slock adapter 必须保持以下最小 harness：
 
 - CLI adapter unit/script test：使用脱敏 fixture 覆盖 active profile、remote visible task、workspace-only task、unassigned task、分页 `hasMore=true/hasOlder=false`、thread target 派生和 status 映射。
 - Collector test：覆盖 Slock Task 仍通过 `/api/device-task-batches` 分批上报，不回到 metadata snapshot。
-- Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock`、Task 查询和 stale/tombstone 行为。
+- Backend/API test：覆盖 `adapter.kind="slock"`、`channel.kind="slock"`、`raw.slock` 和 Task 查询；Task stale/tombstone 行为由共享 runtime task batch harness 覆盖。
 - Runtime Fleet / Runs query test：覆盖 Slock Task 不把 `Slock` 当 Runtime 状态，不把远端可见 task 展示为当前设备任务。
 - 真实设备观察者验证：只读运行 adapter，确认入库数量只包含 `local_active_task`，并把新增真实缺口转成 spec 或 harness 后再修复。
 

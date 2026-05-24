@@ -2452,8 +2452,9 @@ function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType
       ? { create: false, reason: "missing task prompt" }
       : { create: false, reason: "missing prompt" };
   }
-  if (/^(?:\[[^\]]+\]\s*)?<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>/i.test(prompt)) {
-    if (/\bsource:\s*subagent\b/i.test(prompt) || /\bsession_key:\s*agent:[^:\s]+:subagent:/i.test(prompt)) {
+  const internalRuntimeContextText = [prompt, userTurnText].find(isOpenClawInternalRuntimeContextText);
+  if (internalRuntimeContextText) {
+    if (isOpenClawInternalSubagentContextText(internalRuntimeContextText)) {
       return { create: false, reason: "internal subagent run" };
     }
     return { create: false, reason: "internal system run" };
@@ -2471,6 +2472,15 @@ function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType
   if (/^\[subagent(?::[^\]]+)?\]/i.test(prompt)) return { create: false, reason: "internal subagent run" };
   if (taskType !== "conversation" && taskType !== "scheduled") return { create: false, reason: "unsupported OpenClaw task type" };
   return { create: true };
+}
+
+function isOpenClawInternalRuntimeContextText(value) {
+  return /^(?:\[[^\]]+\]\s*)?<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>/i.test(String(value || ""));
+}
+
+function isOpenClawInternalSubagentContextText(value) {
+  const text = String(value || "");
+  return /\bsource:\s*subagent\b/i.test(text) || /\bsession_key:\s*agent:[^:\s]+:subagent:/i.test(text);
 }
 
 function parseJsonMaybe(value) {

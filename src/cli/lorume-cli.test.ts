@@ -1721,6 +1721,12 @@ EOF
       prompt: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is runtime-generated, not user-authored. [Internal task completion event] source: subagent session_key: agent:main:subagent:researcher type: subagent task status: completed successfully",
       sessionKey: "agent:main:dingtalk:group:group-live",
     });
+    writeOpenClawTrajectoryFile(sessionDir, "runtime-context-subagent-snapshot", {
+      finalStatus: "success",
+      prompt: "",
+      snapshotUserMessage: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is runtime-generated, not user-authored. [Internal task completion event] source: subagent session_key: agent:main:subagent:researcher type: subagent task status: completed successfully",
+      sessionKey: "agent:main:dingtalk:group:group-live",
+    });
 
     const output = runCli([
       "collect",
@@ -1746,9 +1752,9 @@ EOF
       }),
       expect.objectContaining({
         code: "openclaw_internal_subagent_ignored",
-        count: 2,
+        count: 3,
         severity: "debug",
-        sampleRefs: expect.arrayContaining(["subagent-run", "runtime-context-subagent"]),
+        sampleRefs: expect.arrayContaining(["subagent-run", "runtime-context-subagent", "runtime-context-subagent-snapshot"]),
       }),
     ]));
     expect(output.diagnostics.items.some((item: { severity?: string }) => item.severity === "warning")).toBe(false);
@@ -2141,11 +2147,12 @@ function writeOpenClawTrajectoryFile(
     finalStatus: "success" | "error" | "interrupted";
     prompt: string;
     sessionKey?: string;
+    snapshotUserMessage?: string;
     traceError?: string;
   },
 ) {
   const sessionKey = options.sessionKey ?? "agent:main:dingtalk:group:group-live";
-  writeFileSync(path.join(sessionDir, `${runId}.trajectory.jsonl`), [
+  const records = [
     JSON.stringify({
       type: "session.started",
       runId,
@@ -2170,7 +2177,21 @@ function writeOpenClawTrajectoryFile(
         ...(options.traceError ? { error: options.traceError } : {}),
       },
     }),
-  ].join("\n"));
+  ];
+  if (options.snapshotUserMessage) {
+    records.push(JSON.stringify({
+      type: "model.completed",
+      runId,
+      sessionKey,
+      ts: "2026-05-21T04:04:00.000Z",
+      data: {
+        messagesSnapshot: [
+          { role: "user", content: options.snapshotUserMessage },
+        ],
+      },
+    }));
+  }
+  writeFileSync(path.join(sessionDir, `${runId}.trajectory.jsonl`), records.join("\n"));
 }
 
 function writeExecutable(filePath: string, content: string) {

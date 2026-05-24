@@ -6,7 +6,7 @@ import path from "node:path";
 export const COLLECTOR_VERSION = "0.1.0";
 
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
-const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock";
+const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock,codex";
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -220,6 +220,12 @@ function formatDiagnosticMessage(item) {
     slock_unassigned_task_ignored: `${count} 条 Slock 任务缺少 assignee，已跳过。`,
     slock_unknown_task_status: `${count} 条 Slock 任务状态未知，已映射为 unknown。`,
     slock_unsupported_runtime_ignored: `${count} 个 Slock active profile 使用了尚未支持的 runtime，已跳过。`,
+    codex_missing_user_message: `${count} 条 Codex native 会话缺少用户消息，已跳过。`,
+    codex_owned_by_multica_ignored: `${count} 条 Multica-owned Codex 会话已过滤。`,
+    codex_owned_by_slock_ignored: `${count} 条 Slock-owned Codex 会话已过滤。`,
+    codex_session_jsonl_unreadable: `${count} 条 Codex session JSONL 不可读，已跳过。`,
+    codex_state_unreadable: `${count} 次 Codex state 不可读或无法解析。`,
+    codex_unknown_task_status: `${count} 条 Codex native 会话状态未知，已映射为 unknown。`,
   };
   return messages[item.code] || item.message || item.code;
 }
@@ -363,6 +369,308 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
   );
 
   return { runtimes: [runtime], agents, tasks: trajectoryMapping.tasks, diagnostics: trajectoryMapping.diagnostics };
+}
+
+function collectCodexDeviceState(deviceId, collectedAt) {
+  const codexRoot = process.env.LORUME_CODEX_HOME || path.join(homeDir(), ".codex");
+  const statePath = process.env.LORUME_CODEX_STATE_PATH || path.join(codexRoot, "state_5.sqlite");
+  if (!existsSync(statePath)) return { runtimes: [], agents: [], tasks: [], diagnostics: [] };
+
+  const diagnostics = createCollectionDiagnosticCollector("codex");
+  let rows = [];
+  try {
+    rows = readCodexThreadRows(statePath);
+  } catch {
+    diagnostics.add(codexDiagnostic("codex_state_unreadable", "error", "adapter", "ignored"), statePath);
+    const runtime = createProductRuntime({
+      deviceId,
+      kind: "codex",
+      name: "Codex",
+      collectionStatus: "error",
+      lastSeenAt: collectedAt,
+      diagnostics: {
+        paths: compactPaths([{ label: "State", path: statePath }]),
+        lastError: "Codex state is unreadable",
+      },
+    });
+    return { runtimes: [runtime], agents: [], tasks: [], diagnostics: diagnostics.items() };
+  }
+
+  const runtime = createProductRuntime({
+    deviceId,
+    kind: "codex",
+    name: "Codex",
+    collectionStatus: "online",
+    lastSeenAt: collectedAt,
+    diagnostics: {
+      paths: compactPaths([
+        { label: "State", path: statePath },
+        { label: "Sessions", path: path.join(codexRoot, "sessions") },
+      ]),
+    },
+  });
+  const agent = {
+    ...createProductAgent({
+      runtimeId: runtime.id,
+      externalId: "codex-local",
+      name: "Codex",
+      collectionStatus: "online",
+      lastSeenAt: collectedAt,
+      diagnostics: {
+        paths: compactPaths([{ label: "Codex", path: codexRoot }]),
+      },
+    }),
+    id: `${runtime.id}:agent:codex:local`,
+  };
+
+  const tasks = [];
+  for (const row of rows) {
+    const threadId = cleanCodexText(codexThreadValue(row, ["id", "thread_id", "threadId"]));
+    if (!threadId) continue;
+
+    const cwd = cleanCodexText(codexThreadValue(row, ["cwd", "current_working_directory", "currentWorkingDirectory"]));
+    const cwdKind = classifyCodexThreadCwd(cwd);
+    if (cwdKind === "slock-owned") {
+      diagnostics.add(codexDiagnostic("codex_owned_by_slock_ignored", "info", "task", "task_dropped"), threadId);
+      continue;
+    }
+    if (cwdKind === "multica-owned") {
+      diagnostics.add(codexDiagnostic("codex_owned_by_multica_ignored", "info", "task", "task_dropped"), threadId);
+      continue;
+    }
+
+    const rolloutPath = cleanCodexText(codexThreadValue(row, ["rollout_path", "rolloutPath", "session_path", "sessionPath"]));
+    const sessionPath = resolveCodexSessionPath(codexRoot, rolloutPath);
+    const records = readCodexSessionRecords(sessionPath);
+    if (!records) {
+      diagnostics.add(codexDiagnostic("codex_session_jsonl_unreadable", "error", "task", "task_dropped"), threadId);
+      continue;
+    }
+    if (codexSessionHasSlockOwnership(records)) {
+      diagnostics.add(codexDiagnostic("codex_owned_by_slock_ignored", "info", "task", "task_dropped"), threadId);
+      continue;
+    }
+
+    const userMessage = cleanCodexText(
+      codexThreadValue(row, ["first_user_message", "firstUserMessage", "first_user_msg", "firstUserMsg"]) ||
+      firstCodexUserMessage(records),
+    );
+    if (!userMessage) {
+      diagnostics.add(codexDiagnostic("codex_missing_user_message", "warning", "task", "task_dropped"), threadId);
+      continue;
+    }
+
+    const status = codexSessionHasTaskComplete(records) ? "done" : "unknown";
+    if (status === "unknown") {
+      diagnostics.add(codexDiagnostic("codex_unknown_task_status", "warning", "task", "task_ingested_with_gap"), threadId);
+    }
+    const agentReply = latestCodexAgentReply(records);
+    const createdAt = toIsoTimestamp(codexThreadValue(row, ["created_at", "createdAt", "created"]));
+    const updatedAt = latestIsoTimestamp(
+      toIsoTimestamp(codexThreadValue(row, ["updated_at", "updatedAt", "modified_at", "modifiedAt"])),
+      latestCodexRecordTimestamp(records),
+    );
+    const rawCodex = codexRawEvidence(row, threadId, rolloutPath);
+    tasks.push({
+      id: makeProductTaskId(agent.id, threadId),
+      agentId: agent.id,
+      taskType: "conversation",
+      status,
+      userMessage,
+      ...(agentReply ? { agentReply } : {}),
+      adapter: { kind: "codex" },
+      raw: { codex: rawCodex },
+      ...(createdAt ? { createdAt } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    });
+  }
+
+  return {
+    runtimes: [runtime],
+    agents: [agent],
+    tasks: orderOpenClawProductTasks(tasks),
+    diagnostics: diagnostics.items(),
+  };
+}
+
+function readCodexThreadRows(statePath) {
+  const script = `
+const { DatabaseSync } = require("node:sqlite");
+const db = new DatabaseSync(process.argv[1], { readOnly: true });
+const rows = db.prepare("SELECT * FROM threads").all();
+db.close();
+process.stdout.write(JSON.stringify(rows));
+`;
+  const output = execFileSync(process.execPath, ["--no-warnings", "-e", script, statePath], {
+    encoding: "utf8",
+    maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const rows = JSON.parse(output || "[]");
+  return Array.isArray(rows) ? rows : [];
+}
+
+function codexThreadValue(row, names) {
+  if (!row || typeof row !== "object") return undefined;
+  for (const name of names) {
+    if (row[name] !== undefined && row[name] !== null && row[name] !== "") return row[name];
+  }
+  return undefined;
+}
+
+function classifyCodexThreadCwd(cwd) {
+  const normalized = String(cwd || "").replace(/\\/g, "/").toLowerCase();
+  if (normalized.includes("/.slock/agents/")) return "slock-owned";
+  if (normalized.includes("/multica_workspaces/")) return "multica-owned";
+  return "codex-native-or-other";
+}
+
+function resolveCodexSessionPath(codexRoot, rolloutPath) {
+  if (!rolloutPath) return "";
+  if (path.isAbsolute(rolloutPath)) return rolloutPath;
+  const resolved = path.resolve(codexRoot, rolloutPath);
+  const root = path.resolve(codexRoot);
+  return resolved === root || resolved.startsWith(`${root}${path.sep}`) ? resolved : "";
+}
+
+function readCodexSessionRecords(sessionPath) {
+  if (!sessionPath || !existsSync(sessionPath)) return null;
+  try {
+    return readFileSync(sessionPath, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch {
+    return null;
+  }
+}
+
+function codexSessionHasSlockOwnership(records) {
+  return records.some((record) => JSON.stringify(record).includes("mcp__chat__"));
+}
+
+function codexSessionHasTaskComplete(records) {
+  return records.some((record) => codexRecordType(record) === "task_complete");
+}
+
+function firstCodexUserMessage(records) {
+  for (const record of records) {
+    if (codexRecordType(record) === "user_message" || codexRecordRole(record) === "user") {
+      const text = codexRecordText(record);
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function latestCodexAgentReply(records) {
+  let reply = "";
+  for (const record of records) {
+    const type = codexRecordType(record);
+    if (type === "task_complete") {
+      const text = codexRecordText(record);
+      if (text) reply = text;
+      continue;
+    }
+    if (type === "agent_message" || type === "assistant_message" || codexRecordRole(record) === "assistant") {
+      const text = codexRecordText(record);
+      if (text) reply = text;
+    }
+  }
+  return reply;
+}
+
+function latestCodexRecordTimestamp(records) {
+  let latest;
+  for (const record of records) {
+    latest = latestIsoTimestamp(latest, toIsoTimestamp(record?.timestamp || record?.ts || record?.time));
+  }
+  return latest;
+}
+
+function codexRecordType(record) {
+  return cleanCodexText(
+    record?.payload?.type ||
+    record?.msg?.type ||
+    (record?.event && typeof record.event === "object" ? record.event.type : "") ||
+    record?.type ||
+    record?.event ||
+    record?.kind,
+  );
+}
+
+function codexRecordRole(record) {
+  return cleanCodexText(
+    record?.payload?.role ||
+    record?.msg?.role ||
+    (record?.message && typeof record.message === "object" ? record.message.role : "") ||
+    record?.role,
+  );
+}
+
+function codexRecordText(record) {
+  const payloads = [
+    record,
+    record?.payload,
+    record?.msg,
+    record?.event && typeof record.event === "object" ? record.event : undefined,
+  ].filter(Boolean);
+  for (const payload of payloads) {
+    const direct = cleanCodexText(
+      payload?.message ||
+      payload?.text ||
+      payload?.content ||
+      payload?.last_agent_message ||
+      payload?.lastAgentMessage ||
+      payload?.agentReply,
+    );
+    if (direct) return direct;
+    if (Array.isArray(payload?.content)) {
+      return cleanCodexText(payload.content.map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") return part.text || part.content || "";
+        return "";
+      }).join(" "));
+    }
+  }
+  return "";
+}
+
+function cleanCodexText(value) {
+  if (Array.isArray(value)) {
+    return cleanCodexText(value.map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object") return part.text || part.content || "";
+      return "";
+    }).join(" "));
+  }
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function codexRawEvidence(row, threadId, rolloutPath) {
+  const git = {
+    ...(cleanCodexText(codexThreadValue(row, ["git_branch", "gitBranch", "branch"])) ? { branch: cleanCodexText(codexThreadValue(row, ["git_branch", "gitBranch", "branch"])) } : {}),
+    ...(cleanCodexText(codexThreadValue(row, ["git_sha", "gitSha", "sha", "commit"])) ? { sha: cleanCodexText(codexThreadValue(row, ["git_sha", "gitSha", "sha", "commit"])) } : {}),
+    ...(cleanCodexText(codexThreadValue(row, ["git_origin", "gitOrigin", "origin"])) ? { origin: cleanCodexText(codexThreadValue(row, ["git_origin", "gitOrigin", "origin"])) } : {}),
+  };
+  const tokensUsed = Number(codexThreadValue(row, ["tokens_used", "tokensUsed", "token_count", "tokenCount"]));
+  return {
+    threadId,
+    ...(rolloutPath ? { rolloutPath } : {}),
+    ...(cleanCodexText(codexThreadValue(row, ["source"])) ? { source: cleanCodexText(codexThreadValue(row, ["source"])) } : {}),
+    ...(cleanCodexText(codexThreadValue(row, ["model"])) ? { model: cleanCodexText(codexThreadValue(row, ["model"])) } : {}),
+    cwdKind: "codex-native-or-other",
+    ...(Number.isFinite(tokensUsed) ? { tokensUsed } : {}),
+    ...(Object.keys(git).length ? { git } : {}),
+  };
+}
+
+function codexDiagnostic(code, severity, target, action) {
+  return { source: "codex", code, severity, target, action };
 }
 
 const SLOCK_HISTORY_PAGE_LIMIT = 100;
@@ -2272,6 +2580,9 @@ export function collectDeviceStateSnapshot(config = {}, args = {}) {
   }
   if (adapterEnabled(mergedConfig, "slock")) {
     collections.push(collectSlockDeviceState(baseDevice, collectedAt, mergedConfig));
+  }
+  if (adapterEnabled(mergedConfig, "codex")) {
+    collections.push(collectCodexDeviceState(baseDevice.id, collectedAt));
   }
   const collected = mergeRuntimeCollections(collections);
 

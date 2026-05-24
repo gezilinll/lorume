@@ -94,6 +94,98 @@ exit 91
     expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
+  it("collects native Codex tasks while skipping Slock and Multica-owned Codex sessions", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-codex-fixture-"));
+    writeCodexFixtureHome(root);
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "fixture-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "codex",
+      },
+    });
+
+    expect(output.runtimes).toEqual([
+      expect.objectContaining({
+        id: "fixture-device:runtime:codex",
+        kind: "codex",
+        name: "Codex",
+        collectionStatus: "online",
+      }),
+    ]);
+    expect(output.agents).toEqual([
+      expect.objectContaining({
+        id: "fixture-device:runtime:codex:agent:codex:local",
+        runtimeId: "fixture-device:runtime:codex",
+        name: "Codex",
+        collectionStatus: "online",
+      }),
+    ]);
+    expect(output.tasks).toEqual([
+      expect.objectContaining({
+        id: "fixture-device:runtime:codex:agent:codex:local:task:thread-native-unknown",
+        agentId: "fixture-device:runtime:codex:agent:codex:local",
+        taskType: "conversation",
+        status: "unknown",
+        userMessage: "帮我看一下这个 flaky test 为什么偶发失败",
+        agentReply: "我还在排查测试波动。",
+        adapter: { kind: "codex" },
+        raw: {
+          codex: expect.objectContaining({
+            threadId: "thread-native-unknown",
+            source: "vscode",
+            model: "gpt-5.4",
+            cwdKind: "codex-native-or-other",
+            tokensUsed: 2560,
+          }),
+        },
+      }),
+      expect.objectContaining({
+        id: "fixture-device:runtime:codex:agent:codex:local:task:thread-native-done",
+        agentId: "fixture-device:runtime:codex:agent:codex:local",
+        taskType: "conversation",
+        status: "done",
+        userMessage: "帮我总结一下当前仓库状态",
+        agentReply: "仓库状态正常，没有发现阻塞。",
+        adapter: { kind: "codex" },
+        raw: {
+          codex: expect.objectContaining({
+            threadId: "thread-native-done",
+            source: "exec",
+            model: "gpt-5.4",
+            cwdKind: "codex-native-or-other",
+            tokensUsed: 1280,
+            git: {
+              branch: "main",
+              sha: "abc1234",
+              origin: "git@example.com:fixture/lorume.git",
+            },
+          }),
+        },
+      }),
+    ]);
+    for (const task of output.tasks) {
+      expect(task).not.toHaveProperty("runtimeId");
+      expect(task).not.toHaveProperty("title");
+      expect(task).not.toHaveProperty("description");
+      expect(task).not.toHaveProperty("toolCalls");
+      expect(task).not.toHaveProperty("channel");
+      expect(task).not.toHaveProperty("conversation");
+    }
+    expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "codex_missing_user_message", severity: "warning", count: 1 }),
+      expect.objectContaining({ code: "codex_unknown_task_status", severity: "warning", count: 1 }),
+      expect.objectContaining({ code: "codex_owned_by_slock_ignored", severity: "info", count: 1 }),
+      expect.objectContaining({ code: "codex_owned_by_multica_ignored", severity: "info", count: 1 }),
+    ]));
+  });
+
   it("discovers Slock daemon credentials by default and collects local Slock tasks", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-daemon-discovery-"));
@@ -1995,6 +2087,41 @@ if (args[0] === "tasks" && args[1] === "list") {
 }
 console.log("{}");
 `);
+}
+
+function writeCodexFixtureHome(root: string) {
+  const fixtureRoot = path.join(repoRoot, "fixtures", "runtime", "codex");
+  const codexRoot = path.join(root, ".codex");
+  const sessionsRoot = path.join(codexRoot, "sessions");
+  mkdirSync(sessionsRoot, { recursive: true });
+  for (const fileName of [
+    "native-done.jsonl",
+    "native-unknown.jsonl",
+    "slock-owned.jsonl",
+    "multica-owned.jsonl",
+    "missing-user.jsonl",
+  ]) {
+    writeFileSync(
+      path.join(sessionsRoot, fileName),
+      readFileSync(path.join(fixtureRoot, "sessions", fileName), "utf8"),
+    );
+  }
+
+  const script = `
+const { DatabaseSync } = require("node:sqlite");
+const { readFileSync } = require("node:fs");
+const [dbPath, sqlPath] = process.argv.slice(1);
+const db = new DatabaseSync(dbPath);
+db.exec(readFileSync(sqlPath, "utf8"));
+db.close();
+`;
+  execFileSync(process.execPath, [
+    "--no-warnings",
+    "-e",
+    script,
+    path.join(codexRoot, "state_5.sqlite"),
+    path.join(fixtureRoot, "threads.sql"),
+  ]);
 }
 
 function writeOpenClawTrajectoryFile(

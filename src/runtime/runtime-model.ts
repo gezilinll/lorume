@@ -42,7 +42,7 @@ export const TASK_TYPES = ["conversation", "scheduled"] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];
 
-export const TASK_ADAPTER_KINDS = ["openclaw", "slock"] as const;
+export const TASK_ADAPTER_KINDS = ["openclaw", "slock", "codex"] as const;
 
 export type TaskAdapterKind = (typeof TASK_ADAPTER_KINDS)[number];
 
@@ -141,6 +141,19 @@ export interface Task {
       threadTarget?: string;
       taskClaimedAt?: string;
       taskCompletedAt?: string;
+    };
+    codex?: {
+      threadId?: string;
+      rolloutPath?: string;
+      source?: string;
+      model?: string;
+      cwdKind?: "codex-native-or-other";
+      tokensUsed?: number;
+      git?: {
+        branch?: string;
+        sha?: string;
+        origin?: string;
+      };
     };
   };
   error?: string;
@@ -308,9 +321,11 @@ function cleanTaskRaw(value: LooseRecord | undefined): Task["raw"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const openclaw = cleanOpenClawRaw(value.openclaw);
   const slock = cleanSlockRaw(value.slock);
-  return openclaw || slock ? {
+  const codex = cleanCodexRaw(value.codex);
+  return openclaw || slock || codex ? {
     ...(openclaw ? { openclaw } : {}),
     ...(slock ? { slock } : {}),
+    ...(codex ? { codex } : {}),
   } : undefined;
 }
 
@@ -337,6 +352,32 @@ function cleanSlockRaw(value: LooseRecord | undefined): NonNullable<NonNullable<
     ...(value.threadTarget ? { threadTarget: String(value.threadTarget) } : {}),
     ...(value.taskClaimedAt ? { taskClaimedAt: String(value.taskClaimedAt) } : {}),
     ...(value.taskCompletedAt ? { taskCompletedAt: String(value.taskCompletedAt) } : {}),
+  };
+  return Object.keys(output).length ? output : undefined;
+}
+
+function cleanCodexRaw(value: LooseRecord | undefined): NonNullable<NonNullable<Task["raw"]>["codex"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const tokensUsed = Number(value.tokensUsed);
+  const git = cleanCodexGit(value.git);
+  const output = {
+    ...(value.threadId ? { threadId: String(value.threadId) } : {}),
+    ...(value.rolloutPath ? { rolloutPath: String(value.rolloutPath) } : {}),
+    ...(value.source ? { source: String(value.source) } : {}),
+    ...(value.model ? { model: String(value.model) } : {}),
+    ...(value.cwdKind === "codex-native-or-other" ? { cwdKind: value.cwdKind } : {}),
+    ...(Number.isFinite(tokensUsed) ? { tokensUsed } : {}),
+    ...(git ? { git } : {}),
+  };
+  return Object.keys(output).length ? output : undefined;
+}
+
+function cleanCodexGit(value: LooseRecord | undefined): NonNullable<NonNullable<NonNullable<Task["raw"]>["codex"]>["git"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const output = {
+    ...(value.branch ? { branch: String(value.branch) } : {}),
+    ...(value.sha ? { sha: String(value.sha) } : {}),
+    ...(value.origin ? { origin: String(value.origin) } : {}),
   };
   return Object.keys(output).length ? output : undefined;
 }
@@ -399,7 +440,7 @@ function isCollectionDiagnosticAction(value: unknown): value is NonNullable<Coll
 }
 
 function isTaskAdapterKind(value: unknown): value is TaskAdapterKind {
-  return value === "openclaw" || value === "slock";
+  return value === "openclaw" || value === "slock" || value === "codex";
 }
 
 function isTaskChannelKind(value: unknown): value is TaskChannelKind {

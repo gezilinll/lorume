@@ -386,6 +386,63 @@ console.log(JSON.stringify({
     }
   });
 
+  it("posts Codex tasks through task batches instead of metadata snapshots", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-codex-task-batch-config-"));
+    const configPath = path.join(configDir, "config.json");
+    const cachePath = path.join(configDir, "task-cache.json");
+    const codexFixturePath = path.join(configDir, "codex-snapshot.json");
+    const { server, receivedSnapshot, receivedTaskBatch, baseUrl } = await startSnapshotServer({
+      expectedAuthorization: "Bearer device-token-test",
+    });
+    writeFileSync(configPath, JSON.stringify({
+      deviceToken: "device-token-test",
+      serverUrl: baseUrl,
+      taskSyncCachePath: cachePath,
+    }));
+    writeFileSync(codexFixturePath, JSON.stringify(createCodexTaskSnapshot()));
+
+    try {
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--fixture",
+        codexFixturePath,
+        "--config",
+        configPath,
+      ]);
+      const snapshot = await receivedSnapshot;
+      const taskBatch = await receivedTaskBatch as {
+        tasks: Array<{ hash: string; task?: { id?: string; adapter?: { kind?: string }; channel?: unknown; conversation?: unknown; raw?: { codex?: unknown } } }>;
+      };
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+
+      expect(snapshot.tasks).toEqual([]);
+      expect(taskBatch).toMatchObject({
+        deviceId: "codex-device",
+        schemaVersion: "device-state-v3",
+        tasks: [expect.objectContaining({
+          hash: expect.any(String),
+          task: expect.objectContaining({
+            id: "codex-device:runtime:codex:agent:codex:local:task:thread-native-done",
+            adapter: { kind: "codex" },
+            raw: { codex: expect.objectContaining({ threadId: "thread-native-done", source: "exec" }) },
+          }),
+        })],
+      });
+      expect(taskBatch.tasks[0].task).not.toHaveProperty("channel");
+      expect(taskBatch.tasks[0].task).not.toHaveProperty("conversation");
+      const entry = taskBatch.tasks[0];
+      expect(cache.tasks["codex-device:runtime:codex:agent:codex:local:task:thread-native-done"]).toMatchObject({
+        adapterKind: "codex",
+        hash: entry.hash,
+        lastAckedAt: expect.any(String),
+      });
+    } finally {
+      server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("resends tasks when the task sync cache belongs to a different registration scope", async () => {
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-task-cache-scope-"));
     const configPath = path.join(configDir, "config.json");
@@ -686,6 +743,61 @@ function createSlockTaskSnapshot(deviceId = "slock-device") {
       taskType: "conversation",
       updatedAt: "2026-05-23T01:05:00.000Z",
       userMessage: "帮我整理今天的项目风险",
+    }],
+  };
+}
+
+function createCodexTaskSnapshot(deviceId = "codex-device") {
+  const collectedAt = "2026-05-24T01:10:00.000Z";
+  const runtimeId = `${deviceId}:runtime:codex`;
+  const agentId = `${runtimeId}:agent:codex:local`;
+  return {
+    collectedAt,
+    device: {
+      architecture: "arm64",
+      collectionStatus: "online",
+      collector: { version: "0.1.0" },
+      hostname: "codex.local",
+      id: deviceId,
+      lastSeenAt: collectedAt,
+      os: "darwin",
+    },
+    runtimes: [{
+      collectionStatus: "online",
+      deviceId,
+      id: runtimeId,
+      kind: "codex",
+      lastSeenAt: collectedAt,
+      name: "Codex",
+    }],
+    agents: [{
+      collectionStatus: "online",
+      id: agentId,
+      lastSeenAt: collectedAt,
+      name: "Codex",
+      runtimeId,
+    }],
+    tasks: [{
+      adapter: { kind: "codex" },
+      agentId,
+      agentReply: "仓库状态正常，没有发现阻塞。",
+      createdAt: "2026-05-24T01:00:00.000Z",
+      id: `${agentId}:task:thread-native-done`,
+      raw: {
+        codex: {
+          threadId: "thread-native-done",
+          rolloutPath: "sessions/native-done.jsonl",
+          source: "exec",
+          model: "gpt-5.4",
+          cwdKind: "codex-native-or-other",
+          tokensUsed: 1280,
+          git: { branch: "main", sha: "abc1234", origin: "git@example.com:fixture/lorume.git" },
+        },
+      },
+      status: "done",
+      taskType: "conversation",
+      updatedAt: "2026-05-24T01:05:00.000Z",
+      userMessage: "帮我总结一下当前仓库状态",
     }],
   };
 }

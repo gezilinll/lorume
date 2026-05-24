@@ -1,0 +1,3 @@
+{"type":"event_msg","timestamp":"2026-05-24T01:00:00.000Z","payload":{"type":"user_message","message":"帮我总结一下当前仓库状态"}}
+{"type":"event_msg","timestamp":"2026-05-24T01:04:00.000Z","payload":{"type":"agent_message","message":"仓库状态正常，没有发现阻塞。"}}
+{"type":"event_msg","timestamp":"2026-05-24T01:05:00.000Z","payload":{"type":"task_complete","last_agent_message":"仓库状态正常，没有发现阻塞。"}}

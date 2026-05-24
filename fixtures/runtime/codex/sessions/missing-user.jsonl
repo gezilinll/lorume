@@ -1,0 +1,2 @@
+{"type":"agent_message","timestamp":"2026-05-24T01:40:00.000Z","message":"这条会话缺少用户消息。"}
+{"type":"task_complete","timestamp":"2026-05-24T01:45:00.000Z","last_agent_message":"这条会话缺少用户消息。"}

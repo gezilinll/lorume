@@ -94,7 +94,7 @@ describe("runtime four-object model", () => {
   });
 
   it("defines only implemented task adapter and channel kinds", () => {
-    expect(TASK_ADAPTER_KINDS).toEqual(["openclaw", "slock"]);
+    expect(TASK_ADAPTER_KINDS).toEqual(["openclaw", "slock", "codex"]);
     expect(TASK_CHANNEL_KINDS).toEqual(["dingtalk", "webchat", "slock"]);
   });
 
@@ -132,6 +132,49 @@ describe("runtime four-object model", () => {
       channel: { kind: "slock", externalId: "#daily-work" },
       raw: { slock: { status: "done", messageId: "msg-1" } },
     });
+  });
+
+  it("accepts implemented Codex adapter and raw fields without adding channel context", () => {
+    const snapshot = createDeviceStateSnapshot({
+      collectedAt: "2026-05-24T00:00:00.000Z",
+      device: { id: "device-1", hostname: "device-1.local", os: "darwin" },
+      tasks: [{
+        id: "device-1:runtime:codex:agent:codex:local:task:thread-1",
+        agentId: "device-1:runtime:codex:agent:codex:local",
+        taskType: "conversation",
+        status: "done",
+        userMessage: "总结仓库状态",
+        agentReply: "仓库状态正常。",
+        adapter: { kind: "codex" },
+        raw: {
+          codex: {
+            threadId: "thread-1",
+            rolloutPath: "sessions/thread-1.jsonl",
+            source: "exec",
+            model: "gpt-5.4",
+            cwdKind: "codex-native-or-other",
+            tokensUsed: 1280,
+            git: { branch: "main", sha: "abc1234", origin: "git@example.com:fixture/lorume.git" },
+          },
+        },
+      }],
+    });
+
+    expect(snapshot.tasks[0]).toMatchObject({
+      adapter: { kind: "codex" },
+      raw: {
+        codex: {
+          threadId: "thread-1",
+          source: "exec",
+          model: "gpt-5.4",
+          cwdKind: "codex-native-or-other",
+          tokensUsed: 1280,
+          git: { branch: "main", sha: "abc1234", origin: "git@example.com:fixture/lorume.git" },
+        },
+      },
+    });
+    expect(snapshot.tasks[0]).not.toHaveProperty("channel");
+    expect(snapshot.tasks[0]).not.toHaveProperty("conversation");
   });
 
   it("accepts Slock profile runtime kinds only when they are implemented", () => {

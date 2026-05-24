@@ -1,0 +1,3 @@
+{"type":"user_message","timestamp":"2026-05-24T01:20:00.000Z","message":"从 Slock 分配过来的任务"}
+{"type":"function_call","timestamp":"2026-05-24T01:21:00.000Z","name":"mcp__chat__send_message","arguments":{"target":"#daily-work"}}
+{"type":"task_complete","timestamp":"2026-05-24T01:25:00.000Z","last_agent_message":"Slock 任务已完成。"}

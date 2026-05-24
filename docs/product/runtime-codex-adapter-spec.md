@@ -22,7 +22,7 @@ Codex 是设备上的执行 Runtime。Codex adapter 的边界是：
 | 用途 | Codex 来源 | 规则 |
 |---|---|---|
 | Thread index | `~/.codex/state_5.sqlite` 的 `threads` 表 | 用于 thread id、session path、source、model、cwd、first user message、git metadata、token count、created/updated time。 |
-| Session evidence | `~/.codex/sessions/**/*.jsonl` | 只读取 thread index 引用的 JSONL，用于 `task_complete`、第一条用户消息 fallback、最新 assistant 回复和 status 观察。 |
+| Session evidence | `~/.codex/sessions/**/*.jsonl` | 只读取 thread index 引用的 JSONL，用于 `task_complete`、第一条用户消息 fallback、最新 assistant 回复和 status 观察。JSONL 语义事件优先读取 `payload.type`，再回退到顶层 `type`。 |
 
 第一版不使用：
 
@@ -45,7 +45,6 @@ Codex adapter 必须先分类，再映射 Task。
 | `slock-owned` | `cwd` 包含 `/.slock/agents/`，或 JSONL 中出现 `mcp__chat__*` / Slock target 证据 | 不生成 Codex Task；输出 `codex_owned_by_slock_ignored`。 |
 | `multica-owned` | `cwd` 包含 `/multica_workspaces/` | 不生成 Codex Task；输出 `codex_owned_by_multica_ignored`。 |
 | `codex-native-or-other` | 没有 Slock 或 Multica ownership 证据 | 满足必填字段时生成 Codex Task。 |
-| `unknown-owned` | thread row 或 JSONL 无法读取到足够信息完成分类 | 不生成 Task；输出 `codex_session_unclassified_ignored`。 |
 
 Codex session 是 Slock-owned 只说明 Codex 执行了来自 Slock 的工作，不说明 Codex 拥有 Slock 的 channel、assignee、status 或 agent reply。Slock adapter 继续拥有 `channel.kind="slock"`、Slock conversation title、assignee、Slock status 和 Slock agent reply 富化。
 
@@ -77,7 +76,7 @@ Codex adapter 使用 `adapter.kind="codex"` 和 `raw.codex`。Codex Task 不新�
 | `taskType` | Codex 会话 | 当前统一为 `conversation`。 |
 | `status` | JSONL status evidence | 第一版只输出 `done` 或 `unknown`。 |
 | `userMessage` | `threads.first_user_message`，fallback 为 JSONL 第一条用户消息 | 必须有非空用户可读内容才生成 Task。 |
-| `agentReply` | 最新 assistant/agent 文本或 `task_complete.last_agent_message` | 可为空；不得合成。 |
+| `agentReply` | 最新 assistant/agent 文本或 `task_complete.last_agent_message` | 可为空；不得合成。真实 Codex JSONL 可能把文本放在 `payload.message`、`payload.content` 或 `payload.last_agent_message`。 |
 | `adapter.kind` | adapter 固定值 | `codex`。 |
 | `channel` | 无 | 第一版省略；不要把 Runtime、adapter 或 cwd 当成 channel。 |
 | `conversation` | 无 | 第一版省略；不要用 thread title 重新引入 Task title。 |
@@ -99,7 +98,7 @@ Codex adapter 使用 `adapter.kind="codex"` 和 `raw.codex`。Codex Task 不新�
 
 | Codex 证据 | Lorume `TaskStatus` |
 |---|---|
-| 该 thread 的 JSONL 出现 `task_complete` | `done` |
+| 该 thread 的 JSONL 出现顶层 `type="task_complete"` 或 `payload.type="task_complete"` | `done` |
 | 缺少 `task_complete`，且没有已经进入 spec/harness 的终态证据 | `unknown` |
 
 明确不映射：
@@ -121,7 +120,6 @@ Codex adapter 只输出结构化聚合 diagnostics，不输出逐条原始 JSONL
 |---|---|---|
 | `codex_owned_by_slock_ignored` | `info` | Thread 为 Slock-owned，被跳过以避免重复 Task。 |
 | `codex_owned_by_multica_ignored` | `info` | Thread 为 Multica-owned，被跳过。 |
-| `codex_session_unclassified_ignored` | `warning` | Thread 无法安全分类，被跳过。 |
 | `codex_missing_user_message` | `warning` | Native candidate 缺少可读 `userMessage`，被跳过。 |
 | `codex_unknown_task_status` | `warning` | Native Task 入库但 status 只能判断为 `unknown`。 |
 | `codex_session_jsonl_unreadable` | `error` | Thread 指向的 JSONL 不可读。 |

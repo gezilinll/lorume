@@ -222,6 +222,53 @@ describeDb("runtime HTTP API with Postgres store", () => {
     }
   });
 
+  it("persists Codex task batches and serves Codex task queries without channel context", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createCodexDeviceStateSnapshot();
+
+        const response = await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
+        const taskBatchResponse = await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
+        const tasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?status=done`);
+
+        expect(response.status).toBe(201);
+        expect(taskBatchResponse.status).toBe(201);
+        await expect(taskBatchResponse.json()).resolves.toMatchObject({
+          acked: [{ id: "codex-device:runtime:codex:agent:codex:local:task:thread-native-done", hash: expect.any(String) }],
+          deviceId: "codex-device",
+          ok: true,
+        });
+        const tasksBody = await tasksResponse.json();
+        expect(tasksBody).toMatchObject({
+          items: [
+            expect.objectContaining({
+              adapter: { kind: "codex" },
+              agentId: "codex-device:runtime:codex:agent:codex:local",
+              id: "codex-device:runtime:codex:agent:codex:local:task:thread-native-done",
+              raw: { codex: expect.objectContaining({ threadId: "thread-native-done", source: "exec" }) },
+              status: "done",
+            }),
+          ],
+          total: 1,
+        });
+        expect(tasksBody.items[0]).not.toHaveProperty("runtimeId");
+        expect(tasksBody.items[0]).not.toHaveProperty("toolCalls");
+        expect(tasksBody.items[0]).not.toHaveProperty("title");
+        expect(tasksBody.items[0]).not.toHaveProperty("description");
+        expect(tasksBody.items[0]).not.toHaveProperty("channel");
+        expect(tasksBody.items[0]).not.toHaveProperty("conversation");
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("records failed collector ingestions for invalid device-state snapshots", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -537,7 +584,60 @@ function createSlockDeviceStateSnapshot() {
   };
 }
 
-function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot> | ReturnType<typeof createSlockDeviceStateSnapshot>) {
+function createCodexDeviceStateSnapshot() {
+  const collectedAt = "2026-05-24T01:10:00.000Z";
+  return {
+    collectedAt,
+    device: {
+      architecture: "arm64",
+      collectionStatus: "online",
+      collector: { version: "0.1.0" },
+      hostname: "codex.local",
+      id: "codex-device",
+      lastSeenAt: collectedAt,
+      os: "darwin",
+      user: { username: "tester" },
+    },
+    runtimes: [{
+      collectionStatus: "online",
+      deviceId: "codex-device",
+      id: "codex-device:runtime:codex",
+      kind: "codex",
+      lastSeenAt: collectedAt,
+      name: "Codex",
+    }],
+    agents: [{
+      collectionStatus: "online",
+      id: "codex-device:runtime:codex:agent:codex:local",
+      lastSeenAt: collectedAt,
+      name: "Codex",
+      runtimeId: "codex-device:runtime:codex",
+    }],
+    tasks: [{
+      adapter: { kind: "codex" },
+      agentId: "codex-device:runtime:codex:agent:codex:local",
+      agentReply: "仓库状态正常，没有发现阻塞。",
+      createdAt: "2026-05-24T01:00:00.000Z",
+      id: "codex-device:runtime:codex:agent:codex:local:task:thread-native-done",
+      raw: {
+        codex: {
+          threadId: "thread-native-done",
+          rolloutPath: "sessions/native-done.jsonl",
+          source: "exec",
+          model: "gpt-5.4",
+          cwdKind: "codex-native-or-other",
+          tokensUsed: 1280,
+        },
+      },
+      status: "done",
+      taskType: "conversation",
+      updatedAt: "2026-05-24T01:05:00.000Z",
+      userMessage: "帮我总结一下当前仓库状态",
+    }],
+  };
+}
+
+function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot> | ReturnType<typeof createSlockDeviceStateSnapshot> | ReturnType<typeof createCodexDeviceStateSnapshot>) {
   const batch = createRuntimeTaskBatches(snapshot.tasks as any, {
     batchMaxBytes: 1_000_000,
     batchMaxTasks: 1_000,

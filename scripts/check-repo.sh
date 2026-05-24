@@ -28,6 +28,7 @@ required_paths=(
   "docs/product/runtime-fleet-page-spec.md"
   "docs/product/runtime-openclaw-adapter-spec.md"
   "docs/product/runtime-slock-adapter-spec.md"
+  "docs/product/runtime-codex-adapter-spec.md"
   "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
   "docs/product/cli-device-capability-spec.md"
@@ -109,6 +110,7 @@ markdown_files = [
     Path("docs/product/runtime-fleet-page-spec.md"),
     Path("docs/product/runtime-openclaw-adapter-spec.md"),
     Path("docs/product/runtime-slock-adapter-spec.md"),
+    Path("docs/product/runtime-codex-adapter-spec.md"),
     Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
@@ -142,6 +144,7 @@ forbidden_phrases = [
     ("docs/product/runtime-openclaw-adapter-spec.md", "source?: {", "Task provenance must use adapter.kind, not source"),
     ("docs/product/runtime-slock-adapter-spec.md", "source.kind", "Task provenance must use adapter.kind, not source.kind"),
     ("docs/product/runtime-slock-adapter-spec.md", "channel.name", "Task channel identity belongs in channel.kind; conversation title belongs in conversation.title"),
+    ("docs/product/runtime-codex-adapter-spec.md", "source?: {", "Task provenance must use adapter.kind, not source"),
 ]
 
 if Path("docs/product/runtime-task-probe.md").exists():

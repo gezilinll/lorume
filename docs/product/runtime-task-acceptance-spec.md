@@ -1,6 +1,6 @@
 # Runtime Task Acceptance Spec
 
-版本：TinySpec v1.3
+版本：TinySpec v1.4
 
 本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs / Work Board 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
 
@@ -22,8 +22,8 @@ Runs / Work Board 必须让用户看清：
 |---|---|---|
 | OpenClaw | 默认启用 | 可以生成 Runtime、Agent、Task。 |
 | Slock | 默认启用 | 已有 `docs/product/runtime-slock-adapter-spec.md` 约束 daemon credential discovery、ownership proof、分页和 Task 映射；只有本机 Slock workspace 与 daemon 参数可证明当前设备真实承载 Agent 时才生成 Task。 |
+| Codex | 默认启用 | 已有 `docs/product/runtime-codex-adapter-spec.md` 约束 Codex 本地数据源、ownership 分类、状态映射和 Task 映射；只采集 Codex native/other 会话。 |
 | Multica | 默认禁用 | 不执行命令、不读目录、不生成对象。 |
-| Codex | Runtime kind | 当前只作为 Slock profile runtime 的归属类型进入模型；不代表已实现 Codex adapter 或 Codex Task 采集。 |
 
 新增平台前必须先补产品 spec、adapter contract 和 harness。
 
@@ -34,7 +34,7 @@ Runs / Work Board 必须让用户看清：
 - Task 状态只用 `Task.status` 表达，不拆成 status / executionStatus 两套。
 - Adapter 负责把平台原始状态映射为 `Task.status`，但必须在 Task raw/evidence 中保留平台原始状态。
 - Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。前端/BFF 展示标题从 `userMessage` 派生。
-- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前支持 `openclaw` 和 `slock`；未实现的 adapter 或 channel kind 不提前进入枚举。
+- Task 必须保存 `adapter.kind` 表示采集归一化来源。当前支持 `openclaw`、`slock` 和 `codex`；未实现的 adapter 或 channel kind 不提前进入枚举。
 - Runtime 和 Agent 只展示 `collectionStatus`，不保存工作忙闲。
 - Runs Channel 筛选只能使用 Task 中实际出现的用户触达渠道，不能把 Runtime kind 或 adapter kind 当作渠道。
 - 不能把裸 execution、adapter capability gap、监听缺口或诊断项伪造成任务卡。
@@ -63,9 +63,23 @@ OpenClaw DingTalk 兜底：
 - 私聊无名称：`DingTalk 私聊`。
 - 不把 `cid...`、手机号或 open conversation id 展示给用户。
 
+## Codex 验收
+
+Codex adapter 只有在本机 Codex thread 能安全分类为 `codex-native-or-other` 时才生成 Task：
+
+- Runtime 固定为 `Runtime.kind="codex"`，Agent 第一版固定为本地 `Codex` Agent。
+- Task 来自 `~/.codex/state_5.sqlite` 的 thread index 和 thread 引用的 session JSONL。
+- Slock-owned Codex session 不入库为 Codex Task，由 Slock adapter 负责 Slock 平台 Task。
+- Multica-owned Codex session 不入库为 Codex Task。
+- `Task.status` 第一版只允许 `done` 和 `unknown`；新状态必须先有 profiling 证据、spec 和失败测试。
+- `userMessage` 必须来自 thread index 或 JSONL 用户消息证据；缺失时跳过并写 diagnostic。
+- `agentReply` 可为空，不能合成。
+- Codex Task 不写 `channel` 和 `conversation`，除非后续有稳定用户触点证据和 harness。
+- 当前不上报 JSONL 原文、tool calls、tool arguments、token、凭据或完整 raw payload。
+
 ## 维护规则
 
-- Adapter 策略变化时，同步更新本 spec、`docs/product/runtime-openclaw-adapter-spec.md` 和对应 harness。
+- Adapter 策略变化时，同步更新本 spec、对应 adapter spec 和对应 harness。
 - 真实设备验证结果只能沉淀为当前字段约束、脱敏 fixture 或可执行测试，不保留个人机器路径、原始 token 或临时 checklist。
 - 如果验收发现测试金字塔漏掉真实行为，先把缺口归类为 unit、script、backend API、DB integration 或 Playwright E2E，再补最小 harness。
 - 后端 WebSocket 只验证连接健康，不作为采集触发器。

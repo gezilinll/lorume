@@ -1,8 +1,8 @@
 # Runtime & Device Registration Spec
 
-版本：TinySpec v0.8
+版本：TinySpec v0.9
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw 和 Slock；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw、Slock 和 Codex；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过；Codex adapter 只采集 Codex 原生或其他未被平台 adapter 归属的本机会话，Slock-owned 和 Multica-owned 的 Codex 会话只进入 diagnostics。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
@@ -19,7 +19,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - 不开放远程任意命令执行。
 - 不把 WebSocket 用作聊天通道、任务调度通道或外部平台协议兼容层。
 - 不把 Conversation、Execution、Capability、SourceRef 或 Channel 做成一等实体。
-- 不采集 Multica 或独立 Codex adapter。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，默认启用后仍只能按其只读 ownership proof 和 Task 映射规则采集；其中 `codex` 只能作为 Slock profile 的 runtime kind 进入模型，不代表已经实现 Codex adapter。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
+- 不采集 Multica。Slock adapter 规则见 `docs/product/runtime-slock-adapter-spec.md`，默认启用后仍只能按其只读 ownership proof 和 Task 映射规则采集；Codex adapter 规则见 `docs/product/runtime-codex-adapter-spec.md`，默认启用后只采集 Codex 原生或其他未被平台 adapter 归属的本机会话。未来 Runtime kind 只有在实现、spec 和 harness 同步落地时才进入模型；Claude Code 从当前支持列表移除。
 - 不把 adapter 命令、能力、原始引用、私有路径或 raw payload 暴露给 UI 主模型。
 
 ## 架构
@@ -35,6 +35,8 @@ flowchart LR
   OpenClaw["OpenClaw"]
   SlockAdapter["Slock adapter<br/>daemon credential discovered"]
   Slock["Slock"]
+  CodexAdapter["Codex adapter<br/>native sessions only"]
+  Codex["Codex"]
 
   UI --> Backend
   Collector --> Backend
@@ -44,6 +46,8 @@ flowchart LR
   OpenClawAdapter --> OpenClaw
   CLI -. allowlist .-> SlockAdapter
   SlockAdapter -. read-only .-> Slock
+  CLI -. allowlist .-> CodexAdapter
+  CodexAdapter -. read-only .-> Codex
 ```
 
 ## 四大对象
@@ -77,7 +81,7 @@ Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含�
 
 ### Runtime
 
-Runtime 表示设备上的可识别运行环境。当前 RuntimeKind 支持 `openclaw` 和 `codex`：`openclaw` 可由 OpenClaw adapter 采集，`codex` 目前只作为 Slock profile runtime 的可归属类型进入模型，不代表 Lorume 已经实现 Codex adapter、Codex CLI 采集或 Codex Task 采集。Slock、Multica 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。
+Runtime 表示设备上的可识别运行环境。当前 RuntimeKind 支持 `openclaw` 和 `codex`：`openclaw` 可由 OpenClaw adapter 采集，`codex` 可由 Codex adapter 采集，也可作为 Slock profile runtime 的可归属类型进入模型。Slock、Multica 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。
 
 ```ts
 export type RuntimeKind = "openclaw" | "codex";
@@ -141,7 +145,7 @@ export interface Task {
   userMessage?: string;
   agentReply?: string;
   status: TaskStatus;
-  adapter: { kind: "openclaw" | "slock" };
+  adapter: { kind: "openclaw" | "slock" | "codex" };
   channel?: {
     kind: "dingtalk" | "webchat" | "slock";
     externalId?: string;
@@ -171,6 +175,19 @@ export interface Task {
       taskClaimedAt?: string;
       taskCompletedAt?: string;
     };
+    codex?: {
+      threadId?: string;
+      rolloutPath?: string;
+      source?: string;
+      model?: string;
+      cwdKind?: "codex-native-or-other";
+      tokensUsed?: number;
+      git?: {
+        branch?: string;
+        sha?: string;
+        origin?: string;
+      };
+    };
   };
   error?: string;
   createdAt?: string;
@@ -181,7 +198,7 @@ export interface Task {
 Task 不包含 `runtimeId`、`run`、`lastRun` 或独立 execution 状态。`Task.status` 是任务当前状态的唯一来源。
 Runtime 名称不能写入 `Task.channel`；如果任务没有当前已实现的用户触点证据，就省略 `channel` 和 `conversation`，而不是把 OpenClaw、Slock、Multica 或 Codex 当成渠道。
 Task 不保存 `title`、`description`、`toolCalls` 或 `lastSeenAt`。页面需要标题时，从 `userMessage` 生成短展示标题；需要任务新鲜度时，只看源系统业务时间 `updatedAt` / `createdAt`。
-Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现支持 `openclaw` 和 `slock`；Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
+Task 的 `adapter.kind` 表示哪一个 collector adapter 归一化了这条 Task。当前实现支持 `openclaw`、`slock` 和 `codex`；Telegram、Slack 等未实现类型不得提前写入枚举或 fixture。
 
 ## 状态规则
 
@@ -280,7 +297,7 @@ HTTP 上报规则：
 
 ## OpenClaw Adapter
 
-OpenClaw 是当前唯一默认启用的 runtime adapter。详细字段映射见 `docs/product/runtime-openclaw-adapter-spec.md`。
+OpenClaw 是当前默认启用的 runtime adapter。详细字段映射见 `docs/product/runtime-openclaw-adapter-spec.md`。
 
 | Lorume 对象 | OpenClaw 来源 | 规则 |
 |---|---|---|
@@ -305,15 +322,41 @@ Task 上报范围：
 | Agent | `${runtimeId}:agent:${openClawAgentId}` |
 | Task | `${agentId}:task:${openClawTaskExternalId}` |
 
+## Codex Adapter
+
+Codex 是当前默认启用的 runtime adapter。详细字段映射见 `docs/product/runtime-codex-adapter-spec.md`。
+
+| Lorume 对象 | Codex 来源 | 规则 |
+|---|---|---|
+| Device | collector host facts | 使用现有本机事实采集逻辑。 |
+| Runtime | `~/.codex/state_5.sqlite` | 生成一个 `Codex` runtime，kind 为 `codex`。 |
+| Agent | Codex 本地 runtime | 第一版生成一个本地 `Codex` Agent。 |
+| Task | `state_5.sqlite` thread index 与 thread 引用的 session JSONL | 只生成 `codex-native-or-other` 会话 Task；Slock-owned 和 Multica-owned 会话不作为 Codex Task 入库。 |
+
+Codex Task 上报范围：
+
+- Adapter 必须输出所有符合产品标准的 Codex native/other Task，不按数量或字节窗口丢弃已识别任务。
+- 第一版 `Task.status` 只映射 `done` 和 `unknown`；其他候选状态必须先经过 profiling、spec 和 harness。
+- 当前不上传完整 JSONL、`toolCalls`、tool arguments、token、凭据或完整原始 payload。
+- 体积控制由 collector 按 `512KiB / 1000 tasks` 拆分 `/api/device-task-batches`，并通过本地 ACK cache 与 Task hash 控制重传。
+
+稳定 ID：
+
+| 对象 | 规则 |
+|---|---|
+| Runtime | `${deviceId}:runtime:codex` |
+| Agent | `${runtimeId}:agent:codex:local` |
+| Task | `${agentId}:task:${codexThreadId}` |
+
 ## Adapter Allowlist
 
 Collector / CLI 必须支持 runtime adapter allowlist：
 
 ```sh
-LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock
+LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock,codex
 ```
 
-当前默认 allowlist 为 `openclaw,slock`。Slock 默认启用不等于必须存在 Slock；没有本机 Slock workspace 或无法从 Slock daemon 进程参数发现 server URL/token 时，Slock adapter 不生成对象。被禁用的 adapter 不得执行命令、读取目录或生成对象。
+当前默认 allowlist 为 `openclaw,slock,codex`。Slock 默认启用不等于必须存在 Slock；没有本机 Slock workspace 或无法从 Slock daemon 进程参数发现 server URL/token 时，Slock adapter 不生成对象。Codex 默认启用不等于必须存在 Codex；没有本机 Codex state 时安静跳过，state 存在但无法安全读取或解析时输出 error diagnostics。被禁用的 adapter 不得执行命令、读取目录或生成对象。
 
 ## 安装与卸载
 
@@ -328,7 +371,7 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock
 ## 验收
 
 - `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出带 `collectedAt` 的 `DeviceStateSnapshot`。
-- 默认采集 allowlist 执行 OpenClaw adapter，并在本机 Slock daemon 凭据和 workspace ownership proof 可用时执行 Slock adapter；不执行 Multica 或独立 Codex adapter。
+- 默认采集 allowlist 执行 OpenClaw、Slock 和 Codex adapter；Slock/Codex 缺少本机可读证据时不生成对象；不执行 Multica adapter。
 - Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。

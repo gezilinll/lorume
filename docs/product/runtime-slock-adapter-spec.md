@@ -6,7 +6,7 @@
 
 ## 模型边界
 
-Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不自动等同于 Lorume 的执行 Runtime。Slock profile 中的 `runtime` 字段才表示该 Agent 在当前设备上的执行 Runtime。Slock adapter 必须使用 profile 的真实 runtime 值派生 Lorume Runtime，不能写死为 `codex` 或 `slock`。Lorume 侧只接收已经进入实现、spec 和 harness 的 runtime kind；当前可接收 `openclaw` 和 `codex`，其中 `codex` 只作为 Slock profile runtime 的归属类型。如果真实 Slock 数据出现新的 runtime 值，必须在同一变更中补该 runtime kind 的模型、fixture 和 harness 后才能入库。
+Slock 在当前真实设备证据中更像协作平台和 Agent 编排层，不自动等同于 Lorume 的执行 Runtime。Slock profile 中的 `runtime` 字段才表示该 Agent 在当前设备上的执行 Runtime。Slock adapter 必须使用 profile 的真实 runtime 值派生 Lorume Runtime，不能写死为 `codex` 或 `slock`。Lorume 侧只接收已经进入实现、spec 和 harness 的 runtime kind；当前可接收 `openclaw` 和 `codex`。其中 `codex` 既可以由独立 Codex adapter 采集本机 native/other Codex 会话，也可以作为 Slock profile runtime 的归属类型；Slock 平台 Task、channel、assignee、status 和 reply 仍由 Slock adapter 负责。如果真实 Slock 数据出现新的 runtime 值，必须在同一变更中补该 runtime kind 的模型、fixture 和 harness 后才能入库。
 
 因此 Slock adapter 的边界是：
 

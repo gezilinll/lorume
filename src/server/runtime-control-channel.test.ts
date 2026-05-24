@@ -53,7 +53,7 @@ describe("runtime control channel", () => {
     });
   });
 
-  it("marks a registered device offline when its socket disconnects", () => {
+  it("marks a registered device offline without recording ordinary disconnects as control errors", () => {
     const store = createStore();
     const channel = createRuntimeControlChannel({
       store,
@@ -68,8 +68,35 @@ describe("runtime control channel", () => {
     expect(store.readDeviceConnection("fixture-mac")).toMatchObject({
       deviceId: "fixture-mac",
       status: "offline",
-      lastError: "socket closed",
     });
+    expect(store.readDeviceConnection("fixture-mac")?.lastError).toBeUndefined();
+  });
+
+  it("clears a previous transient control error after a later successful heartbeat", () => {
+    const store = createStore();
+    const currentTime = new Date("2026-05-08T08:00:00.000Z");
+    const channel = createRuntimeControlChannel({
+      store,
+      now: () => currentTime,
+    });
+    const socket = new MemorySocket();
+
+    store.writeDeviceConnection({
+      deviceId: "fixture-mac",
+      status: "offline",
+      lastError: "socket closed",
+      lastHeartbeatAt: "2026-05-08T07:59:00.000Z",
+    });
+
+    channel.attach(socket);
+    channel.receive(socket, JSON.stringify({ type: "heartbeat", deviceId: "fixture-mac" }));
+
+    expect(store.readDeviceConnection("fixture-mac", currentTime)).toMatchObject({
+      deviceId: "fixture-mac",
+      status: "online",
+      lastHeartbeatAt: "2026-05-08T08:00:00.000Z",
+    });
+    expect(store.readDeviceConnection("fixture-mac", currentTime)?.lastError).toBeUndefined();
   });
 
   it("reports unsupported control messages without changing connection state", () => {

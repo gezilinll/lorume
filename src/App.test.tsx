@@ -608,11 +608,11 @@ describe("Console shell", () => {
     expect(screen.getByRole("columnheader", { name: "所属设备" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "归属 Runtime" })).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader", { name: "最近同步" }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByLabelText("运行资产筛选")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("搜索设备、Runtime、Agent 或任务")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
-    expect(within(screen.getByLabelText("Runtime")).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "全部",
-      "OpenClaw",
-    ]);
+    expect(screen.queryByLabelText("Runtime")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("同步时间")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("可用性")).not.toBeInTheDocument();
   });
 
@@ -681,13 +681,14 @@ describe("Console shell", () => {
     expect(within(agentRow).queryByText("工作中")).not.toBeInTheDocument();
   });
 
-  it("filters Runtime Fleet agents by search and opens agent details", async () => {
+  it("opens Runtime Fleet agent details without a filter toolbar", async () => {
     const user = userEvent.setup();
     render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+    expect(screen.queryByLabelText("运行资产筛选")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("搜索设备、Runtime、Agent 或任务")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("搜索设备、Runtime、Agent 或任务"), "main");
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
     expect(within(agentTable).getByText("main")).toBeInTheDocument();
@@ -705,6 +706,23 @@ describe("Console shell", () => {
     expect(within(detail).queryByText("origin")).not.toBeInTheDocument();
     expect(within(detail).queryByText("sourceRefs")).not.toBeInTheDocument();
     expect(within(detail).queryByText("load")).not.toBeInTheDocument();
+  });
+
+  it("copies Runtime Fleet object ids without rendering long Lorume IDs in details", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(globalThis.navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    render(<App runtimeMode="agent" />);
+
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+    await user.click(screen.getByRole("row", { name: /main/ }));
+
+    const detail = screen.getByRole("complementary", { name: "运行资产详情" });
+    expect(within(detail).queryByText(/Lorume ID:/)).not.toBeInTheDocument();
+
+    await user.click(within(detail).getByRole("button", { name: "复制 ID" }));
+
+    expect(await within(detail).findByText("已复制")).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith("fixture-mac:runtime:openclaw:agent:main");
   });
 
   it("automatically refreshes Runtime Fleet query data while mounted", async () => {

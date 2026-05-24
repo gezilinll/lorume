@@ -79,6 +79,8 @@ export interface Device {
 
 Device 不保存由 Runtime、Agent 或 Task 推导出来的状态，不包含额外 display name、connection mode 或工作忙闲。
 
+`Device.network.localIps` 是面向用户的本机地址归一化列表。Collector 必须优先保留活跃的 RFC1918 私有 IPv4 地址，并丢弃 loopback、link-local IPv6、Docker/VM/VPN 网桥噪音地址和接口网络占位地址。没有私有 IPv4 时，collector 最多可以保留一个公网可路由 IPv6 地址。公网 IP 只能在后端能从请求来源推导时写入 `Device.network.publicIp`，并与 `localIps` 分开存储。
+
 ### Runtime
 
 Runtime 表示设备上的可识别运行环境。当前 RuntimeKind 支持 `openclaw` 和 `codex`：`openclaw` 可由 OpenClaw adapter 采集，`codex` 可由 Codex adapter 采集，也可作为 Slock profile runtime 的可归属类型进入模型。Slock、Multica 等未来类型不能提前写入产品枚举、fixture 或测试，必须在对应 adapter、spec 和 harness 落地时同改。

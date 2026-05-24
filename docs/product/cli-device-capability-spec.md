@@ -39,7 +39,7 @@
 - `device.os`
 - `device.architecture`
 - `device.lastSeenAt`
-- `device.network.localIps`（可选，来自本机非 internal 网络接口）
+- `device.network.localIps`（可选，来自本机去噪后的用户可解释局域网地址；优先 RFC1918 私有 IPv4，丢弃 loopback、link-local IPv6、Docker/VM/VPN 网桥噪音地址和网络占位地址）
 - `device.network.publicIp`（可选，只能来自后端观测或显式配置，CLI 不主动访问外部探测服务）
 - `device.user.username`（可选）
 - `collectedAt`

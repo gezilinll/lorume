@@ -4,10 +4,8 @@ import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
-  filterRuntimeFleet,
   formatRuntimeTimestamp,
   getRuntimeFleetDetail,
-  listRuntimeFleetRuntimeKindOptions,
   runtimeAgentLastSeenAt,
   runtimeFleetObjectStatusLabels,
   runtimeFleetSnapshotFromQueryResponse,
@@ -15,11 +13,9 @@ import {
   runtimeKindLabels,
   summarizeRuntimeFleet,
   type RuntimeFleetDetail,
-  type RuntimeFleetFilters,
-  type RuntimeFleetLastSeenRange,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
-import { createEmptyRuntimeFleetTaskSummary, type Agent, type Runtime, type RuntimeKind } from "./runtime-model";
+import { createEmptyRuntimeFleetTaskSummary, type Agent, type Runtime } from "./runtime-model";
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
@@ -32,12 +28,6 @@ import { PixelIcon } from "../ui/PixelIcon";
 
 const fixtureRuntimeSnapshot = runtimeFleetSnapshotFromQueryResponse(fixtureSnapshot) ?? createEmptyRuntimeInventorySnapshot();
 const autoRefreshIntervalMs = 30_000;
-const lastSeenRangeLabels: Record<RuntimeFleetLastSeenRange, string> = {
-  all: "全部时间",
-  "24h": "最近 24 小时",
-  "7d": "最近 7 天",
-  "30d": "最近 30 天",
-};
 
 type RuntimeFleetSelection = {
   kind: RuntimeFleetDetail["kind"];
@@ -59,7 +49,7 @@ const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
   failed: "探测失败",
 };
 
-/** First Runtime Fleet surface: inspect registered device, runtimes, agents, and channel exposure. */
+/** First Runtime Fleet surface: inspect registered device, runtimes, agents, and collection state. */
 export function RuntimeFleetPage() {
   const allowFixtureFallback = isFixtureFallbackAllowed();
   const [snapshot, setSnapshot] = useState<RuntimeFleetSnapshot>(
@@ -69,9 +59,6 @@ export function RuntimeFleetPage() {
   const [deviceDiagnostics, setDeviceDiagnostics] = useState<DeviceHealthStatusResult[]>([]);
   const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
-  const [query, setQuery] = useState("");
-  const [runtimeKind, setRuntimeKind] = useState<RuntimeKind | "all">("all");
-  const [lastSeenRange, setLastSeenRange] = useState<RuntimeFleetLastSeenRange>("all");
   const [selection, setSelection] = useState<RuntimeFleetSelection | null>(null);
   const [agentSkillProbeState, setAgentSkillProbeState] = useState<AgentSkillProbeViewState>({
     agentId: "",
@@ -163,7 +150,6 @@ export function RuntimeFleetPage() {
     };
   }, [allowFixtureFallback]);
 
-  const runtimeKindOptions = useMemo(() => listRuntimeFleetRuntimeKindOptions(snapshot), [snapshot]);
   const collectionHealthByDeviceId = useMemo(
     () => new Map(collectionHealth.map((health) => [health.deviceId, health])),
     [collectionHealth],
@@ -172,17 +158,6 @@ export function RuntimeFleetPage() {
     () => new Map(deviceDiagnostics.map((diagnostic) => [diagnostic.deviceId, diagnostic])),
     [deviceDiagnostics],
   );
-  useEffect(() => {
-    if (runtimeKind !== "all" && !runtimeKindOptions.some((option) => option.value === runtimeKind)) {
-      setRuntimeKind("all");
-    }
-  }, [runtimeKind, runtimeKindOptions]);
-
-  const filters: RuntimeFleetFilters = useMemo(
-    () => ({ lastSeenRange, query, runtimeKind }),
-    [lastSeenRange, query, runtimeKind],
-  );
-  const result = useMemo(() => filterRuntimeFleet(snapshot, filters), [filters, snapshot]);
   const summary = useMemo(() => summarizeRuntimeFleet(snapshot), [snapshot]);
   const detail = selection
     ? getRuntimeFleetDetail(
@@ -246,49 +221,6 @@ export function RuntimeFleetPage() {
         </p>
       ) : null}
 
-      <section className="toolbar runtimeToolbar" aria-label="运行资产筛选">
-        <label className="toolbarField toolbarSearch">
-          <span className="controlLabel">搜索</span>
-          <span className="searchBox">
-            <PixelIcon name="search" size={16} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索设备、Runtime、Agent 或任务"
-            />
-          </span>
-        </label>
-
-        <label className="toolbarField">
-          <span className="controlLabel">Runtime</span>
-          <select
-            value={runtimeKind}
-            onChange={(event) => setRuntimeKind(event.target.value as RuntimeKind | "all")}
-          >
-            <option value="all">全部</option>
-            {runtimeKindOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="toolbarField">
-          <span className="controlLabel">同步时间</span>
-          <select
-            value={lastSeenRange}
-            onChange={(event) => setLastSeenRange(event.target.value as RuntimeFleetLastSeenRange)}
-          >
-            {(Object.keys(lastSeenRangeLabels) as RuntimeFleetLastSeenRange[]).map((option) => (
-              <option key={option} value={option}>
-                {lastSeenRangeLabels[option]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
-
       <section className="metricGrid" aria-label="运行资产概览">
         <Metric label="设备" value={summary.devices} tone="blue" />
         <Metric label="Runtime" value={summary.runtimes} tone="green" />
@@ -300,7 +232,7 @@ export function RuntimeFleetPage() {
           <DevicePanel
             collectionHealthByDeviceId={collectionHealthByDeviceId}
             deviceDiagnosticsByDeviceId={deviceDiagnosticsByDeviceId}
-            devices={result.devices}
+            devices={snapshot.devices}
             snapshot={snapshot}
             selectedId={selection?.kind === "device" ? selection.id : undefined}
             onSelect={(deviceId) => setSelection({ kind: "device", id: deviceId })}
@@ -308,12 +240,12 @@ export function RuntimeFleetPage() {
           <RuntimeTable
             collectionHealthByDeviceId={collectionHealthByDeviceId}
             snapshot={snapshot}
-            runtimes={result.runtimes}
+            runtimes={snapshot.runtimes}
             selectedId={selection?.kind === "runtime" ? selection.id : undefined}
             onSelect={(runtime) => setSelection({ kind: "runtime", id: runtime.id })}
           />
           <AgentTable
-            agents={result.agents}
+            agents={snapshot.agents}
             collectionHealthByDeviceId={collectionHealthByDeviceId}
             runtimes={snapshot.runtimes}
             snapshot={snapshot}
@@ -476,12 +408,12 @@ function DevicePanel({
       <div className="runtimePanelHeader">
         <div>
           <h2>设备</h2>
-          <p>{devices.length} 台设备匹配当前筛选</p>
+          <p>{devices.length} 台已注册设备</p>
         </div>
         <PixelIcon name="server" size={18} />
       </div>
       {devices.length === 0 ? (
-        <EmptyAsset message="没有匹配的设备" />
+        <EmptyAsset message="暂无设备" />
       ) : (
         devices.map((device) => {
           const deviceHealth = deviceDiagnosticsByDeviceId.get(device.id);
@@ -534,12 +466,12 @@ function RuntimeTable({
       <div className="runtimePanelHeader">
         <div>
           <h2>Runtime</h2>
-          <p>{runtimes.length} 个 Runtime 匹配当前筛选</p>
+          <p>{runtimes.length} 个已采集 Runtime</p>
         </div>
         <PixelIcon name="cpu" size={18} />
       </div>
       {runtimes.length === 0 ? (
-        <EmptyAsset message="没有匹配的 Runtime" />
+        <EmptyAsset message="暂无 Runtime" />
       ) : (
         <div className="assetTable runtimeTable" role="table" aria-label="Runtime 列表">
           <div className="assetRow assetHeader runtimeTableRow" role="row">
@@ -612,12 +544,12 @@ function AgentTable({
       <div className="runtimePanelHeader">
         <div>
           <h2>Agent</h2>
-          <p>{agents.length} 个 Agent 匹配当前筛选</p>
+          <p>{agents.length} 个已采集 Agent</p>
         </div>
         <PixelIcon name="bot" size={18} />
       </div>
       {agents.length === 0 ? (
-        <EmptyAsset message="没有匹配的 Agent" />
+        <EmptyAsset message="暂无 Agent" />
       ) : (
         <div className="assetTable agentTable" role="table" aria-label="Agent 列表">
           <div className="assetRow assetHeader agentTableRow" role="row">
@@ -684,6 +616,12 @@ function RuntimeDetail({
   skillProbeState: AgentSkillProbeViewState;
   onRefreshSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
+  const [copiedObjectId, setCopiedObjectId] = useState("");
+
+  useEffect(() => {
+    setCopiedObjectId("");
+  }, [detail?.id]);
+
   if (!detail) {
     return (
       <aside className="detailPanel" aria-label="运行资产详情">
@@ -700,7 +638,22 @@ function RuntimeDetail({
           <p className="eyebrow">{detail.kind}</p>
           <h2>{detail.title}</h2>
         </div>
-        <StatusBadge label={detail.statusLabel} status={detail.status} />
+        <div className="detailHeaderActions">
+          <StatusBadge label={detail.statusLabel} status={detail.status} />
+          <button
+            className="secondaryButton compactButton copyIdButton"
+            type="button"
+            onClick={() => {
+              void copyTextToClipboard(detail.id).then((copied) => {
+                if (copied) setCopiedObjectId(detail.id);
+              });
+            }}
+          >
+            <PixelIcon name="copy" size={14} />
+            <span>复制 ID</span>
+          </button>
+          {copiedObjectId === detail.id ? <span className="skillStatusInline">已复制</span> : null}
+        </div>
       </div>
       <DetailBlock title="概览">{detail.subtitle}</DetailBlock>
       {detail.sections.map((section) => (
@@ -715,6 +668,31 @@ function RuntimeDetail({
       ) : null}
     </aside>
   );
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  const clipboard = globalThis.navigator?.clipboard;
+  if (clipboard?.writeText) {
+    await clipboard.writeText(value);
+    return true;
+  }
+  return copyTextWithTextarea(value);
+}
+
+function copyTextWithTextarea(value: string): boolean {
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  try {
+    if (typeof document.execCommand !== "function") return false;
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textArea);
+  }
 }
 
 function AgentSkillProbePanel({

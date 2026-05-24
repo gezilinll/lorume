@@ -16,6 +16,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist/backend ./dist/backend
 COPY db ./db
-COPY scripts/db-setup.mjs scripts/install-device-collector.sh scripts/lorume-device-collector.mjs scripts/lorume-runtime-adapters.mjs scripts/lorume.mjs ./scripts/
+COPY scripts/db-setup.mjs scripts/install-device-collector.sh scripts/lorume-device-collector.mjs scripts/lorume-runtime-adapters.mjs scripts/local-ip-normalization.mjs scripts/lorume.mjs ./scripts/
 EXPOSE 4173
 CMD ["sh", "-c", "node scripts/db-setup.mjs && node dist/backend/backend-server.mjs"]

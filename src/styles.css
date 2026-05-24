@@ -893,10 +893,6 @@ h1 {
   justify-content: start;
 }
 
-.runtimeToolbar {
-  grid-template-columns: minmax(260px, 1fr) repeat(2, minmax(140px, 190px));
-}
-
 .toolbarField {
   display: grid;
   gap: 6px;
@@ -1854,6 +1850,22 @@ button.tableRow:hover,
 
 .detailHeader > div {
   min-width: 0;
+}
+
+.detailHeaderActions {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.copyIdButton {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  height: 32px;
 }
 
 .detailHeader h2 {

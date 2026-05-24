@@ -31,6 +31,7 @@ describe("standalone Lorume backend server", () => {
       "install-device-collector.sh",
       "lorume-device-collector.mjs",
       "lorume-runtime-adapters.mjs",
+      "local-ip-normalization.mjs",
       "lorume.mjs",
     ]);
     for (const entry of deviceInstallerPackageManifest) {
@@ -40,6 +41,7 @@ describe("standalone Lorume backend server", () => {
     expect(deviceInstallerRuntimeFiles.map((entry) => entry.fileName)).toEqual([
       "lorume-device-collector.mjs",
       "lorume-runtime-adapters.mjs",
+      "local-ip-normalization.mjs",
       "lorume.mjs",
     ]);
   });

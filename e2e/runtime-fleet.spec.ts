@@ -30,7 +30,7 @@ test.describe("Runtime Fleet", () => {
     await resetE2eDatabase();
   });
 
-  test("filters agents, opens details, and stays responsive", async ({ page, request }) => {
+  test("opens agent details and stays responsive without a filter toolbar", async ({ page, request }) => {
     await seedRuntimeFleetData(request);
     const skillProbeResponse = await request.post("/api/agent-skill-probe-snapshots", {
       data: {
@@ -83,18 +83,11 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("归属 Runtime");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("最近同步");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("Skill");
+    await expect(page.getByLabel("运行资产筛选")).toHaveCount(0);
+    await expect(page.getByPlaceholder("搜索设备、Runtime、Agent 或任务")).toHaveCount(0);
     await expect(page.getByLabel("Channel")).toHaveCount(0);
-    await expect(page.getByLabel("Runtime").locator("option")).toHaveText(["全部", "OpenClaw"]);
+    await expect(page.getByLabel("同步时间")).toHaveCount(0);
     await expect(page.getByLabel("可用性")).toHaveCount(0);
-    await expect(page.getByLabel("同步时间").locator("option")).toHaveText([
-      "全部时间",
-      "最近 24 小时",
-      "最近 7 天",
-      "最近 30 天",
-    ]);
-
-    await page.getByPlaceholder("搜索设备、Runtime、Agent 或任务").fill("main");
-    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("main");
 
     await page.getByRole("row", { name: /main/ }).click();
     const detail = page.getByRole("complementary", { name: "运行资产详情" });
@@ -136,7 +129,7 @@ test.describe("Runtime Fleet", () => {
     expect(pageOverflows).toBe(false);
   });
 
-  test("keeps the Runtime Fleet toolbar within the viewport on laptop widths", async ({ page, request }) => {
+  test("keeps Runtime Fleet content within the viewport on laptop widths", async ({ page, request }) => {
     await seedRuntimeFleetData(request);
 
     await page.setViewportSize({ width: 1185, height: 900 });

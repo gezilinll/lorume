@@ -4,6 +4,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
 const COLLECTOR_VERSION = "0.1.0";
 const DEFAULT_INTERVAL_MS = 300_000;
@@ -299,14 +300,13 @@ function safeUsername() {
 }
 
 function collectLocalIps() {
-  const values = [];
-  for (const entries of Object.values(networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.internal) continue;
-      if (entry.address) values.push(entry.address);
+  const localEntries = [];
+  for (const interfaceEntries of Object.values(networkInterfaces())) {
+    for (const entry of interfaceEntries ?? []) {
+      localEntries.push(entry);
     }
   }
-  return Array.from(new Set(values)).sort();
+  return normalizeLocalIpsForDisplay(localEntries);
 }
 
 function applyDeviceOverrides(snapshot, config) {

@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
+import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
 export const COLLECTOR_VERSION = "0.1.0";
 
@@ -147,14 +148,13 @@ function safeUsername() {
 }
 
 function collectLocalIps() {
-  const values = [];
-  for (const entries of Object.values(networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.internal) continue;
-      if (entry.address) values.push(entry.address);
+  const localEntries = [];
+  for (const interfaceEntries of Object.values(networkInterfaces())) {
+    for (const entry of interfaceEntries ?? []) {
+      localEntries.push(entry);
     }
   }
-  return Array.from(new Set(values)).sort();
+  return normalizeLocalIpsForDisplay(localEntries);
 }
 
 function createCollectionDiagnosticCollector(defaultSource = "openclaw") {
@@ -318,6 +318,7 @@ function listOpenClawConfigAgentIds(config) {
 }
 
 function collectOpenClawDeviceState(deviceId, collectedAt) {
+  const openClawRoot = path.join(homeDir(), ".openclaw");
   const config = readOpenClawConfig();
   const health = runJson("openclaw", ["health", "--json", "--timeout", "5000"]);
   const status = runJson("openclaw", ["status", "--json", "--timeout", "5000"]);
@@ -333,10 +334,7 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
     collectionStatus,
     lastSeenAt: collectedAt,
     diagnostics: {
-      paths: compactPaths([
-        { label: "Config", path: path.join(homeDir(), ".openclaw", "openclaw.json") },
-        { label: "Agents", path: path.join(homeDir(), ".openclaw", "agents") },
-      ]),
+      paths: rootPath(openClawRoot),
       ...(health?.ok === false ? { lastError: "openclaw health returned ok=false" } : {}),
     },
   });
@@ -363,7 +361,7 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
       collectionStatus: collectionStatus === "error" ? "error" : "online",
       lastSeenAt: collectedAt,
       diagnostics: {
-        paths: compactPaths([{ label: "Agent", path: path.join(homeDir(), ".openclaw", "agents", agentId) }]),
+        paths: compactPaths([{ label: "根目录", path: path.join(openClawRoot, "agents", agentId) }]),
       },
     }),
   );
@@ -389,7 +387,7 @@ function collectCodexDeviceState(deviceId, collectedAt) {
       collectionStatus: "error",
       lastSeenAt: collectedAt,
       diagnostics: {
-        paths: compactPaths([{ label: "State", path: statePath }]),
+        paths: rootPath(codexRoot),
         lastError: "Codex state is unreadable",
       },
     });
@@ -403,10 +401,7 @@ function collectCodexDeviceState(deviceId, collectedAt) {
     collectionStatus: "online",
     lastSeenAt: collectedAt,
     diagnostics: {
-      paths: compactPaths([
-        { label: "State", path: statePath },
-        { label: "Sessions", path: path.join(codexRoot, "sessions") },
-      ]),
+      paths: rootPath(codexRoot),
     },
   });
   const agent = {
@@ -417,7 +412,7 @@ function collectCodexDeviceState(deviceId, collectedAt) {
       collectionStatus: "online",
       lastSeenAt: collectedAt,
       diagnostics: {
-        paths: compactPaths([{ label: "Codex", path: codexRoot }]),
+        paths: rootPath(codexRoot),
       },
     }),
     id: `${runtime.id}:agent:codex:local`,
@@ -1228,8 +1223,7 @@ function slockDiagnostic(code, severity, target, action) {
 }
 
 function readSlockWorkspaceAgentIds() {
-  const root = process.env.LORUME_SLOCK_HOME || path.join(homeDir(), ".slock");
-  const agentsRoot = path.join(root, "agents");
+  const agentsRoot = path.join(slockRoot(), "agents");
   const ids = new Set();
   try {
     for (const entry of readdirSync(agentsRoot, { withFileTypes: true })) {
@@ -1573,15 +1567,19 @@ function ensureSlockRuntime(runtimesById, { deviceId, kind, collectedAt }) {
 }
 
 function ensureSlockAgent(agentsById, { runtimeId, profile, collectedAt }) {
+  const profileId = slockProfileId(profile);
   const agent = {
     ...createProductAgent({
       runtimeId,
-      externalId: slockProfileId(profile),
+      externalId: profileId,
       name: slockProfileDisplayName(profile),
       collectionStatus: "online",
       lastSeenAt: collectedAt,
+      diagnostics: {
+        paths: slockAgentRootPaths(profileId),
+      },
     }),
-    id: `${runtimeId}:agent:slock:${sanitizeId(slockProfileId(profile))}`,
+    id: `${runtimeId}:agent:slock:${sanitizeId(profileId)}`,
   };
   if (!agentsById.has(agent.id)) agentsById.set(agent.id, agent);
   return agentsById.get(agent.id);
@@ -1931,6 +1929,18 @@ function cleanOpenClawTaskText(value) {
 
 function compactPaths(paths) {
   return paths.filter((entry) => entry?.path && existsSync(entry.path));
+}
+
+function rootPath(root) {
+  return root ? [{ label: "根目录", path: root }] : [];
+}
+
+function slockRoot() {
+  return process.env.LORUME_SLOCK_HOME || path.join(homeDir(), ".slock");
+}
+
+function slockAgentRootPaths(profileId) {
+  return compactPaths(rootPath(path.join(slockRoot(), "agents", sanitizeId(profileId))));
 }
 
 function applyDeviceOverrides(snapshot, config) {

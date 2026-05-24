@@ -4,10 +4,8 @@ import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
-  filterRuntimeFleet,
   formatRuntimeTimestamp,
   getRuntimeFleetDetail,
-  listRuntimeFleetRuntimeKindOptions,
   runtimeDisplayName,
   runtimeFleetSnapshotFromQueryResponse,
   summarizeRuntimeFleet,
@@ -71,25 +69,6 @@ describe("runtime fleet query", () => {
     });
   });
 
-  it("lists only supported runtime kinds present in the current snapshot", () => {
-    expect(listRuntimeFleetRuntimeKindOptions({
-      ...snapshot,
-      runtimes: [
-        ...snapshot.runtimes,
-        {
-          id: "fixture-mac:runtime:codex",
-          deviceId: "fixture-mac",
-          kind: "codex",
-          name: "Codex",
-          collectionStatus: "online",
-        },
-      ],
-    })).toEqual([
-      { label: "OpenClaw", value: "openclaw" },
-      { label: "Codex", value: "codex" },
-    ]);
-  });
-
   it("uses collection status as the only Runtime and Agent status source", () => {
     const runtime = snapshot.runtimes[0];
     const agent = snapshot.agents[0];
@@ -116,16 +95,6 @@ describe("runtime fleet query", () => {
     expect(deriveAgentFleetStatus(snapshot, agent)).toBe("online");
   });
 
-  it("filters fleet objects without requesting Task rows", () => {
-    const result = filterRuntimeFleet(snapshot, { query: "openclaw" });
-
-    expect(result.devices.map((device) => device.id)).toEqual(["fixture-mac"]);
-    expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["OpenClaw Gateway"]);
-    expect(result.agents.map((agent) => agent.name)).toEqual(["main"]);
-    expect(result).not.toHaveProperty("tasks");
-    expect(result.taskSummary.byAgentId["fixture-mac:runtime:openclaw:agent:main"]).toMatchObject({ total: 2 });
-  });
-
   it("resolves device detail with only device facts, collector facts, and derived task counts", () => {
     const detail = getRuntimeFleetDetail(snapshot, "device", "fixture-mac");
 
@@ -136,7 +105,6 @@ describe("runtime fleet query", () => {
       title: "fixture-mac",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac",
       "Hostname: fixture-mac.local",
       "OS: darwin",
       "Arch: arm64",
@@ -167,7 +135,6 @@ describe("runtime fleet query", () => {
       title: "OpenClaw Gateway",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac:runtime:openclaw",
       "Version: 2026.5.1",
       "状态: 在线",
       `最近同步: ${fixtureLastSeenAt}`,
@@ -202,7 +169,6 @@ describe("runtime fleet query", () => {
       title: "main",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac:runtime:openclaw:agent:main",
       "状态: 在线",
       `最近同步: ${fixtureLastSeenAt}`,
     ]);
@@ -211,6 +177,7 @@ describe("runtime fleet query", () => {
       "所属设备: fixture-mac",
     ]);
     expect(sectionItems(detailSections(detail), "任务统计")).toContain("全部任务: 2");
+    expect(sectionItems(detailSections(detail), "本地路径")).toEqual(["不适用"]);
     expect((detail as { origin?: unknown }).origin).toBeUndefined();
     expect((detail as { sourceRefs?: unknown }).sourceRefs).toBeUndefined();
     expect((detail as { load?: unknown }).load).toBeUndefined();

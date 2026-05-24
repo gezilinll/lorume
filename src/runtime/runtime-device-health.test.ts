@@ -48,6 +48,56 @@ describe("deriveDeviceHealthStatus", () => {
     });
   });
 
+  it("keeps a device online after one missed heartbeat interval when device-state is fresh", () => {
+    expect(deriveDeviceHealthStatus({
+      deviceId: "device-a",
+      now,
+      connection: {
+        deviceId: "device-a",
+        status: "online",
+        connectedAt: "2026-05-21T08:50:00.000Z",
+        lastHeartbeatAt: "2026-05-21T08:59:15.000Z",
+      },
+      deviceStateIngestions: [{
+        deviceId: "device-a",
+        snapshotType: "device_state",
+        status: "succeeded",
+        collectedAt: "2026-05-21T08:58:30.000Z",
+        receivedAt: "2026-05-21T08:59:00.000Z",
+        counts: { devices: 1 },
+        diagnostics: [],
+      }],
+    })).toMatchObject({
+      status: "online",
+      reason: "heartbeat_and_device_state_fresh",
+    });
+  });
+
+  it("returns offline, not error, after multiple missed heartbeats when the last device-state succeeded", () => {
+    expect(deriveDeviceHealthStatus({
+      deviceId: "device-a",
+      now,
+      connection: {
+        deviceId: "device-a",
+        status: "stale",
+        connectedAt: "2026-05-21T08:50:00.000Z",
+        lastHeartbeatAt: "2026-05-21T08:58:00.000Z",
+      },
+      deviceStateIngestions: [{
+        deviceId: "device-a",
+        snapshotType: "device_state",
+        status: "succeeded",
+        collectedAt: "2026-05-21T08:58:30.000Z",
+        receivedAt: "2026-05-21T08:59:00.000Z",
+        counts: { devices: 1 },
+        diagnostics: [],
+      }],
+    })).toMatchObject({
+      status: "offline",
+      reason: "device_state_or_heartbeat_stale",
+    });
+  });
+
   it("returns offline when previous device-state collection succeeded but freshness expired", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",

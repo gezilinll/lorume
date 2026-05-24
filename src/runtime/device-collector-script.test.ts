@@ -13,6 +13,29 @@ const installerScript = path.join(repoRoot, "scripts", "install-device-collector
 const fixturePath = path.join(repoRoot, "fixtures", "runtime", "runtime-fleet-device-state.sample.json");
 
 describe("device collector scripts", () => {
+  it("normalizes collector local IPs for user-facing device network fields", async () => {
+    // @ts-expect-error Test imports the collector-owned .mjs helper directly.
+    const { normalizeLocalIpsForDisplay } = await import("../../scripts/local-ip-normalization.mjs") as {
+      normalizeLocalIpsForDisplay: (entries: Array<{ address: string; internal: boolean }>) => string[];
+    };
+
+    expect(normalizeLocalIpsForDisplay([
+      { address: "127.0.0.1", internal: true },
+      { address: "10.1.67.125", internal: false },
+      { address: "192.168.107.0", internal: false },
+      { address: "192.168.139.3", internal: false },
+      { address: "172.17.0.1", internal: false },
+      { address: "fe80::2d47:7ef3:5ff2:3f4a", internal: false },
+      { address: "fd07:b51a:cc66:0:a617:db5e:ab7:e9f1", internal: false },
+    ])).toEqual(["10.1.67.125", "192.168.139.3"]);
+    expect(normalizeLocalIpsForDisplay([
+      { address: "fe80::2d47:7ef3:5ff2:3f4a", internal: false },
+      { address: "fd07:b51a:cc66:0:a617:db5e:ab7:e9f1", internal: false },
+      { address: "2601:646:8f80:6180::1", internal: false },
+      { address: "2601:646:8f80:6180::2", internal: false },
+    ])).toEqual(["2601:646:8f80:6180::1"]);
+  });
+
   it("prints a device-state snapshot from a fixture in once mode", () => {
     const output = execFileSync(process.execPath, [
       collectorScript,

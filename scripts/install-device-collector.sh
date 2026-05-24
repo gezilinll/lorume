@@ -165,6 +165,11 @@ if [[ ! -f "$SOURCE_RUNTIME_ADAPTERS" ]]; then
   echo "Lorume runtime adapter module not found: $SOURCE_RUNTIME_ADAPTERS" >&2
   exit 1
 fi
+SOURCE_LOCAL_IP_NORMALIZATION="$SOURCE_DIR/scripts/local-ip-normalization.mjs"
+if [[ ! -f "$SOURCE_LOCAL_IP_NORMALIZATION" ]]; then
+  echo "Lorume local IP normalization module not found: $SOURCE_LOCAL_IP_NORMALIZATION" >&2
+  exit 1
+fi
 SOURCE_INSTALLER="$SOURCE_DIR/scripts/install-device-collector.sh"
 if [[ ! -f "$SOURCE_INSTALLER" ]]; then
   echo "Lorume installer script not found: $SOURCE_INSTALLER" >&2
@@ -214,6 +219,7 @@ install -m 0755 "$SOURCE_INSTALLER" "$INSTALL_DIR/install-device-collector.sh"
 install -m 0755 "$SOURCE_COLLECTOR" "$INSTALL_DIR/lorume-device-collector.mjs"
 install -m 0755 "$SOURCE_CLI" "$INSTALL_DIR/lorume.mjs"
 install -m 0644 "$SOURCE_RUNTIME_ADAPTERS" "$INSTALL_DIR/lorume-runtime-adapters.mjs"
+install -m 0644 "$SOURCE_LOCAL_IP_NORMALIZATION" "$INSTALL_DIR/local-ip-normalization.mjs"
 
 "$NODE_BIN" - "$INSTALL_DIR/config.json" "$INSTALL_DIR" "$SERVER_URL" "$WS_URL" "$DEVICE_ID" "$DEVICE_TOKEN" "$INTERVAL_MS" <<'NODE'
 const fs = require("node:fs");

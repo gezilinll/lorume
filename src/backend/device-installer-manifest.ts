@@ -27,6 +27,11 @@ export const deviceInstallerPackageManifest = [
     contentType: "text/javascript; charset=utf-8",
   },
   {
+    fileName: "local-ip-normalization.mjs",
+    sourcePath: "scripts/local-ip-normalization.mjs",
+    contentType: "text/javascript; charset=utf-8",
+  },
+  {
     fileName: "lorume.mjs",
     sourcePath: "scripts/lorume.mjs",
     contentType: "text/javascript; charset=utf-8",
@@ -42,6 +47,11 @@ export const deviceInstallerRuntimeFiles = [
   {
     fileName: "lorume-runtime-adapters.mjs",
     sourcePath: "scripts/lorume-runtime-adapters.mjs",
+    mode: "0644",
+  },
+  {
+    fileName: "local-ip-normalization.mjs",
+    sourcePath: "scripts/local-ip-normalization.mjs",
     mode: "0644",
   },
   {

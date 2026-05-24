@@ -31,6 +31,7 @@ for (const installerFile of [
   "scripts/install-device-collector.sh",
   "scripts/lorume-device-collector.mjs",
   "scripts/lorume-runtime-adapters.mjs",
+  "scripts/local-ip-normalization.mjs",
   "scripts/lorume.mjs",
 ]) {
   assert(backendDockerfile.includes(installerFile), `backend container must include ${installerFile} for remote device registration`);

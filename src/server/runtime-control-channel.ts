@@ -88,7 +88,7 @@ export function createRuntimeControlChannel(options: RuntimeControlChannelOption
           collectorVersion: message.collectorVersion ?? current.collectorVersion,
           hostname: message.hostname ?? current.hostname,
           summary: message.summary ?? current.summary,
-          lastError: message.error ?? current.lastError,
+          lastError: message.error || undefined,
         });
         return;
       }

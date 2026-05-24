@@ -1,6 +1,5 @@
 import {
   createDeviceStateSnapshot,
-  RUNTIME_KINDS,
   type Agent,
   type CollectionStatus,
   type Device,
@@ -41,9 +40,6 @@ export const runtimeFleetObjectStatusLabels = collectionStatusLabels;
 /** Normalized Runtime Fleet object status. */
 export type RuntimeFleetObjectStatus = CollectionStatus;
 
-/** Coarse observation time range for Runtime Fleet filtering. */
-export type RuntimeFleetLastSeenRange = "all" | "24h" | "7d" | "30d";
-
 /** Backend/UI Runtime Fleet snapshot built from the four top-level product objects. */
 export interface RuntimeFleetSnapshot {
   /** Collector completion time across the result set. */
@@ -65,36 +61,6 @@ export interface RuntimeFleetQuerySummary {
   runtimeCount: number;
   agentCount: number;
   taskCount: number;
-}
-
-/** Runtime kind option shown by Runtime Fleet. */
-export interface RuntimeFleetRuntimeKindOption {
-  /** Filter value. */
-  value: RuntimeKind;
-  /** Human-readable label. */
-  label: string;
-}
-
-/** Filter state supported by the Runtime Fleet page. */
-export interface RuntimeFleetFilters {
-  /** Free-text search across device, runtime, and agent context. */
-  query?: string;
-  /** Runtime kind to keep. */
-  runtimeKind?: RuntimeKind | "all";
-  /** Optional last-observed range for device/runtime/agent rows. */
-  lastSeenRange?: RuntimeFleetLastSeenRange;
-}
-
-/** Filtered assets shown by Runtime Fleet. */
-export interface RuntimeFleetResult {
-  /** Devices represented by the active filters. */
-  devices: Device[];
-  /** Runtimes matching the active filters. */
-  runtimes: Runtime[];
-  /** Agents matching the active filters. */
-  agents: Agent[];
-  /** Active Task counts for visible objects. */
-  taskSummary: RuntimeFleetTaskSummary;
 }
 
 /** Small summary cards for Runtime Fleet. */
@@ -186,14 +152,6 @@ export function runtimeAgentLastSeenAt(
   return agent.lastSeenAt ?? runtime?.lastSeenAt ?? snapshot?.collectedAt;
 }
 
-/** List runtime kinds actually present in the current Runtime Fleet snapshot. */
-export function listRuntimeFleetRuntimeKindOptions(snapshot: RuntimeFleetSnapshot): RuntimeFleetRuntimeKindOption[] {
-  const kinds = new Set(snapshot.runtimes.map((runtime) => runtime.kind));
-  return RUNTIME_KINDS
-    .filter((kind) => kinds.has(kind))
-    .map((kind) => ({ value: kind, label: runtimeKindLabels[kind] }));
-}
-
 /** Summarize one query result for Runtime Fleet cards. */
 export function summarizeRuntimeFleet(snapshot: RuntimeFleetSnapshot): RuntimeFleetSummary {
   return {
@@ -230,77 +188,6 @@ export function deriveAgentFleetStatus(
   _collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
 ): RuntimeFleetObjectStatus {
   return normalizeCollectionStatus(agent.collectionStatus);
-}
-
-/** Filter a runtime snapshot while preserving linear Device -> Runtime -> Agent -> Task relationships. */
-export function filterRuntimeFleet(
-  snapshot: RuntimeFleetSnapshot,
-  filters: RuntimeFleetFilters = {},
-): RuntimeFleetResult {
-  const query = normalizeSearch(filters.query ?? "");
-  let runtimes = snapshot.runtimes;
-  let agents = snapshot.agents;
-  let devices = snapshot.devices;
-
-  if (filters.runtimeKind && filters.runtimeKind !== "all") {
-    runtimes = runtimes.filter((runtime) => runtime.kind === filters.runtimeKind);
-    const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
-    agents = agents.filter((agent) => runtimeIds.has(agent.runtimeId));
-    const deviceIds = new Set(runtimes.map((runtime) => runtime.deviceId));
-    devices = devices.filter((device) => deviceIds.has(device.id));
-  }
-
-  if (filters.lastSeenRange && filters.lastSeenRange !== "all") {
-    const lastSeenRange = filters.lastSeenRange;
-    const devicesInRange = devices.filter((device) => matchesLastSeenRange(device.lastSeenAt, lastSeenRange));
-    const deviceIdsInRange = new Set(devicesInRange.map((device) => device.id));
-    runtimes = runtimes.filter((runtime) =>
-      deviceIdsInRange.has(runtime.deviceId) || matchesLastSeenRange(runtime.lastSeenAt, lastSeenRange),
-    );
-    const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
-    agents = agents.filter((agent) =>
-      runtimeIds.has(agent.runtimeId) || matchesLastSeenRange(agent.lastSeenAt, lastSeenRange),
-    );
-    const visibleDeviceIds = new Set([
-      ...devicesInRange.map((device) => device.id),
-      ...runtimes.map((runtime) => runtime.deviceId),
-    ]);
-    devices = devices.filter((device) => visibleDeviceIds.has(device.id));
-  }
-
-  if (query) {
-    const matchingDevices = devices.filter((device) => deviceMatches(device, query));
-    const matchingDeviceIds = new Set(matchingDevices.map((device) => device.id));
-    const matchingRuntimes = runtimes.filter((runtime) =>
-      matchingDeviceIds.has(runtime.deviceId) || runtimeMatches(runtime, query),
-    );
-    const matchingRuntimeIds = new Set(matchingRuntimes.map((runtime) => runtime.id));
-    const matchingAgents = agents.filter((agent) =>
-      matchingRuntimeIds.has(agent.runtimeId) || agentMatches(agent, query),
-    );
-    const matchingAgentIds = new Set(matchingAgents.map((agent) => agent.id));
-
-    agents = agents.filter((agent) => matchingAgentIds.has(agent.id));
-    const visibleRuntimeIds = new Set([
-      ...matchingRuntimeIds,
-      ...agents.map((agent) => agent.runtimeId),
-    ]);
-    runtimes = runtimes.filter((runtime) =>
-      visibleRuntimeIds.has(runtime.id) || matchingDeviceIds.has(runtime.deviceId),
-    );
-    const visibleDeviceIds = new Set([
-      ...matchingDeviceIds,
-      ...runtimes.map((runtime) => runtime.deviceId),
-    ]);
-    devices = devices.filter((device) => visibleDeviceIds.has(device.id));
-  }
-
-  return {
-    devices,
-    runtimes,
-    agents,
-    taskSummary: pickRuntimeFleetTaskSummary(snapshot.taskSummary, devices, runtimes, agents),
-  };
 }
 
 /** Resolve a detail panel object from the latest snapshot. */
@@ -446,7 +333,7 @@ export function getRuntimeFleetDetail(
         },
         {
           title: "本地路径",
-          items: localPathItems(agent.diagnostics?.paths),
+          items: localPathItems(agent.diagnostics?.paths, "不适用"),
         },
       ],
     };
@@ -510,10 +397,6 @@ export function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeFl
   };
 }
 
-function normalizeSearch(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function normalizeCollectionStatus(value: unknown): CollectionStatus {
   return value === "online" || value === "offline" || value === "error" || value === "syncing"
     ? value
@@ -526,64 +409,6 @@ function deviceForRuntime(snapshot: RuntimeFleetSnapshot, runtime: Runtime): Dev
 
 function deviceDisplayLabel(device: Device): string {
   return device.id;
-}
-
-function matchesLastSeenRange(value: string | undefined, range: RuntimeFleetLastSeenRange): boolean {
-  const timestamp = Date.parse(value ?? "");
-  if (!Number.isFinite(timestamp)) return false;
-  const now = Date.now();
-  const rangeMs = range === "24h"
-    ? 24 * 60 * 60 * 1000
-    : range === "7d"
-      ? 7 * 24 * 60 * 60 * 1000
-      : 30 * 24 * 60 * 60 * 1000;
-  return timestamp >= now - rangeMs && timestamp <= now + 60 * 1000;
-}
-
-function includesQuery(values: Array<string | undefined>, query: string): boolean {
-  return values.some((value) => value?.toLowerCase().includes(query));
-}
-
-function deviceMatches(device: Device, query: string): boolean {
-  return includesQuery(
-    [
-      device.id,
-      device.hostname,
-      device.os,
-      device.architecture,
-      device.user?.username,
-      device.network?.publicIp,
-      ...(device.network?.localIps ?? []),
-    ],
-    query,
-  );
-}
-
-function runtimeMatches(runtime: Runtime, query: string): boolean {
-  return includesQuery(
-    [
-      runtime.id,
-      runtime.name,
-      runtime.kind,
-      runtimeKindLabels[runtime.kind],
-      runtime.version,
-      ...localPathItems(runtime.diagnostics?.paths),
-      runtime.diagnostics?.lastError,
-    ],
-    query,
-  );
-}
-
-function agentMatches(agent: Agent, query: string): boolean {
-  return includesQuery(
-    [
-      agent.id,
-      agent.name,
-      ...localPathItems(agent.diagnostics?.paths),
-      agent.diagnostics?.lastError,
-    ],
-    query,
-  );
 }
 
 function registeredRuntimeLabels(runtimes: Runtime[]): string[] {
@@ -612,30 +437,6 @@ function taskCountsForRuntime(snapshot: RuntimeFleetSnapshot, runtimeId: string)
 
 function taskCountsForAgent(snapshot: RuntimeFleetSnapshot, agentId: string): TaskStatusCounts {
   return snapshot.taskSummary.byAgentId[agentId] ?? createEmptyTaskStatusCounts();
-}
-
-function pickRuntimeFleetTaskSummary(
-  taskSummary: RuntimeFleetTaskSummary,
-  devices: Device[],
-  runtimes: Runtime[],
-  agents: Agent[],
-): RuntimeFleetTaskSummary {
-  return {
-    byAgentId: pickTaskCountRecords(taskSummary.byAgentId, agents.map((agent) => agent.id)),
-    byDeviceId: pickTaskCountRecords(taskSummary.byDeviceId, devices.map((device) => device.id)),
-    byRuntimeId: pickTaskCountRecords(taskSummary.byRuntimeId, runtimes.map((runtime) => runtime.id)),
-  };
-}
-
-function pickTaskCountRecords(
-  source: Record<string, TaskStatusCounts>,
-  ids: string[],
-): Record<string, TaskStatusCounts> {
-  const picked: Record<string, TaskStatusCounts> = {};
-  for (const id of ids) {
-    if (source[id]) picked[id] = source[id];
-  }
-  return picked;
 }
 
 function normalizeRuntimeFleetTaskSummary(value: unknown): RuntimeFleetTaskSummary {
@@ -698,8 +499,10 @@ function normalizeCount(value: unknown, fallback = 0): number {
   return Number.isFinite(count) && count >= 0 ? count : fallback;
 }
 
-function localPathItems(paths?: Array<{ label: string; path: string }>): string[] {
-  return (paths ?? [])
+function localPathItems(paths?: Array<{ label: string; path: string }>, emptyFallback?: string): string[] {
+  const items = (paths ?? [])
     .filter((entry) => entry.path)
     .map((entry) => `${entry.label}: ${entry.path}`);
+  if (!items.length && emptyFallback) return [emptyFallback];
+  return items;
 }

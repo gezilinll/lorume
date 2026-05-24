@@ -893,10 +893,6 @@ h1 {
   justify-content: start;
 }
 
-.runtimeToolbar {
-  grid-template-columns: minmax(260px, 1fr) repeat(2, minmax(140px, 190px));
-}
-
 .toolbarField {
   display: grid;
   gap: 6px;

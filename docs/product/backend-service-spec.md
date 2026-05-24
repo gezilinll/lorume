@@ -60,7 +60,7 @@ flowchart LR
 当前只保留必要表：
 
 - `devices`：设备身份、hostname、OS、架构、collector 状态、最近同步和连接摘要。
-- `runtimes`：设备上的 Runtime / 平台入口，例如 OpenClaw、Multica、Codex、Slock。
+- `runtimes`：设备上的 Runtime / 平台入口；当前实现只接收 OpenClaw 和 Codex。
 - `agents`：Lorume 管理视角下的 Managed Agent。
 - `tasks`：Agent 承接的业务工作。Task 只通过 `agent_id` 关联 Agent，不直接保存 Runtime 或 Device 外键。
 - `collector_ingestions`：每次 collector 上报的结果、数量、耗时、结构化 diagnostics 和错误摘要。
@@ -113,8 +113,8 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
 正式查询 API：
 
 - `GET /api/runtime-fleet`
-  - 参数：`search`、`runtimeKind`、`syncWindow`。
-  - 返回 Runtime Fleet 页面需要的设备、Runtime、Agent、summary 和详情基础数据。
+  - 当前不接收搜索或筛选参数。
+  - 返回 Runtime Fleet 页面需要的全量设备、Runtime、Agent、summary 和详情基础数据。
 - `GET /api/runtime-tasks`
   - 参数：`search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
   - 后端负责筛选、时间范围、稳定 cursor 分页和排序，返回 `total` 与 `nextCursor`。

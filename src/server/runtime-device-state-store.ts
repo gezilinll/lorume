@@ -129,11 +129,11 @@ export function createRuntimeDeviceStateStore(
     markDeviceDisconnected(deviceId, disconnectedAt, reason) {
       const current = deviceConnections.get(deviceId);
       if (!current) return null;
+      const { lastError: _lastError, ...connectionWithoutError } = current;
       const nextConnection = {
-        ...current,
+        ...connectionWithoutError,
         status: "offline" as const,
         lastDisconnectedAt: disconnectedAt,
-        ...(reason ? { lastError: reason } : {}),
       };
       deviceConnections.set(deviceId, nextConnection);
       return { ...nextConnection };

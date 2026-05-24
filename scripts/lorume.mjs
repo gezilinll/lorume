@@ -5,6 +5,7 @@ import { hostname, arch, platform, userInfo, networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectDeviceStateSnapshot } from "./lorume-runtime-adapters.mjs";
+import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -373,14 +374,13 @@ function safeUsername() {
 }
 
 function collectLocalIps() {
-  const values = [];
-  for (const entries of Object.values(networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.internal) continue;
-      if (entry.address) values.push(entry.address);
+  const localEntries = [];
+  for (const interfaceEntries of Object.values(networkInterfaces())) {
+    for (const entry of interfaceEntries ?? []) {
+      localEntries.push(entry);
     }
   }
-  return Array.from(new Set(values)).sort();
+  return normalizeLocalIpsForDisplay(localEntries);
 }
 
 function sanitizeId(value) {

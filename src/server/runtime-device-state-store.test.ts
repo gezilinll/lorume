@@ -84,8 +84,8 @@ describe("runtime device-state store", () => {
       deviceId: "fixture-mac",
       status: "offline",
       lastDisconnectedAt: "2026-05-08T08:02:30.000Z",
-      lastError: "socket closed",
     });
+    expect(store.readDeviceConnection("fixture-mac")?.lastError).toBeUndefined();
   });
 
 });

@@ -680,6 +680,7 @@ const SLOCK_HTTP_TIMEOUT_SECONDS = 10;
 const SLOCK_SUPPORTED_RUNTIME_KINDS = new Set(["openclaw", "codex"]);
 const SLOCK_REPLY_CACHE_SCHEMA_VERSION = "slock-reply-v2";
 const DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN = 10;
+const DEFAULT_SLOCK_REPLY_ENRICHMENT_BUDGET_MS = 15_000;
 
 function collectSlockDeviceState(device, collectedAt, config = {}) {
   const workspaceAgentIds = readSlockWorkspaceAgentIds();
@@ -693,7 +694,9 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   const replyCacheScope = createSlockReplyCacheScope(baseUrl, device.id);
   const replyCache = readSlockReplyCache(replyCachePath, replyCacheScope);
   const replyThreadReadBudget = {
+    budgetMs: slockReplyEnrichmentBudgetMs(config),
     remaining: slockMaxReplyThreadReadsPerRun(config),
+    startedAt: Date.now(),
   };
   const runtimesById = new Map();
   const agentsById = new Map();
@@ -837,7 +840,7 @@ function collectSlockTasksFromChannel({
     let replyDeferred = false;
     let shouldWriteReplyCache = false;
     if (shouldFetchSlockAgentReply({ cachedEntry: cachedReply, fingerprint, message })) {
-      if (replyThreadReadBudget.remaining <= 0) {
+      if (!canReadSlockReplyThread(replyThreadReadBudget)) {
         replyDeferred = true;
         diagnostics.add(slockDiagnostic("slock_agent_reply_deferred", "info", "task", "task_ingested_with_gap"), messageId);
       } else {
@@ -1091,6 +1094,22 @@ function slockMaxReplyThreadReadsPerRun(config = {}) {
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) return DEFAULT_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN;
   return Math.floor(value);
+}
+
+function slockReplyEnrichmentBudgetMs(config = {}) {
+  const raw = process.env.LORUME_SLOCK_REPLY_ENRICHMENT_BUDGET_MS ??
+    config.slockReplyEnrichmentBudgetMs ??
+    config.slock?.replyEnrichmentBudgetMs;
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_SLOCK_REPLY_ENRICHMENT_BUDGET_MS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_SLOCK_REPLY_ENRICHMENT_BUDGET_MS;
+  return Math.floor(value);
+}
+
+function canReadSlockReplyThread(budget) {
+  if (budget.remaining <= 0) return false;
+  if (budget.budgetMs <= 0) return false;
+  return Date.now() - budget.startedAt < budget.budgetMs;
 }
 
 function resolveSlockReplyCachePath(config = {}) {

@@ -65,6 +65,8 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock,codex
 
 `DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须输出所有符合产品标准的 Task，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，必须带 `adapter.kind`，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
+Collector 调用该命令时必须使用本地单飞锁保护，避免常驻服务和手动 `--once` 同时执行完整采集。Collector 可以通过配置或环境变量设置 CLI subprocess timeout；timeout 只限制 collector 子进程等待时间，不改变 CLI 输出模型。
+
 ### `lorume collector stop --json --install-dir <path>`
 
 停止本机 Lorume collector 服务，但不删除安装文件或配置。该命令必须幂等：服务不存在或已经停止时仍返回成功状态，并在 JSON 中说明没有可停止的服务。

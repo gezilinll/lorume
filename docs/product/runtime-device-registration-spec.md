@@ -358,6 +358,21 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock,codex
 
 当前默认 allowlist 为 `openclaw,slock,codex`。Slock 默认启用不等于必须存在 Slock；没有本机 Slock workspace 或无法从 Slock daemon 进程参数发现 server URL/token 时，Slock adapter 不生成对象。Codex 默认启用不等于必须存在 Codex；没有本机 Codex state 时安静跳过，state 存在但无法安全读取或解析时输出 error diagnostics。被禁用的 adapter 不得执行命令、读取目录或生成对象。
 
+## Collector 调度与耗时预算
+
+Collector 的数据采集由设备侧主动触发。后端只接收上报和维护 WebSocket 连接健康，不下发采集刷新命令。
+
+Collector 必须保护同一安装目录内的采集单飞：
+
+- 同一时间只能有一个 `device_state` 采集 run 执行，常驻服务计时器和手动 `--once` 共享同一把本地锁。
+- 锁文件只记录 `pid`、`runId`、`startedAt`、执行模式和 collector version，不记录 device token、Slock token、请求头或平台 payload。
+- 如果锁对应进程仍存活且未超过 stale 阈值，新 run 必须跳过并写结构化 `collector_run_skipped` 日志；这不是采集失败，不应产生 metadata snapshot 或 Task batch。
+- 如果锁对应进程不存在或超过 stale 阈值，collector 可以回收锁并开始新 run。
+
+Collector 必须记录本地结构化耗时指标，至少包含 run id、总耗时、CLI 采集耗时、metadata POST 耗时、Task batch POST 耗时、对象数量、changed Task 数、removed Task 数和 batch 数。日志必须沿用 secret redaction 规则。
+
+数据采集 interval 和 CLI subprocess timeout 必须可配置。默认数据采集 interval 应大于正常真实设备 run 的预期耗时；WebSocket heartbeat 仍是连接健康信号，必须独立于数据采集 interval，并继续使用较短心跳周期。
+
 ## 安装与卸载
 
 组织 owner / admin 可以生成 device token，并得到一条包含 server URL、device id 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。
@@ -372,6 +387,8 @@ LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock,codex
 
 - `lorume collect device-state --json` 在 OpenClaw fixture 和 fake CLI 环境下输出带 `collectedAt` 的 `DeviceStateSnapshot`。
 - 默认采集 allowlist 执行 OpenClaw、Slock 和 Codex adapter；Slock/Codex 缺少本机可读证据时不生成对象；不执行 Multica adapter。
+- Collector 必须跨进程单飞；重叠采集只记录 skip，不重复执行 CLI、不写重复 Task batch。
+- Collector 必须记录采集与上传阶段耗时指标，并支持本地配置 interval 和 CLI timeout。
 - Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。

@@ -12,7 +12,7 @@ Options:
   --ws-url <url>          Optional Lorume device control WebSocket URL
   --device-id <id>        Device id to register
   --device-token <token>  Lorume device token for ingestion and control
-  --interval-ms <ms>      Collector interval for service mode (default: 60000)
+  --interval-ms <ms>      Collector interval for service mode (default: 300000)
   --once                  Run a one-time collection after install
   --no-service            Do not install launchd/systemd service
   --stop                  Stop the installed collector service and keep files
@@ -28,7 +28,7 @@ SERVER_URL=""
 WS_URL=""
 DEVICE_ID=""
 DEVICE_TOKEN=""
-INTERVAL_MS="60000"
+INTERVAL_MS="300000"
 ONCE="false"
 NO_SERVICE="false"
 FIXTURE=""

@@ -604,6 +604,46 @@ EOF
     }
   });
 
+  it("bounds Slock agent reply thread reads by wall-clock budget without dropping Tasks", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-wall-budget-"));
+    try {
+      server.setJoinedChannelTargets(["#reply-budget"]);
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "10",
+          LORUME_SLOCK_REPLY_ENRICHMENT_BUDGET_MS: "0",
+        },
+      });
+
+      const threadReads = server.requests.filter((request) =>
+        request.pathname === "/internal/agent/agent-local-1/history" &&
+        request.channel.startsWith("#reply-budget:budget-")
+      );
+
+      expect(output.tasks).toHaveLength(3);
+      for (const task of output.tasks) expect(task).not.toHaveProperty("agentReply");
+      expect(threadReads).toHaveLength(0);
+      expect(output.diagnostics.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "slock_agent_reply_deferred", severity: "info", count: 3 }),
+      ]));
+    } finally {
+      await server.close();
+    }
+  });
+
   it("continues deferred Slock agent reply enrichment on later collector runs", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-reply-budget-cache-"));

@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const COLLECTOR_VERSION = "0.1.0";
-const DEFAULT_INTERVAL_MS = 60_000;
+const DEFAULT_INTERVAL_MS = 300_000;
+const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 const POST_RETRY_DELAYS_MS = [0, 500, 1500];
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LORUME_CLI_PATH = path.join(SCRIPT_DIR, "lorume.mjs");
 const DEFAULT_COLLECTOR_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_LOCK_STALE_GRACE_MS = 60_000;
 const DEFAULT_TASK_BATCH_MAX_BYTES = 512 * 1024;
 const DEFAULT_TASK_BATCH_MAX_TASKS = 1000;
 const TASK_SYNC_SCHEMA_VERSION = "device-state-v3";
@@ -111,6 +113,27 @@ function resolveCollectorLogMaxBytes(config = {}) {
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_COLLECTOR_LOG_MAX_BYTES;
 }
 
+function resolveCollectionTimeoutMs(config = {}) {
+  const value = Number(process.env.LORUME_COLLECTION_TIMEOUT_MS || config.collectionTimeoutMs || DEFAULT_COLLECTION_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_COLLECTION_TIMEOUT_MS;
+}
+
+function resolveCollectorLockPath(config = {}) {
+  return process.env.LORUME_COLLECTOR_LOCK_PATH ||
+    config.collectorLockPath ||
+    path.join(homeDir(), ".lorume", "collector", "run.lock");
+}
+
+function resolveCollectorLockStaleMs(config = {}) {
+  const explicit = Number(process.env.LORUME_COLLECTOR_LOCK_STALE_MS || config.collectorLockStaleMs || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+  return resolveCollectionTimeoutMs(config) + DEFAULT_LOCK_STALE_GRACE_MS;
+}
+
+function createRunId() {
+  return `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createCollectorLogger(config = {}) {
   const logPath = resolveCollectorLogPath(config);
   const maxBytes = resolveCollectorLogMaxBytes(config);
@@ -158,6 +181,80 @@ function redactCollectorLogFields(value) {
       ? "[redacted]"
       : redactCollectorLogFields(entry),
   ]));
+}
+
+function acquireCollectorRunLock(config, runId, mode) {
+  const lockPath = resolveCollectorLockPath(config);
+  const staleAfterMs = resolveCollectorLockStaleMs(config);
+  mkdirSync(path.dirname(lockPath), { recursive: true });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      const lock = {
+        collectorVersion: COLLECTOR_VERSION,
+        mode,
+        pid: process.pid,
+        runId,
+        startedAt: isoNow(),
+      };
+      writeFileSync(fd, `${JSON.stringify(lock)}\n`, "utf8");
+      closeSync(fd);
+      return { acquired: true, lockPath, runId };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const existing = readCollectorRunLock(lockPath);
+      if (shouldReclaimCollectorRunLock(existing, staleAfterMs)) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch {
+          // Another process may have released or replaced the lock. Retry once.
+          continue;
+        }
+      }
+      return { acquired: false, existing, lockPath, runId };
+    }
+  }
+
+  return { acquired: false, existing: readCollectorRunLock(lockPath), lockPath, runId };
+}
+
+function readCollectorRunLock(lockPath) {
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function shouldReclaimCollectorRunLock(lock, staleAfterMs) {
+  const pid = Number(lock?.pid);
+  const startedAt = Date.parse(String(lock?.startedAt || ""));
+  const ageMs = Number.isFinite(startedAt) ? Date.now() - startedAt : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(pid) || pid <= 0) return true;
+  if (ageMs > staleAfterMs) return true;
+  return !isProcessAlive(pid);
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseCollectorRunLock(lock) {
+  if (!lock?.acquired) return;
+  try {
+    const current = readCollectorRunLock(lock.lockPath);
+    if (current?.runId === lock.runId && Number(current?.pid) === process.pid) unlinkSync(lock.lockPath);
+  } catch {
+    // Best effort: stale-lock recovery handles abandoned locks on later runs.
+  }
 }
 
 function collectorErrorCode(error) {
@@ -319,7 +416,7 @@ async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, 
     .filter((entry) => cache.tasks[entry.task.id]?.hash !== entry.hash);
   if (entries.length === 0 && removedTaskIds.length === 0) {
     logger.info({ deviceId: snapshot.device.id, event: "task_batch_upload_skipped", tasks: tasks.length }, "No changed tasks to upload.");
-    return;
+    return { batchCount: 0, changedTaskCount: 0, removedTaskCount: 0 };
   }
   const batchOptions = {
     batchMaxBytes: positiveInteger(config.taskBatchMaxBytes, DEFAULT_TASK_BATCH_MAX_BYTES),
@@ -344,6 +441,7 @@ async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, 
     removedTasks: removedTaskIds.length,
     tasks: entries.length,
   });
+  return { batchCount: batches.length, changedTaskCount: entries.length, removedTaskCount: removedTaskIds.length };
 }
 
 function canTrustTaskPresence(snapshot) {
@@ -609,9 +707,43 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-async function runOnce(config, args) {
+async function runOnce(config, args, mode = "once") {
   const logger = createCollectorLogger(config);
-  const snapshot = collectSnapshot(config, args);
+  const runId = createRunId();
+  const lock = acquireCollectorRunLock(config, runId, mode);
+  if (!lock.acquired) {
+    logger.info({
+      event: "collector_run_skipped",
+      existingRunId: lock.existing?.runId,
+      existingStartedAt: lock.existing?.startedAt,
+      reason: "collector_run_in_progress",
+      runId,
+    }, "Collector run skipped because another run is in progress.");
+    return undefined;
+  }
+
+  const startedAt = Date.now();
+  const metrics = {
+    batchCount: 0,
+    changedTaskCount: 0,
+    cliDurationMs: 0,
+    metadataPostDurationMs: 0,
+    removedTaskCount: 0,
+    taskBatchPostDurationMs: 0,
+    taskCount: 0,
+  };
+  logger.info({
+    collectionTimeoutMs: resolveCollectionTimeoutMs(config),
+    event: "collector_run_started",
+    mode,
+    runId,
+  });
+  try {
+    const cliStartedAt = Date.now();
+    const snapshot = collectSnapshot(config, args);
+    metrics.cliDurationMs = Date.now() - cliStartedAt;
+    metrics.taskCount = Array.isArray(snapshot.tasks) ? snapshot.tasks.length : 0;
+
   logger.info({
     event: "device_state_collected",
     deviceId: snapshot.device.id,
@@ -624,8 +756,15 @@ async function runOnce(config, args) {
   const serverUrl = args.serverUrl || config.serverUrl || "";
   if (serverUrl && !args.printOnly) {
     const deviceToken = resolveDeviceToken(config, args);
+    const metadataPostStartedAt = Date.now();
     await postSnapshot(serverUrl, metadataSnapshot(snapshot), deviceToken);
-    await postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger);
+    metrics.metadataPostDurationMs = Date.now() - metadataPostStartedAt;
+    const taskBatchPostStartedAt = Date.now();
+    const taskBatchStats = await postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger);
+    metrics.taskBatchPostDurationMs = Date.now() - taskBatchPostStartedAt;
+    metrics.batchCount = taskBatchStats.batchCount;
+    metrics.changedTaskCount = taskBatchStats.changedTaskCount;
+    metrics.removedTaskCount = taskBatchStats.removedTaskCount;
     logger.info({
       event: "device_state_upload_succeeded",
       deviceId: snapshot.device.id,
@@ -637,7 +776,25 @@ async function runOnce(config, args) {
     });
   }
   if (args.printOnly || !serverUrl) console.log(JSON.stringify(snapshot, null, 2));
+  logger.info({
+    ...metrics,
+    deviceId: snapshot.device.id,
+    event: "collector_run_finished",
+    runId,
+    totalDurationMs: Date.now() - startedAt,
+  });
   return snapshot;
+  } catch (error) {
+    logger.error({
+      durationMs: Date.now() - startedAt,
+      errorCode: collectorErrorCode(error),
+      event: "collector_run_failed",
+      runId,
+    }, collectorErrorMessage(error));
+    throw error;
+  } finally {
+    releaseCollectorRunLock(lock);
+  }
 }
 
 function resolveCliDeviceIdentity(config, args) {
@@ -670,7 +827,7 @@ function runLorumeCliJson(config, cliArgs) {
     env: { ...process.env },
     maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120_000,
+    timeout: resolveCollectionTimeoutMs(config),
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -691,7 +848,7 @@ function stripCliCommand(value) {
 }
 
 async function refreshSnapshots(config, args) {
-  const deviceStateSnapshot = await runOnce(config, args);
+  const deviceStateSnapshot = await runOnce(config, args, "service");
   return { deviceStateSnapshot };
 }
 

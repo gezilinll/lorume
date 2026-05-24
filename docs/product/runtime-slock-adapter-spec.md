@@ -44,6 +44,7 @@ Slock 只读 API 可能出现短暂 5xx、网络超时、408 或 429。Adapter �
 | `LORUME_SLOCK_AGENT_IDS` 或 `slockAgentIds` | 可选显式本机 Slock Agent id 列表。未配置时优先使用 daemon 参数里的本机 `--agent-id`，再从 `~/.slock/agents/*` 枚举候选。 |
 | `LORUME_SLOCK_REPLY_CACHE_PATH` 或 `slockReplyCachePath` | 可选的本地 Agent 回复 cache 路径；只用于减少重复读取 task thread。默认在 collector home 下。 |
 | `LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN` 或 `slockMaxReplyThreadReadsPerRun` | 单次 collector run 最多深读多少条 task thread 来补 `agentReply`。默认 `10`，可设为 `0` 表示本轮只发现 Task、不补 reply。 |
+| `LORUME_SLOCK_REPLY_ENRICHMENT_BUDGET_MS` 或 `slockReplyEnrichmentBudgetMs` | 单次 collector run 用于 Slock `agentReply` thread 深读的 wall-clock budget。默认 `15000`；设为 `0` 表示本轮只发现 Task、不补 reply。 |
 
 显式配置优先级高于 daemon 自动发现。默认产品路径不要求用户把 Slock token 填入 Lorume 配置；collector 每轮从本机进程参数临时读取，并只用于当轮只读请求。
 
@@ -161,8 +162,8 @@ Adapter 负责生成归一化 `Task.status`，但不得覆盖原始 `taskStatus`
 - `agentReply` 是 cache-aware enrichment。Adapter 先从 channel history 发现核心 Task，再使用本地 reply cache 判断是否在同一 collector run 读取 task thread。新 Task 或 reply 相关字段变化时读取 thread history；未变化时复用缓存的 `agentReply`。
 - Reply fingerprint 只覆盖稳定且能表示 thread/reply 变化的源字段：message id、`taskAssigneeId`、raw task status、`replyCount`、thread id、task message `updatedAt`、`taskClaimedAt`、`taskCompletedAt`。collector 采集时间不进入 fingerprint。
 - `replyCount === 0` 且没有 cache 时不读取 thread；`replyCount` 缺失时首轮读取一次 thread，因为源数据无法证明没有回复。
-- 每个 collector run 默认最多深读 `10` 条 Slock task thread。该限制只影响 `agentReply` 富化，不允许丢弃符合产品标准的 Task。
-- 预算耗尽时输出 `slock_agent_reply_deferred` info diagnostic；这些 Task 本轮不写入 reply cache，也不写 `slock_missing_agent_reply` warning。后续 collector run 会继续用相同规则补未缓存的 Task。
+- 每个 collector run 默认最多深读 `10` 条 Slock task thread，并且必须受本轮 `agentReply` 富化 wall-clock budget 约束。该限制只影响 `agentReply` 富化，不允许丢弃符合产品标准的 Task。
+- 数量预算或 wall-clock budget 耗尽时输出 `slock_agent_reply_deferred` info diagnostic；这些 Task 本轮不写入 reply cache，也不写 `slock_missing_agent_reply` warning。后续 collector run 会继续用相同规则补未缓存的 Task。
 - 只有实际成功读取过 task thread 后，才可以写入或刷新 reply cache。不能为预算延期的 Task 写入空 reply cache，避免后续误判为无需富化。
 - `done` Task 缺少 assigned Agent 回复时，Task 可以入库，但必须按可证明原因写入更精确的 warning：thread 为空写 `slock_agent_reply_thread_empty`，thread 404 / 不存在 / 不可读写 `slock_agent_reply_thread_unavailable`，thread 可读但没有 assigned Agent 文本写 `slock_missing_agent_reply`。
 - `in_progress`、`review`、`todo` 缺少 `agentReply` 不写 warning。

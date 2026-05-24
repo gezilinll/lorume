@@ -219,6 +219,29 @@ console.log(JSON.stringify({
     }
   });
 
+  it("uses a safer default service interval when the installer interval is not provided", () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "lorume-default-interval-home-"));
+    const installDir = path.join(homeDir, "collector");
+
+    try {
+      execFileSync("bash", [
+        installerScript,
+        "--source-dir",
+        repoRoot,
+        "--install-dir",
+        installDir,
+        "--device-id",
+        "interval-device",
+        "--no-service",
+      ], { encoding: "utf8", env: { ...process.env, HOME: homeDir } });
+
+      const config = JSON.parse(readFileSync(path.join(installDir, "config.json"), "utf8"));
+      expect(config.intervalMs).toBe(300000);
+    } finally {
+      rmSync(homeDir, { force: true, recursive: true });
+    }
+  });
+
   it("posts during installer once mode when a server url is configured", async () => {
     const installDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-"));
     const { server, receivedSnapshot, baseUrl } = await startSnapshotServer();
@@ -649,8 +672,20 @@ console.log(JSON.stringify({
         .map((line) => JSON.parse(line));
 
       expect(records).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event: "collector_run_started", level: "info", runId: expect.any(String) }),
         expect.objectContaining({ event: "device_state_collected", level: "info" }),
         expect.objectContaining({ event: "device_state_upload_succeeded", level: "info" }),
+        expect.objectContaining({
+          batchCount: expect.any(Number),
+          changedTaskCount: expect.any(Number),
+          cliDurationMs: expect.any(Number),
+          event: "collector_run_finished",
+          level: "info",
+          metadataPostDurationMs: expect.any(Number),
+          removedTaskCount: expect.any(Number),
+          taskBatchPostDurationMs: expect.any(Number),
+          totalDurationMs: expect.any(Number),
+        }),
       ]));
       expect(JSON.stringify(records)).not.toContain("secret-device-token");
     } finally {
@@ -694,6 +729,162 @@ console.log(JSON.stringify({
       expect(JSON.stringify(records)).not.toContain("secret-device-token");
     } finally {
       server.close();
+    }
+  });
+
+  it("skips overlapping collector runs across processes using a shared lock", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-lock-"));
+    const fakeCli = path.join(configDir, "lorume.mjs");
+    const configPath = path.join(configDir, "config.json");
+    const callsPath = path.join(configDir, "calls.jsonl");
+    const lockPath = path.join(configDir, "run.lock");
+    const logPath = path.join(configDir, "collector.jsonl");
+    writeFileSync(fakeCli, `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({ argv: process.argv.slice(2), pid: process.pid }) + "\\n");
+await new Promise((resolve) => setTimeout(resolve, 800));
+console.log(JSON.stringify({
+  command: "collect.device-state",
+  collectedAt: "2026-05-19T00:00:00.000Z",
+  device: { id: "locked-device", hostname: "locked.local", os: "darwin", collectionStatus: "online", lastSeenAt: "2026-05-19T00:00:00.000Z", collector: { version: "test" } },
+  runtimes: [],
+  agents: [],
+  tasks: []
+}));
+`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(configPath, JSON.stringify({
+      collectorLockPath: lockPath,
+      logPath,
+      lorumeCliPath: fakeCli,
+    }));
+
+    try {
+      const firstRun = runNodeScript([
+        collectorScript,
+        "--once",
+        "--print-only",
+        "--config",
+        configPath,
+      ]);
+      await waitForCondition(() => existsSync(callsPath), "fake CLI to start");
+
+      const secondOutput = await runNodeScript([
+        collectorScript,
+        "--once",
+        "--print-only",
+        "--config",
+        configPath,
+      ]);
+      const firstOutput = await firstRun;
+      const calls = readFileSync(callsPath, "utf8").trim().split("\n");
+      const records = readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+
+      expect(JSON.parse(firstOutput).device.id).toBe("locked-device");
+      expect(secondOutput.trim()).toBe("");
+      expect(calls).toHaveLength(1);
+      expect(records).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          event: "collector_run_skipped",
+          level: "info",
+          reason: "collector_run_in_progress",
+          runId: expect.any(String),
+        }),
+      ]));
+    } finally {
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
+  it("reclaims a stale collector lock when the recorded process is gone", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-stale-lock-"));
+    const fakeCli = path.join(configDir, "lorume.mjs");
+    const configPath = path.join(configDir, "config.json");
+    const callsPath = path.join(configDir, "calls.jsonl");
+    const lockPath = path.join(configDir, "run.lock");
+    writeFileSync(fakeCli, `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+console.log(JSON.stringify({
+  command: "collect.device-state",
+  collectedAt: "2026-05-19T00:00:00.000Z",
+  device: { id: "stale-lock-device", hostname: "stale.local", os: "darwin", collectionStatus: "online", lastSeenAt: "2026-05-19T00:00:00.000Z", collector: { version: "test" } },
+  runtimes: [],
+  agents: [],
+  tasks: []
+}));
+`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(lockPath, `${JSON.stringify({
+      collectorVersion: "0.1.0",
+      mode: "service",
+      pid: 99999999,
+      runId: "stale-run",
+      startedAt: new Date().toISOString(),
+    })}\n`);
+    writeFileSync(configPath, JSON.stringify({
+      collectorLockPath: lockPath,
+      lorumeCliPath: fakeCli,
+    }));
+
+    try {
+      const output = await runNodeScript([
+        collectorScript,
+        "--once",
+        "--print-only",
+        "--config",
+        configPath,
+      ]);
+      const calls = readFileSync(callsPath, "utf8").trim().split("\n");
+
+      expect(JSON.parse(output).device.id).toBe("stale-lock-device");
+      expect(calls).toHaveLength(1);
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
+  it("uses configured collection timeout for the CLI subprocess", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-collector-timeout-"));
+    const fakeCli = path.join(configDir, "lorume.mjs");
+    const configPath = path.join(configDir, "config.json");
+    const logPath = path.join(configDir, "collector.jsonl");
+    writeFileSync(fakeCli, `#!/usr/bin/env node
+await new Promise((resolve) => setTimeout(resolve, 300));
+console.log(JSON.stringify({
+  command: "collect.device-state",
+  collectedAt: "2026-05-19T00:00:00.000Z",
+  device: { id: "timeout-device", hostname: "timeout.local", os: "darwin", collectionStatus: "online", lastSeenAt: "2026-05-19T00:00:00.000Z", collector: { version: "test" } },
+  runtimes: [],
+  agents: [],
+  tasks: []
+}));
+`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(configPath, JSON.stringify({
+      collectionTimeoutMs: 20,
+      logPath,
+      lorumeCliPath: fakeCli,
+    }));
+
+    try {
+      await expect(runNodeScript([
+        collectorScript,
+        "--once",
+        "--config",
+        configPath,
+      ])).rejects.toThrow(/ETIMEDOUT|timed out/i);
+      const records = readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(records).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          durationMs: expect.any(Number),
+          errorCode: "collector_run_failed",
+          event: "collector_run_failed",
+        }),
+      ]));
+    } finally {
+      rmSync(configDir, { force: true, recursive: true });
     }
   });
 });
@@ -829,6 +1020,15 @@ function runCommand(command: string, args: string[], options: { env?: NodeJS.Pro
       reject(new Error((stderr || stdout).trim()));
     });
   });
+}
+
+async function waitForCondition(predicate: () => boolean, label: string): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2_000) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{

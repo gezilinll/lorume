@@ -571,7 +571,7 @@ describe("Console shell", () => {
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
   });
 
-  it("opens Runtime Fleet and renders the OpenClaw-first fixture data", async () => {
+  it("opens Runtime Fleet and renders runtime fixture data", async () => {
     const user = userEvent.setup();
     render(<App runtimeMode="agent" />);
 

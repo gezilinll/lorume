@@ -2442,6 +2442,9 @@ function shouldCreateOpenClawTrajectoryTask(run, taskType = inferOpenClawTaskTyp
 }
 
 function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType(run)) {
+  const runId = String(run?.runId || "");
+  if (/^announce[:/-]v\d+/i.test(runId)) return { create: false, reason: "internal announce run" };
+  if (/^subagent(?::|-|\/|$)/i.test(runId)) return { create: false, reason: "internal subagent run" };
   const prompt = cleanOpenClawPromptText(run?.prompt);
   const userTurnText = prompt || cleanOpenClawTaskText(run?.snapshotUserMessage || run?.snapshotUserMessageCandidate);
   if (!userTurnText) {

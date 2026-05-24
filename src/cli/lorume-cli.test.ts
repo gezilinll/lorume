@@ -1706,6 +1706,11 @@ EOF
       prompt: "[announce:v1] publish OpenClaw internal status",
       sessionKey: "agent:main:webchat:internal",
     });
+    writeOpenClawTrajectoryFile(sessionDir, "announce:v1:agent:main:subagent:researcher:run-1", {
+      finalStatus: "success",
+      prompt: "[Wed 2026-05-06 10:20 GMT+8] <<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is not a user task.",
+      sessionKey: "agent:main:dingtalk:group:group-live",
+    });
     writeOpenClawTrajectoryFile(sessionDir, "subagent-run", {
       finalStatus: "success",
       prompt: "[subagent:researcher] internal scratchpad work",
@@ -1730,9 +1735,9 @@ EOF
     expect(output.diagnostics.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
         code: "openclaw_internal_announce_ignored",
-        count: 1,
+        count: 2,
         severity: "debug",
-        sampleRefs: ["announce-v1"],
+        sampleRefs: ["announce-v1", "announce:v1:agent:main:subagent:researcher:run-1"],
       }),
       expect.objectContaining({
         code: "openclaw_internal_subagent_ignored",

@@ -684,6 +684,12 @@ function RuntimeDetail({
   skillProbeState: AgentSkillProbeViewState;
   onRefreshSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
+  const [copiedObjectId, setCopiedObjectId] = useState("");
+
+  useEffect(() => {
+    setCopiedObjectId("");
+  }, [detail?.id]);
+
   if (!detail) {
     return (
       <aside className="detailPanel" aria-label="运行资产详情">
@@ -700,7 +706,22 @@ function RuntimeDetail({
           <p className="eyebrow">{detail.kind}</p>
           <h2>{detail.title}</h2>
         </div>
-        <StatusBadge label={detail.statusLabel} status={detail.status} />
+        <div className="detailHeaderActions">
+          <StatusBadge label={detail.statusLabel} status={detail.status} />
+          <button
+            className="secondaryButton compactButton copyIdButton"
+            type="button"
+            onClick={() => {
+              void copyTextToClipboard(detail.id).then((copied) => {
+                if (copied) setCopiedObjectId(detail.id);
+              });
+            }}
+          >
+            <PixelIcon name="copy" size={14} />
+            <span>复制 ID</span>
+          </button>
+          {copiedObjectId === detail.id ? <span className="skillStatusInline">已复制</span> : null}
+        </div>
       </div>
       <DetailBlock title="概览">{detail.subtitle}</DetailBlock>
       {detail.sections.map((section) => (
@@ -715,6 +736,31 @@ function RuntimeDetail({
       ) : null}
     </aside>
   );
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  const clipboard = globalThis.navigator?.clipboard;
+  if (clipboard?.writeText) {
+    await clipboard.writeText(value);
+    return true;
+  }
+  return copyTextWithTextarea(value);
+}
+
+function copyTextWithTextarea(value: string): boolean {
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  try {
+    if (typeof document.execCommand !== "function") return false;
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textArea);
+  }
 }
 
 function AgentSkillProbePanel({

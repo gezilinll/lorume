@@ -334,7 +334,6 @@ export function getRuntimeFleetDetail(
         {
           title: "基础信息",
           items: [
-            `Lorume ID: ${device.id}`,
             `Hostname: ${device.hostname}`,
             `OS: ${device.os ?? "未上报"}`,
             `Arch: ${device.architecture ?? "未上报"}`,
@@ -387,7 +386,6 @@ export function getRuntimeFleetDetail(
         {
           title: "基础信息",
           items: [
-            `Lorume ID: ${runtime.id}`,
             `Version: ${runtime.version ?? "未上报"}`,
             `状态: ${collectionStatusLabels[status]}`,
             `最近同步: ${formatRuntimeTimestamp(runtime.lastSeenAt)}`,
@@ -431,7 +429,6 @@ export function getRuntimeFleetDetail(
         {
           title: "基础信息",
           items: [
-            `Lorume ID: ${agent.id}`,
             `状态: ${collectionStatusLabels[status]}`,
             `最近同步: ${formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtime, snapshot))}`,
           ],

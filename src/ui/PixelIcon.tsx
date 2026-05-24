@@ -11,6 +11,7 @@ export type PixelIconName =
   | "chevron-down"
   | "chevron-left"
   | "chevron-up"
+  | "copy"
   | "cpu"
   | "health"
   | "heart"
@@ -104,6 +105,12 @@ const iconPaths: Record<PixelIconName, ReactElement> = {
   "chevron-down": <path d="m6 9 6 6 6-6" />,
   "chevron-left": <path d="m15 18-6-6 6-6" />,
   "chevron-up": <path d="m18 15-6-6-6 6" />,
+  copy: (
+    <>
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M5 15V5h10" />
+    </>
+  ),
   cpu: (
     <>
       <rect x="7" y="7" width="10" height="10" rx="2" />

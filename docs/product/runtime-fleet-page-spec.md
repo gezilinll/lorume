@@ -1,6 +1,6 @@
 # Runtime Fleet Page Spec
 
-版本：TinySpec v1.2
+版本：TinySpec v1.3
 
 Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。页面只展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
 
@@ -21,6 +21,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - 支持按关键词、Runtime kind、同步时间过滤。
 - Runtime kind 候选项必须来自当前后端数据中真实存在的 Runtime。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
+- 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
 - Agent 行级 Skill 探测仍是只读能力；它展示已存储 metadata，不请求设备执行远端探测。
 - 页面自动轮询后端已有数据，不下发远端采集命令。
 
@@ -70,6 +71,8 @@ Runs 会话任务页对 Task 展示 `Task.status`：
 | `unknown` | 未知 |
 
 ## 页面字段策略
+
+详情面板默认展示用户可读的名称、归属、采集状态和诊断字段，不把完整 Lorume 内部对象 ID 渲染成正文。Device、Runtime 和 Agent 详情都必须提供 `复制 ID` 操作；点击后复制当前对象的完整内部 ID，并给出轻量成功反馈。
 
 ### Device
 
@@ -127,6 +130,7 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 设备即使暂时没有 Runtime，也必须在 Device 列表里可见。
 - 页面不展示 Runtime `capabilities/endpoint/sourceRefs`。
 - 页面不展示 Agent `origin/sourceRefs/load`。
+- 详情面板不展示 `Lorume ID: ...` 长文本，Device、Runtime 和 Agent 均可通过 `复制 ID` 按钮复制内部 ID。
 - Production 查询失败时展示错误状态，不回退 fixture。
 - 页面自动读取后端查询结果，并展示上次刷新时间。
 - 页面不展示请求设备刷新按钮，不暴露远端命令轮询状态。

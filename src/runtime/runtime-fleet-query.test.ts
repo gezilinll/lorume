@@ -136,7 +136,6 @@ describe("runtime fleet query", () => {
       title: "fixture-mac",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac",
       "Hostname: fixture-mac.local",
       "OS: darwin",
       "Arch: arm64",
@@ -167,7 +166,6 @@ describe("runtime fleet query", () => {
       title: "OpenClaw Gateway",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac:runtime:openclaw",
       "Version: 2026.5.1",
       "状态: 在线",
       `最近同步: ${fixtureLastSeenAt}`,
@@ -202,7 +200,6 @@ describe("runtime fleet query", () => {
       title: "main",
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
-      "Lorume ID: fixture-mac:runtime:openclaw:agent:main",
       "状态: 在线",
       `最近同步: ${fixtureLastSeenAt}`,
     ]);

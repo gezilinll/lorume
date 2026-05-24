@@ -1856,6 +1856,22 @@ button.tableRow:hover,
   min-width: 0;
 }
 
+.detailHeaderActions {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.copyIdButton {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  height: 32px;
+}
+
 .detailHeader h2 {
   color: var(--lorume-color-ink);
   font-family: var(--font-sans);

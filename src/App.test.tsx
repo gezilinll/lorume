@@ -707,6 +707,23 @@ describe("Console shell", () => {
     expect(within(detail).queryByText("load")).not.toBeInTheDocument();
   });
 
+  it("copies Runtime Fleet object ids without rendering long Lorume IDs in details", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(globalThis.navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    render(<App runtimeMode="agent" />);
+
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+    await user.click(screen.getByRole("row", { name: /main/ }));
+
+    const detail = screen.getByRole("complementary", { name: "运行资产详情" });
+    expect(within(detail).queryByText(/Lorume ID:/)).not.toBeInTheDocument();
+
+    await user.click(within(detail).getByRole("button", { name: "复制 ID" }));
+
+    expect(await within(detail).findByText("已复制")).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith("fixture-mac:runtime:openclaw:agent:main");
+  });
+
   it("automatically refreshes Runtime Fleet query data while mounted", async () => {
     vi.useFakeTimers();
     let latestRequests = 0;

@@ -1716,6 +1716,11 @@ EOF
       prompt: "[subagent:researcher] internal scratchpad work",
       sessionKey: "agent:main:webchat:internal",
     });
+    writeOpenClawTrajectoryFile(sessionDir, "runtime-context-subagent", {
+      finalStatus: "success",
+      prompt: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is runtime-generated, not user-authored. [Internal task completion event] source: subagent session_key: agent:main:subagent:researcher type: subagent task status: completed successfully",
+      sessionKey: "agent:main:dingtalk:group:group-live",
+    });
 
     const output = runCli([
       "collect",
@@ -1741,9 +1746,9 @@ EOF
       }),
       expect.objectContaining({
         code: "openclaw_internal_subagent_ignored",
-        count: 1,
+        count: 2,
         severity: "debug",
-        sampleRefs: ["subagent-run"],
+        sampleRefs: expect.arrayContaining(["subagent-run", "runtime-context-subagent"]),
       }),
     ]));
     expect(output.diagnostics.items.some((item: { severity?: string }) => item.severity === "warning")).toBe(false);

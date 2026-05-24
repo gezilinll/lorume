@@ -2452,6 +2452,12 @@ function openClawTrajectoryTaskEligibility(run, taskType = inferOpenClawTaskType
       ? { create: false, reason: "missing task prompt" }
       : { create: false, reason: "missing prompt" };
   }
+  if (/^(?:\[[^\]]+\]\s*)?<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>/i.test(prompt)) {
+    if (/\bsource:\s*subagent\b/i.test(prompt) || /\bsession_key:\s*agent:[^:\s]+:subagent:/i.test(prompt)) {
+      return { create: false, reason: "internal subagent run" };
+    }
+    return { create: false, reason: "internal system run" };
+  }
   if (prompt === "HEARTBEAT_OK" || /^\[OpenClaw heartbeat poll\]/i.test(prompt)) {
     return { create: false, reason: "internal heartbeat run" };
   }

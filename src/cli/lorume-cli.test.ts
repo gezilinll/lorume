@@ -1691,8 +1691,10 @@ EOF
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-internal-run-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "internal");
+    const dingtalkStateDir = path.join(root, ".openclaw", "agents", "main", "sessions", "dingtalk-state");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(dingtalkStateDir, { recursive: true });
     writeOpenClawExecutable(binDir, {
       health: { ok: true, agents: [{ agentId: "main" }] },
       status: {
@@ -1727,6 +1729,33 @@ EOF
       snapshotUserMessage: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is runtime-generated, not user-authored. [Internal task completion event] source: subagent session_key: agent:main:subagent:researcher type: subagent task status: completed successfully",
       sessionKey: "agent:main:dingtalk:group:group-live",
     });
+    writeOpenClawTrajectoryFile(sessionDir, "runtime-context-dingtalk-message", {
+      finalStatus: "success",
+      prompt: "Process DingTalk message",
+      runtimeContext: {
+        chat_id: "group-live",
+        group_subject: "日常工作提醒助手",
+        message_id: "msg-internal-context-1",
+        sender: "张良",
+        sender_id: "user-live-1",
+      },
+      sessionKey: "agent:main:dingtalk:group:group-live",
+    });
+    writeFileSync(path.join(dingtalkStateDir, "targets.directory.json"), JSON.stringify({
+      groups: {
+        "group-live": { currentTitle: "日常工作提醒助手" },
+      },
+    }));
+    writeFileSync(path.join(dingtalkStateDir, "messages.context.json"), JSON.stringify({
+      records: [{
+        msgId: "msg-internal-context-1",
+        conversationId: "group-live",
+        direction: "inbound",
+        text: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> OpenClaw runtime context (internal): This context is runtime-generated, not user-authored. [Internal task completion event] source: subagent session_key: agent:main:subagent:researcher type: subagent task status: completed successfully",
+        senderId: "user-live-1",
+        senderName: "张良",
+      }],
+    }));
 
     const output = runCli([
       "collect",
@@ -1752,9 +1781,14 @@ EOF
       }),
       expect.objectContaining({
         code: "openclaw_internal_subagent_ignored",
-        count: 3,
+        count: 4,
         severity: "debug",
-        sampleRefs: expect.arrayContaining(["subagent-run", "runtime-context-subagent", "runtime-context-subagent-snapshot"]),
+        sampleRefs: expect.arrayContaining([
+          "subagent-run",
+          "runtime-context-subagent",
+          "runtime-context-subagent-snapshot",
+          "runtime-context-dingtalk-message",
+        ]),
       }),
     ]));
     expect(output.diagnostics.items.some((item: { severity?: string }) => item.severity === "warning")).toBe(false);
@@ -2146,6 +2180,7 @@ function writeOpenClawTrajectoryFile(
   options: {
     finalStatus: "success" | "error" | "interrupted";
     prompt: string;
+    runtimeContext?: Record<string, unknown>;
     sessionKey?: string;
     snapshotUserMessage?: string;
     traceError?: string;
@@ -2165,7 +2200,10 @@ function writeOpenClawTrajectoryFile(
       runId,
       sessionKey,
       ts: "2026-05-21T04:01:00.000Z",
-      data: { prompt: options.prompt },
+      data: {
+        prompt: options.prompt,
+        ...(options.runtimeContext ? { runtimeContext: options.runtimeContext } : {}),
+      },
     }),
     JSON.stringify({
       type: "trace.artifacts",

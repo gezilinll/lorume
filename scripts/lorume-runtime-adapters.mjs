@@ -1680,6 +1680,17 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
       diagnostics.add(openClawUserMessageDiagnostic(userMessageResult.reason), runId);
       continue;
     }
+    if (isOpenClawInternalRuntimeContextText(userMessageResult.userMessage)) {
+      diagnostics.add(
+        openClawEligibilityDiagnostic(
+          isOpenClawInternalSubagentContextText(userMessageResult.userMessage)
+            ? "internal subagent run"
+            : "internal system run",
+        ),
+        runId,
+      );
+      continue;
+    }
     const status = normalizeOpenClawTrajectoryProductTaskStatus(run);
     const toolError = firstOpenClawFailedToolCallError(run.toolCalls);
     const error = openClawTrajectoryError(run) || toolError;

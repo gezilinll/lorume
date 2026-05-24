@@ -77,7 +77,7 @@ Registry / Catalog 是对象目录和元数据系统，不参与运行时执行�
 Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落地并可验收的页面：
 
 - Runtime Fleet
-- Runs / Work Board
+- Runs（会话任务）
 - 组织设置
 
 任务中心和通知中心是 Console 右上角工具抽屉，不是主导航页面。它们服务于当前页面上下文中的异步状态和提醒查看。
@@ -99,7 +99,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 当前主要用户动线：
 
 - 管理运行资产：登录 -> Runtime Fleet -> 查看 Device、Runtime、Agent 和采集健康。
-- 查看 Agent 工作项：登录 -> Runs / Work Board -> 按 Runtime、Channel、阶段和时间范围查看工作项。
+- 查看 Agent 会话任务：登录 -> Runs -> 按 Channel、状态和时间范围查看会话任务。
 - 跟踪异步任务：登录 -> 右上角任务中心抽屉 -> 查看 Operation / Job 状态、失败原因和目标资源。
 - 查看通知：登录 -> 右上角通知中心抽屉 -> 查看未读/已读通知、同步、采集、审核和恢复类通知。
 - 管理组织：登录 -> 组织设置 -> 查看当前组织与成员身份，创建邀请链接。
@@ -470,7 +470,7 @@ SSH 失败、依赖缺失、健康检查失败、容量不足、OpenClaw/Nowledg
 ## 实现优先级
 
 - Console 只暴露已经有页面、数据链路、权限规则和 harness 的能力。
-- 已实现页面是 Runtime Fleet、Runs / Work Board 和组织设置；任务中心和通知中心作为右上角工具抽屉提供。
+- 已实现页面是 Runtime Fleet、Runs（会话任务）和组织设置；任务中心和通知中心作为右上角工具抽屉提供。
 - Object Catalog、Agent Studio、Workflow Studio、Governance Center、Integrations & Resources 等页面进入实现前，必须先补齐对应 spec、对象模型、权限边界和 harness。
 - Integrations & Resources 接入 OpenClaw、Multica、Slock、Codex、DingTalk、Telegram、Slack、BI、星图、SLS、GitLab、Aetheris CLI 等资源时，平台差异必须由 adapter 转换为 Lorume 语义。
 - 图片中的 UI 细节不应被机械照搬，真正实现时应以对象模型、交互流和运行态数据为准。

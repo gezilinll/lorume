@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import fleetFixture from "../fixtures/runtime/runtime-fleet-device-state.sample.json";
+import fleetFixture from "../fixtures/runtime/runtime-fleet-query.sample.json";
 import { App } from "./App";
 import type { RuntimeFleetSnapshot } from "./runtime/runtime-fleet-query";
-import type { CollectionStatus, Task } from "./runtime/runtime-model";
+import { TASK_CHANNEL_KIND_LABELS, TASK_STATUSES, type CollectionStatus, type Task, type TaskChannelKind } from "./runtime/runtime-model";
 
 const originalFetch = globalThis.fetch;
 const originalPath = window.location.pathname;
@@ -30,22 +30,46 @@ function runtimeFleetQueryResponse(snapshot: RuntimeFleetSnapshot) {
     devices: snapshot.devices,
     runtimes: snapshot.runtimes,
     agents: snapshot.agents,
-    tasks: snapshot.tasks,
-    summary: {
-      agentCount: snapshot.agents.length,
-      deviceCount: snapshot.devices.length,
-      runtimeCount: snapshot.runtimes.length,
-      taskCount: snapshot.tasks.length,
-    },
+    taskSummary: snapshot.taskSummary,
+    summary: snapshot.summary,
   };
 }
 
 function taskQueryResponse(tasks: unknown[], nextCursor?: string, total = tasks.length) {
+  const byStatus = taskStatusCounts(tasks);
+  byStatus.total = total;
+  const channels = taskChannelFacets(tasks);
   return {
+    facets: { channels },
     items: tasks,
+    summary: { byStatus, total: byStatus.total },
     total,
     ...(nextCursor ? { nextCursor } : {}),
   };
+}
+
+function taskStatusCounts(tasks: unknown[]) {
+  const counts = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<Task["status"], number> & { total: number };
+  counts.total = 0;
+  for (const task of tasks as Task[]) {
+    if (!TASK_STATUSES.includes(task.status)) continue;
+    counts[task.status] += 1;
+    counts.total += 1;
+  }
+  return counts;
+}
+
+function taskChannelFacets(tasks: unknown[]) {
+  const counts = new Map<TaskChannelKind, number>();
+  for (const task of tasks as Task[]) {
+    if (!task.channel?.kind) continue;
+    counts.set(task.channel.kind, (counts.get(task.channel.kind) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([kind, count]) => ({
+    count,
+    kind,
+    label: TASK_CHANNEL_KIND_LABELS[kind],
+  }));
 }
 
 function collectionHealthResponse(snapshot: RuntimeFleetSnapshot) {
@@ -56,7 +80,7 @@ function collectionHealthResponse(snapshot: RuntimeFleetSnapshot) {
           agents: snapshot.agents.length,
           devices: snapshot.devices.length,
           runtimes: snapshot.runtimes.length,
-          tasks: snapshot.tasks.length,
+          tasks: snapshot.summary.taskCount,
         },
         error: null,
         id: "device_state",
@@ -199,7 +223,7 @@ describe("Console shell", () => {
     await user.click(within(nav).getByRole("button", { name: "Runs" }));
 
     expect(window.location.pathname).toBe("/runs");
-    expect(screen.getByRole("heading", { name: "工作看板" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "会话任务" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "任务 0" }));
     expect(window.location.pathname).toBe("/operations");
@@ -246,16 +270,16 @@ describe("Console shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
-    expect(screen.getByRole("heading", { name: "工作看板" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "会话任务" })).toBeInTheDocument();
     for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
-    expect(await screen.findByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
+    expect(await screen.findByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
     const channelSelect = screen.getByLabelText("渠道") as HTMLSelectElement;
     expect(channelSelect.value).toBe("all");
     expect(within(channelSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "全部",
-      "DingTalk",
+      "DingTalk（2）",
     ]);
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
@@ -352,7 +376,7 @@ describe("Console shell", () => {
     render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
+    expect(await screen.findByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
 
     expect(screen.queryByText("Slock 监听未就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenClaw 执行监听已接入")).not.toBeInTheDocument();
@@ -378,7 +402,7 @@ describe("Console shell", () => {
         assignee: { name: "main" },
         creator: { name: "PMO" },
         id: "task-page-2",
-        status: "todo",
+        status: "in_progress",
         updatedAt: "2026-05-21T07:59:00.000Z",
         userMessage: "Second backend task",
       }),
@@ -401,7 +425,7 @@ describe("Console shell", () => {
 
     expect(await screen.findByRole("button", { name: /First backend task/ })).toBeInTheDocument();
     expect(screen.getByText("已显示 1 / 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "加载更多" }).closest(".boardResultMeta")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "加载更多" }).closest(".workLaneItems")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "加载更多" }));
 
     expect(await screen.findByRole("button", { name: /Second backend task/ })).toBeInTheDocument();

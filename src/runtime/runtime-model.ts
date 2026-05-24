@@ -38,6 +38,16 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export type TaskStatusCounts = Record<TaskStatus, number> & {
+  total: number;
+};
+
+export interface RuntimeFleetTaskSummary {
+  byAgentId: Record<string, TaskStatusCounts>;
+  byRuntimeId: Record<string, TaskStatusCounts>;
+  byDeviceId: Record<string, TaskStatusCounts>;
+}
+
 export const TASK_TYPES = ["conversation", "scheduled"] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -49,6 +59,12 @@ export type TaskAdapterKind = (typeof TASK_ADAPTER_KINDS)[number];
 export const TASK_CHANNEL_KINDS = ["dingtalk", "webchat", "slock"] as const;
 
 export type TaskChannelKind = (typeof TASK_CHANNEL_KINDS)[number];
+
+export const TASK_CHANNEL_KIND_LABELS: Record<TaskChannelKind, string> = {
+  dingtalk: "DingTalk",
+  slock: "Slock",
+  webchat: "Web Chat",
+};
 
 export interface Device {
   id: string;
@@ -217,6 +233,28 @@ export function normalizeTaskStatus(value: string): TaskStatus {
   if (normalized === "failed" || normalized === "error" || normalized === "timed_out" || normalized === "timeout" || normalized === "lost") return "failed";
   if (normalized === "cancelled" || normalized === "canceled" || normalized === "interrupted") return "cancelled";
   return "unknown";
+}
+
+export function createEmptyTaskStatusCounts(): TaskStatusCounts {
+  return {
+    blocked: 0,
+    cancelled: 0,
+    done: 0,
+    failed: 0,
+    in_progress: 0,
+    review: 0,
+    todo: 0,
+    total: 0,
+    unknown: 0,
+  };
+}
+
+export function createEmptyRuntimeFleetTaskSummary(): RuntimeFleetTaskSummary {
+  return {
+    byAgentId: {},
+    byDeviceId: {},
+    byRuntimeId: {},
+  };
 }
 
 export function normalizeTaskType(value: string | undefined): TaskType {

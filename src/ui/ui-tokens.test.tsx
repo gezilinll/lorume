@@ -93,7 +93,7 @@ describe("Glacier Premium Precision UI primitives", () => {
         title="登录 Lorume"
         subtitle="使用团队邮箱接收验证码"
         preview={<div>Runtime Fleet</div>}
-        notice="登录后可统一管理组织内 Device、Runtime、Agent 与工作看板。"
+        notice="登录后可统一管理组织内 Device、Runtime、Agent 与会话任务。"
       >
         <PixelButton>继续</PixelButton>
       </AuthLayout>,

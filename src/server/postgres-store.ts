@@ -10,12 +10,20 @@ import {
 } from "../runtime/agent-skill-probe";
 import {
   createDeviceStateSnapshot,
+  createEmptyRuntimeFleetTaskSummary,
+  createEmptyTaskStatusCounts,
+  TASK_CHANNEL_KIND_LABELS,
+  TASK_STATUSES,
   type Agent,
   type CollectionDiagnosticItem,
   type Device,
   type DeviceStateSnapshot,
+  type RuntimeFleetTaskSummary,
   type Runtime,
   type Task,
+  type TaskChannelKind,
+  type TaskStatus,
+  type TaskStatusCounts,
 } from "../runtime/runtime-model";
 import type { RuntimeTaskBatch } from "../runtime/runtime-task-sync";
 
@@ -76,13 +84,31 @@ interface PostgresTaskQueryRow {
   orderTimestamp: Date | null;
 }
 
+interface PostgresRuntimeFleetTaskSummaryRow {
+  agentId: string;
+  runtimeId: string | null;
+  deviceId: string | null;
+  status: string;
+  count: string;
+}
+
+interface PostgresTaskStatusSummaryRow {
+  status: string;
+  count: string;
+}
+
+interface PostgresTaskChannelFacetRow {
+  kind: string;
+  count: string;
+}
+
 /** Backend query result for Runtime Fleet. */
 export interface PostgresRuntimeFleetResult {
   collectedAt: string | null;
   devices: Device[];
   runtimes: Runtime[];
   agents: Agent[];
-  tasks: Task[];
+  taskSummary: RuntimeFleetTaskSummary;
   summary: {
     deviceCount: number;
     runtimeCount: number;
@@ -108,6 +134,13 @@ export interface PostgresRuntimeTaskResult {
   items: Task[];
   total: number;
   nextCursor?: string;
+  summary: {
+    total: number;
+    byStatus: TaskStatusCounts;
+  };
+  facets: {
+    channels: Array<{ kind: TaskChannelKind; label: string; count: number }>;
+  };
 }
 
 /** Postgres-backed repository for the current Device / Runtime / Agent / Task model. */
@@ -258,13 +291,25 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
       }
     },
     async readRuntimeFleet() {
-      const [deviceResult, runtimeResult, agentResult, taskResult] = await Promise.all([
+      const [deviceResult, runtimeResult, agentResult, taskSummaryResult] = await Promise.all([
         pool.query<{ collector: Device["collector"]; raw: Device; collected_at: Date | null }>(
           "SELECT collector, raw, collected_at FROM devices ORDER BY hostname, id",
         ),
         pool.query<{ raw: Runtime }>("SELECT raw FROM runtimes ORDER BY name"),
         pool.query<{ raw: Agent }>("SELECT raw FROM agents ORDER BY name"),
-        pool.query<{ raw: Task }>(`SELECT t.raw FROM tasks t WHERE t.stale_at IS NULL ORDER BY ${taskOrderExpression} DESC, t.id DESC`),
+        pool.query<PostgresRuntimeFleetTaskSummaryRow>(`
+          SELECT
+            t.agent_id AS "agentId",
+            a.runtime_id AS "runtimeId",
+            r.device_id AS "deviceId",
+            t.status,
+            count(*)::text AS count
+          FROM tasks t
+          LEFT JOIN agents a ON a.id = t.agent_id
+          LEFT JOIN runtimes r ON r.id = a.runtime_id
+          WHERE t.stale_at IS NULL
+          GROUP BY t.agent_id, a.runtime_id, r.device_id, t.status
+        `),
       ]);
       const collectedAt = deviceResult.rows
         .map((row) => row.collected_at?.toISOString() ?? null)
@@ -276,7 +321,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         device: deviceResult.rows[0]?.raw ?? { id: "backend", hostname: "backend", os: "unknown" },
         runtimes: runtimeResult.rows.map((row) => row.raw),
         agents: agentResult.rows.map((row) => row.raw),
-        tasks: taskResult.rows.map((row) => row.raw),
+        tasks: [],
       });
       const devices = deviceResult.rows.map((row) => createDeviceStateSnapshot({
         collectedAt: collectedAt ?? new Date().toISOString(),
@@ -287,24 +332,26 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
       }).device);
       const runtimes = sanitized.runtimes;
       const agents = sanitized.agents;
-      const tasks = sanitized.tasks;
+      const { taskCount, taskSummary } = buildRuntimeFleetTaskSummary(taskSummaryResult.rows);
 
       return {
         collectedAt,
         devices,
         runtimes,
         agents,
-        tasks,
+        taskSummary,
         summary: {
           agentCount: agents.length,
           deviceCount: devices.length,
           runtimeCount: runtimes.length,
-          taskCount: tasks.length,
+          taskCount,
         },
       };
     },
     async listRuntimeTasks(filters = {}) {
       const { clause, values } = createTaskWhereClause(filters);
+      const summaryPromise = readTaskStatusSummary(pool, filters);
+      const facetsPromise = readTaskFacets(pool, filters);
       const countResult = await pool.query<{ count: string }>(
         `SELECT count(*) AS count
         FROM tasks t
@@ -337,8 +384,10 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         tasks: visibleRows.map((row) => row.raw),
       }).tasks;
       return {
+        facets: await facetsPromise,
         items: tasks,
         nextCursor,
+        summary: await summaryPromise,
         total: Number(countResult.rows[0]?.count ?? 0),
       };
     },
@@ -588,6 +637,111 @@ async function insertCollectorIngestion(
 async function countTable(client: pg.PoolClient, table: string): Promise<number> {
   const result = await client.query<{ count: string }>(`SELECT count(*) AS count FROM ${table}`);
   return Number(result.rows[0]?.count ?? 0);
+}
+
+function buildRuntimeFleetTaskSummary(rows: PostgresRuntimeFleetTaskSummaryRow[]): {
+  taskCount: number;
+  taskSummary: RuntimeFleetTaskSummary;
+} {
+  const taskSummary = createEmptyRuntimeFleetTaskSummary();
+  let taskCount = 0;
+
+  for (const row of rows) {
+    if (!isTaskStatus(row.status)) continue;
+    const count = Number(row.count);
+    if (!Number.isFinite(count) || count <= 0) continue;
+    taskCount += count;
+    addTaskStatusCount(taskSummary.byAgentId, row.agentId, row.status, count);
+    if (row.runtimeId) addTaskStatusCount(taskSummary.byRuntimeId, row.runtimeId, row.status, count);
+    if (row.deviceId) addTaskStatusCount(taskSummary.byDeviceId, row.deviceId, row.status, count);
+  }
+
+  return { taskCount, taskSummary };
+}
+
+async function readTaskStatusSummary(
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
+  filters: PostgresRuntimeTaskFilters,
+): Promise<PostgresRuntimeTaskResult["summary"]> {
+  const { clause, values } = createTaskWhereClause({
+    ...filters,
+    cursor: null,
+    status: null,
+  });
+  const result = await client.query<PostgresTaskStatusSummaryRow>(`
+    SELECT t.status, count(*)::text AS count
+    FROM tasks t
+    LEFT JOIN agents a ON a.id = t.agent_id
+    LEFT JOIN runtimes r ON r.id = a.runtime_id
+    ${clause}
+    GROUP BY t.status
+  `, values);
+  const byStatus = createEmptyTaskStatusCounts();
+  for (const row of result.rows) {
+    if (!isTaskStatus(row.status)) continue;
+    const count = Number(row.count);
+    if (!Number.isFinite(count) || count <= 0) continue;
+    byStatus[row.status] += count;
+    byStatus.total += count;
+  }
+  return {
+    byStatus,
+    total: byStatus.total,
+  };
+}
+
+async function readTaskFacets(
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
+  filters: PostgresRuntimeTaskFilters,
+): Promise<PostgresRuntimeTaskResult["facets"]> {
+  const { clause, values } = createTaskWhereClause({
+    ...filters,
+    channelKind: null,
+    cursor: null,
+  });
+  const result = await client.query<PostgresTaskChannelFacetRow>(`
+    SELECT t.channel->>'kind' AS kind, count(*)::text AS count
+    FROM tasks t
+    LEFT JOIN agents a ON a.id = t.agent_id
+    LEFT JOIN runtimes r ON r.id = a.runtime_id
+    ${addSqlCondition(clause, "t.channel->>'kind' IS NOT NULL")}
+    GROUP BY t.channel->>'kind'
+    ORDER BY kind
+  `, values);
+  return {
+    channels: result.rows
+      .filter((row): row is PostgresTaskChannelFacetRow & { kind: TaskChannelKind } => isTaskChannelKind(row.kind))
+      .map((row) => ({
+        count: Number(row.count),
+        kind: row.kind,
+        label: TASK_CHANNEL_KIND_LABELS[row.kind],
+      })),
+  };
+}
+
+function addTaskStatusCount(
+  summary: RuntimeFleetTaskSummary["byAgentId"],
+  id: string,
+  status: TaskStatus,
+  count: number,
+): void {
+  if (!id) return;
+  const existing = summary[id] ?? createEmptyTaskStatusCounts();
+  existing[status] += count;
+  existing.total += count;
+  summary[id] = existing;
+}
+
+function isTaskStatus(value: string): value is TaskStatus {
+  return (TASK_STATUSES as readonly string[]).includes(value);
+}
+
+function isTaskChannelKind(value: string): value is TaskChannelKind {
+  return value === "dingtalk" || value === "webchat" || value === "slock";
+}
+
+function addSqlCondition(clause: string, condition: string): string {
+  return clause ? `${clause} AND ${condition}` : `WHERE ${condition}`;
 }
 
 async function withTransaction<T>(

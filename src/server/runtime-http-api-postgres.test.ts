@@ -85,15 +85,39 @@ describeDb("runtime HTTP API with Postgres store", () => {
           runtimes: 1,
           tasks: 1,
         });
-        await expect(fleetResponse.json()).resolves.toMatchObject({
+        const fleetBody = await fleetResponse.json();
+        expect(fleetBody).toMatchObject({
           agents: [expect.objectContaining({ id: "openclaw-device:runtime:openclaw:agent:main", collectionStatus: "online" })],
           devices: [expect.objectContaining({ id: "openclaw-device", collectionStatus: "online" })],
           runtimes: [expect.objectContaining({ id: "openclaw-device:runtime:openclaw", collectionStatus: "online" })],
           summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 1 },
-          tasks: [expect.objectContaining({ id: "openclaw-device:runtime:openclaw:agent:main:task:task-1" })],
+          taskSummary: {
+            byAgentId: {
+              "openclaw-device:runtime:openclaw:agent:main": expect.objectContaining({
+                in_progress: 1,
+                total: 1,
+              }),
+            },
+            byDeviceId: {
+              "openclaw-device": expect.objectContaining({
+                in_progress: 1,
+                total: 1,
+              }),
+            },
+            byRuntimeId: {
+              "openclaw-device:runtime:openclaw": expect.objectContaining({
+                in_progress: 1,
+                total: 1,
+              }),
+            },
+          },
         });
+        expect(fleetBody).not.toHaveProperty("tasks");
         const tasksBody = await tasksResponse.json();
         expect(tasksBody).toMatchObject({
+          facets: {
+            channels: [{ count: 1, kind: "dingtalk", label: "DingTalk" }],
+          },
           items: [
             expect.objectContaining({
               agentId: "openclaw-device:runtime:openclaw:agent:main",
@@ -102,6 +126,13 @@ describeDb("runtime HTTP API with Postgres store", () => {
               status: "in_progress",
             }),
           ],
+          summary: {
+            byStatus: expect.objectContaining({
+              in_progress: 1,
+              total: 1,
+            }),
+            total: 1,
+          },
           total: 1,
         });
         expect(tasksBody.items[0]).not.toHaveProperty("runtimeId");
@@ -166,7 +197,11 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         await expect(fleetResponse.json()).resolves.toMatchObject({
           summary: { taskCount: 0 },
-          tasks: [],
+          taskSummary: {
+            byAgentId: {},
+            byDeviceId: {},
+            byRuntimeId: {},
+          },
         });
         await expect(tasksResponse.json()).resolves.toMatchObject({
           items: [],

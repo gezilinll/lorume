@@ -5,15 +5,16 @@ import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import {
   createRuntimeTaskBoard,
   createTasksQueryUrl,
-  listRuntimeTaskChannelOptions,
   runtimeTasksQueryPageFromResponse,
   taskStatusLabels,
   type RuntimeTaskBoardFilters,
   type RuntimeTaskBoardItem,
   type RuntimeTaskChannelKind,
+  type RuntimeTaskChannelOption,
   type RuntimeTaskTimeRangeFilter,
+  type RuntimeTasksQueryPage,
 } from "./runtime-work-query-api";
-import { TASK_STATUSES, type Task, type TaskStatus } from "./runtime-model";
+import { createEmptyTaskStatusCounts, TASK_STATUSES, type Task, type TaskStatus, type TaskStatusCounts } from "./runtime-model";
 import { PixelIcon } from "../ui/PixelIcon";
 
 const autoRefreshIntervalMs = 30_000;
@@ -27,22 +28,33 @@ const fixtureTasks = runtimeTasksQueryPageFromResponse({
   items: (fleetFixture as { tasks?: unknown[] }).tasks ?? [],
   total: (fleetFixture as { tasks?: unknown[] }).tasks?.length ?? 0,
 })?.tasks ?? [];
+const fixtureSummary = createRuntimeTaskBoard(fixtureTasks).summary;
+const fixtureLaneStates = createLaneStatesFromTasks(fixtureTasks, fixtureSummary);
 const defaultFiltersKey = createRuntimeTaskFiltersKey();
 
-interface RuntimeTaskLoadResult {
+interface RuntimeTaskLaneState {
   tasks: Task[];
   total: number;
   nextCursor?: string;
+  loading: boolean;
+  error?: string;
 }
+
+type RuntimeTaskLaneStateByStatus = Record<TaskStatus, RuntimeTaskLaneState>;
 
 /** Read-only board for normalized Agent Tasks. */
 export function RuntimeWorkBoardPage() {
   const allowFixtureFallback = isFixtureFallbackAllowed();
-  const [tasks, setTasks] = useState<Task[]>(allowFixtureFallback ? fixtureTasks : []);
-  const [totalMatchingItems, setTotalMatchingItems] = useState(allowFixtureFallback ? fixtureTasks.length : 0);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
+  const [laneStates, setLaneStates] = useState<RuntimeTaskLaneStateByStatus>(
+    allowFixtureFallback ? fixtureLaneStates : createEmptyLaneStates(),
+  );
+  const [summary, setSummary] = useState<TaskStatusCounts>(
+    allowFixtureFallback ? fixtureSummary : createEmptyTaskStatusCounts(),
+  );
+  const [channelOptions, setChannelOptions] = useState<RuntimeTaskChannelOption[]>(
+    allowFixtureFallback ? [{ count: fixtureTasks.length, label: "DingTalk", value: "dingtalk" }] : [],
+  );
   const [loadedFiltersKey, setLoadedFiltersKey] = useState(defaultFiltersKey);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshState, setRefreshState] = useState<{
     status: "idle" | "running" | "success" | "error";
     message: string;
@@ -69,42 +81,46 @@ export function RuntimeWorkBoardPage() {
   async function fetchLatestTasks(
     filterOptions?: RuntimeTaskBoardFilters,
     cursor?: string,
-  ): Promise<RuntimeTaskLoadResult> {
-    const queryResponse = await fetch(createTasksQueryUrl(window.location.origin, filterOptions, { cursor }));
+    options: { limit?: number } = {},
+  ): Promise<RuntimeTasksQueryPage> {
+    const queryResponse = await fetch(createTasksQueryUrl(window.location.origin, filterOptions, {
+      cursor,
+      limit: options.limit,
+    }));
     if (!queryResponse.ok) throw new Error(`runtime task query failed: ${queryResponse.status}`);
     const queryPage = runtimeTasksQueryPageFromResponse(await queryResponse.json());
     if (!queryPage) throw new Error("runtime task query returned an invalid payload");
     return queryPage;
   }
 
-  function applyTasks(
-    latestTasks: Task[],
-    options: { append?: boolean; filtersKey?: string; nextCursor?: string; total?: number } = {},
-  ) {
-    setTasks((current) => options.append ? mergeTasks(current, latestTasks) : latestTasks);
-    setNextCursor(options.nextCursor);
-    setLoadedFiltersKey(options.filtersKey ?? defaultFiltersKey);
-    setTotalMatchingItems(options.total ?? latestTasks.length);
-    setLastLoadedAt(new Date().toISOString());
-  }
-
   async function loadLatestTasks(options: { silent?: boolean } = {}) {
     try {
-      const latest = await fetchLatestTasks(filters);
-      applyTasks(latest.tasks, {
-        filtersKey,
-        nextCursor: latest.nextCursor,
-        total: latest.total,
-      });
-      if (!options.silent) setRefreshState({ status: "success", message: "已读取最新任务" });
+      await loadTaskDashboard();
+      if (!options.silent) setRefreshState({ status: "success", message: "已读取最新会话任务" });
     } catch (error) {
       if (!options.silent) {
         setRefreshState({
           status: "error",
-          message: error instanceof Error ? error.message : "读取任务失败",
+          message: error instanceof Error ? error.message : "读取会话任务失败",
         });
       }
     }
+  }
+
+  async function loadTaskDashboard(): Promise<void> {
+    const overview = await fetchLatestTasks(filters, undefined, { limit: 1 });
+    const statusesToLoad = statusesForFilters(overview.summary, status);
+    const lanePages = await Promise.all(
+      statusesToLoad.map(async (laneStatus) => ({
+        page: await fetchLatestTasks({ ...filters, status: laneStatus }, undefined, { limit: 50 }),
+        status: laneStatus,
+      })),
+    );
+    setSummary(overview.summary);
+    setChannelOptions(overview.channelOptions);
+    setLaneStates(createLaneStatesFromPages(overview.summary, lanePages));
+    setLoadedFiltersKey(filtersKey);
+    setLastLoadedAt(new Date().toISOString());
   }
 
   useEffect(() => {
@@ -113,17 +129,23 @@ export function RuntimeWorkBoardPage() {
 
     async function loadTasksForFilters() {
       try {
-        const latest = await fetchLatestTasks(filters);
-        if (!cancelled) {
-          applyTasks(latest.tasks, {
-            filtersKey,
-            nextCursor: latest.nextCursor,
-            total: latest.total,
-          });
-        }
+        const overview = await fetchLatestTasks(filters, undefined, { limit: 1 });
+        const statusesToLoad = statusesForFilters(overview.summary, status);
+        const lanePages = await Promise.all(
+          statusesToLoad.map(async (laneStatus) => ({
+            page: await fetchLatestTasks({ ...filters, status: laneStatus }, undefined, { limit: 50 }),
+            status: laneStatus,
+          })),
+        );
+        if (cancelled) return;
+        setSummary(overview.summary);
+        setChannelOptions(overview.channelOptions);
+        setLaneStates(createLaneStatesFromPages(overview.summary, lanePages));
+        setLoadedFiltersKey(filtersKey);
+        setLastLoadedAt(new Date().toISOString());
       } catch {
         if (!allowFixtureFallback && !cancelled) {
-          setRefreshState({ status: "error", message: "后端查询失败，无法读取正式任务" });
+          setRefreshState({ status: "error", message: "后端查询失败，无法读取会话任务" });
         }
       }
     }
@@ -141,39 +163,49 @@ export function RuntimeWorkBoardPage() {
     };
   }, [allowFixtureFallback, filters, filtersKey]);
 
-  const channelOptions = useMemo(() => listRuntimeTaskChannelOptions(tasks), [tasks]);
   useEffect(() => {
     if (channelKind !== "all" && !channelOptions.some((option) => option.value === channelKind)) {
       setChannelKind("all");
     }
   }, [channelKind, channelOptions]);
 
-  const board = useMemo(() => createRuntimeTaskBoard(tasks, filters), [filters, tasks]);
+  const visibleTasks = useMemo(() => flattenLaneTasks(laneStates, status), [laneStates, status]);
+  const board = useMemo(() => createRuntimeTaskBoard(visibleTasks, filters, summary), [filters, summary, visibleTasks]);
   const selectedItem = selectedId ? board.visibleItems.find((item) => item.id === selectedId) ?? null : board.visibleItems[0] ?? null;
   const displayedItems = board.visibleItems.length;
   const paginationMatchesFilters = loadedFiltersKey === filtersKey;
-  const displayedTotal = paginationMatchesFilters ? totalMatchingItems : displayedItems;
-  const canLoadMore = Boolean(nextCursor && paginationMatchesFilters);
+  const displayedTotal = paginationMatchesFilters ? visibleTotal(laneStates, summary, status) : displayedItems;
 
-  async function loadMoreTasks() {
-    if (!nextCursor || loadingMore || !paginationMatchesFilters) return;
-    setLoadingMore(true);
+  async function loadMoreTasks(laneStatus: TaskStatus) {
+    const lane = laneStates[laneStatus];
+    if (!lane.nextCursor || lane.loading || !paginationMatchesFilters) return;
+    setLaneStates((current) => ({
+      ...current,
+      [laneStatus]: { ...current[laneStatus], loading: true, error: undefined },
+    }));
     try {
-      const page = await fetchLatestTasks(filters, nextCursor);
-      applyTasks(page.tasks, {
-        append: true,
-        filtersKey,
-        nextCursor: page.nextCursor,
-        total: page.total,
-      });
-      setRefreshState({ status: "success", message: "已加载更多任务" });
+      const page = await fetchLatestTasks({ ...filters, status: laneStatus }, lane.nextCursor, { limit: 50 });
+      setLaneStates((current) => ({
+        ...current,
+        [laneStatus]: {
+          error: undefined,
+          loading: false,
+          nextCursor: page.nextCursor,
+          tasks: mergeTasks(current[laneStatus].tasks, page.tasks.filter((task) => task.status === laneStatus)),
+          total: page.total,
+        },
+      }));
+      setRefreshState({ status: "success", message: "已加载更多会话任务" });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "加载更多失败";
+      setLaneStates((current) => ({
+        ...current,
+        [laneStatus]: { ...current[laneStatus], error: message, loading: false },
+      }));
       setRefreshState({
         status: "error",
-        message: error instanceof Error ? error.message : "加载更多失败",
+        message,
       });
-    } finally {
-      setLoadingMore(false);
     }
   }
 
@@ -182,9 +214,9 @@ export function RuntimeWorkBoardPage() {
       <header className="pageHeader">
         <div>
           <p className="eyebrow">Agent / Tasks</p>
-          <h1>工作看板</h1>
+          <h1>会话任务</h1>
           <p className="pageSubtitle">
-            统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。
+            查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。
           </p>
           <p className="pageRefreshMeta">
             {lastLoadedAt ? `上次刷新 ${formatRuntimeTimestamp(lastLoadedAt)}` : ""}
@@ -196,12 +228,12 @@ export function RuntimeWorkBoardPage() {
             type="button"
             disabled={refreshState.status === "running"}
             onClick={() => {
-              setRefreshState({ status: "running", message: "正在读取最新任务" });
+              setRefreshState({ status: "running", message: "正在读取会话任务" });
               void loadLatestTasks();
             }}
           >
             <PixelIcon name="reload" size={16} />
-            {refreshState.status === "running" ? "刷新中" : "刷新看板"}
+            {refreshState.status === "running" ? "刷新中" : "刷新任务"}
           </button>
           {refreshState.message ? (
             <p className={`refreshMessage refresh-${refreshState.status}`} role="status">
@@ -211,7 +243,7 @@ export function RuntimeWorkBoardPage() {
         </div>
       </header>
 
-      <section className="toolbar workBoardToolbar" aria-label="工作看板筛选">
+      <section className="toolbar workBoardToolbar" aria-label="会话任务筛选">
         <label className="toolbarField toolbarSearch">
           <span className="controlLabel">搜索</span>
           <span className="searchBox">
@@ -233,7 +265,7 @@ export function RuntimeWorkBoardPage() {
             <option value="all">全部</option>
             {channelOptions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {option.label}（{option.count}）
               </option>
             ))}
           </select>
@@ -284,18 +316,13 @@ export function RuntimeWorkBoardPage() {
         <div className="workBoardMain">
           <div className="boardResultMeta">
             <span>已显示 {displayedItems} / {displayedTotal}</span>
-            {canLoadMore ? (
-              <button className="loadMoreButton" type="button" disabled={loadingMore} onClick={() => void loadMoreTasks()}>
-                {loadingMore ? "加载中" : "加载更多"}
-              </button>
-            ) : null}
           </div>
           <div className="workBoardLanes" aria-label="任务泳道">
             {board.lanes.map((lane) => (
               <section className="workLane" key={lane.status} aria-label={`${lane.label}泳道`}>
                 <div className="workLaneHeader">
                   <h2>{lane.label}</h2>
-                  <span>{lane.items.length}</span>
+                  <span>{lane.items.length} / {laneStates[lane.status].total}</span>
                 </div>
                 <div className="workLaneItems">
                   {lane.items.length ? (
@@ -323,6 +350,19 @@ export function RuntimeWorkBoardPage() {
                   ) : (
                     <p className="emptyLane">无匹配项</p>
                   )}
+                  {laneStates[lane.status].nextCursor && paginationMatchesFilters ? (
+                    <button
+                      className="loadMoreButton"
+                      type="button"
+                      disabled={laneStates[lane.status].loading}
+                      onClick={() => void loadMoreTasks(lane.status)}
+                    >
+                      {laneStates[lane.status].loading ? "加载中" : "加载更多"}
+                    </button>
+                  ) : null}
+                  {laneStates[lane.status].error ? (
+                    <p className="refreshMessage refresh-error" role="status">{laneStates[lane.status].error}</p>
+                  ) : null}
                 </div>
               </section>
             ))}
@@ -438,6 +478,66 @@ function createRuntimeTaskFiltersKey(filters?: RuntimeTaskBoardFilters): string 
     timeEnd: filters?.timeRange?.end ?? "",
     timeStart: filters?.timeRange?.start ?? "",
   });
+}
+
+function createEmptyLaneStates(summary: TaskStatusCounts = createEmptyTaskStatusCounts()): RuntimeTaskLaneStateByStatus {
+  const lanes = {} as RuntimeTaskLaneStateByStatus;
+  for (const laneStatus of TASK_STATUSES) {
+    lanes[laneStatus] = {
+      loading: false,
+      tasks: [],
+      total: summary[laneStatus],
+    };
+  }
+  return lanes;
+}
+
+function createLaneStatesFromTasks(tasks: Task[], summary: TaskStatusCounts): RuntimeTaskLaneStateByStatus {
+  const lanes = createEmptyLaneStates(summary);
+  for (const laneStatus of TASK_STATUSES) {
+    lanes[laneStatus] = {
+      loading: false,
+      tasks: tasks.filter((task) => task.status === laneStatus),
+      total: summary[laneStatus],
+    };
+  }
+  return lanes;
+}
+
+function createLaneStatesFromPages(
+  summary: TaskStatusCounts,
+  pages: Array<{ status: TaskStatus; page: RuntimeTasksQueryPage }>,
+): RuntimeTaskLaneStateByStatus {
+  const lanes = createEmptyLaneStates(summary);
+  for (const { page, status } of pages) {
+    lanes[status] = {
+      loading: false,
+      nextCursor: page.nextCursor,
+      tasks: page.tasks.filter((task) => task.status === status),
+      total: page.total,
+    };
+  }
+  return lanes;
+}
+
+function statusesForFilters(summary: TaskStatusCounts, status: TaskStatus | "all"): TaskStatus[] {
+  if (status !== "all") return [status];
+  const statusesWithTasks = TASK_STATUSES.filter((laneStatus) => summary[laneStatus] > 0);
+  return statusesWithTasks.length ? statusesWithTasks : [];
+}
+
+function flattenLaneTasks(laneStates: RuntimeTaskLaneStateByStatus, status: TaskStatus | "all"): Task[] {
+  const statuses = status === "all" ? TASK_STATUSES : [status];
+  return statuses.flatMap((laneStatus) => laneStates[laneStatus].tasks);
+}
+
+function visibleTotal(
+  laneStates: RuntimeTaskLaneStateByStatus,
+  summary: TaskStatusCounts,
+  status: TaskStatus | "all",
+): number {
+  if (status === "all") return summary.total;
+  return laneStates[status].total;
 }
 
 function mergeTasks(current: Task[], next: Task[]): Task[] {

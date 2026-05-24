@@ -1,14 +1,17 @@
 import {
   createDeviceStateSnapshot,
   RUNTIME_KINDS,
-  TASK_STATUSES,
   type Agent,
   type CollectionStatus,
   type Device,
+  type RuntimeFleetTaskSummary,
   type Runtime,
   type RuntimeKind,
-  type Task,
-  type TaskStatus,
+  type TaskChannelKind,
+  type TaskStatusCounts,
+  createEmptyRuntimeFleetTaskSummary,
+  createEmptyTaskStatusCounts,
+  TASK_CHANNEL_KIND_LABELS,
 } from "./runtime-model";
 import type { DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
@@ -20,10 +23,8 @@ export const runtimeKindLabels: Record<RuntimeKind, string> = {
 };
 
 /** Channel labels used when a Task includes user-facing channel context. */
-export const channelKindLabels: Record<NonNullable<Task["channel"]>["kind"], string> = {
-  dingtalk: "DingTalk",
-  slock: "Slock",
-  webchat: "Web Chat",
+export const channelKindLabels: Record<TaskChannelKind, string> = {
+  ...TASK_CHANNEL_KIND_LABELS,
 };
 
 /** Product collection status labels shown for Device, Runtime, and Agent rows. */
@@ -53,8 +54,17 @@ export interface RuntimeFleetSnapshot {
   runtimes: Runtime[];
   /** Agent objects represented by the query. */
   agents: Agent[];
-  /** Task objects represented by the query. */
-  tasks: Task[];
+  /** Active Task counts derived by the backend without returning Task rows. */
+  taskSummary: RuntimeFleetTaskSummary;
+  /** Top-level backend counts. */
+  summary: RuntimeFleetQuerySummary;
+}
+
+export interface RuntimeFleetQuerySummary {
+  deviceCount: number;
+  runtimeCount: number;
+  agentCount: number;
+  taskCount: number;
 }
 
 /** Runtime kind option shown by Runtime Fleet. */
@@ -67,7 +77,7 @@ export interface RuntimeFleetRuntimeKindOption {
 
 /** Filter state supported by the Runtime Fleet page. */
 export interface RuntimeFleetFilters {
-  /** Free-text search across device, runtime, agent, and task context. */
+  /** Free-text search across device, runtime, and agent context. */
   query?: string;
   /** Runtime kind to keep. */
   runtimeKind?: RuntimeKind | "all";
@@ -83,8 +93,8 @@ export interface RuntimeFleetResult {
   runtimes: Runtime[];
   /** Agents matching the active filters. */
   agents: Agent[];
-  /** Tasks matching or linked to the active filters. */
-  tasks: Task[];
+  /** Active Task counts for visible objects. */
+  taskSummary: RuntimeFleetTaskSummary;
 }
 
 /** Small summary cards for Runtime Fleet. */
@@ -187,10 +197,10 @@ export function listRuntimeFleetRuntimeKindOptions(snapshot: RuntimeFleetSnapsho
 /** Summarize one query result for Runtime Fleet cards. */
 export function summarizeRuntimeFleet(snapshot: RuntimeFleetSnapshot): RuntimeFleetSummary {
   return {
-    agents: snapshot.agents.length,
-    devices: snapshot.devices.length,
-    runtimes: snapshot.runtimes.length,
-    tasks: snapshot.tasks.length,
+    agents: snapshot.summary.agentCount,
+    devices: snapshot.summary.deviceCount,
+    runtimes: snapshot.summary.runtimeCount,
+    tasks: snapshot.summary.taskCount,
   };
 }
 
@@ -230,26 +240,32 @@ export function filterRuntimeFleet(
   const query = normalizeSearch(filters.query ?? "");
   let runtimes = snapshot.runtimes;
   let agents = snapshot.agents;
-  let tasks = snapshot.tasks;
   let devices = snapshot.devices;
 
   if (filters.runtimeKind && filters.runtimeKind !== "all") {
     runtimes = runtimes.filter((runtime) => runtime.kind === filters.runtimeKind);
     const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
     agents = agents.filter((agent) => runtimeIds.has(agent.runtimeId));
-    const agentIds = new Set(agents.map((agent) => agent.id));
-    tasks = tasks.filter((task) => agentIds.has(task.agentId));
+    const deviceIds = new Set(runtimes.map((runtime) => runtime.deviceId));
+    devices = devices.filter((device) => deviceIds.has(device.id));
   }
 
   if (filters.lastSeenRange && filters.lastSeenRange !== "all") {
     const lastSeenRange = filters.lastSeenRange;
-    runtimes = runtimes.filter((runtime) => matchesLastSeenRange(runtime.lastSeenAt, lastSeenRange));
+    const devicesInRange = devices.filter((device) => matchesLastSeenRange(device.lastSeenAt, lastSeenRange));
+    const deviceIdsInRange = new Set(devicesInRange.map((device) => device.id));
+    runtimes = runtimes.filter((runtime) =>
+      deviceIdsInRange.has(runtime.deviceId) || matchesLastSeenRange(runtime.lastSeenAt, lastSeenRange),
+    );
     const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
     agents = agents.filter((agent) =>
       runtimeIds.has(agent.runtimeId) || matchesLastSeenRange(agent.lastSeenAt, lastSeenRange),
     );
-    const agentIds = new Set(agents.map((agent) => agent.id));
-    tasks = tasks.filter((task) => agentIds.has(task.agentId) || matchesLastSeenRange(taskActivityAt(task), lastSeenRange));
+    const visibleDeviceIds = new Set([
+      ...devicesInRange.map((device) => device.id),
+      ...runtimes.map((runtime) => runtime.deviceId),
+    ]);
+    devices = devices.filter((device) => visibleDeviceIds.has(device.id));
   }
 
   if (query) {
@@ -263,10 +279,8 @@ export function filterRuntimeFleet(
       matchingRuntimeIds.has(agent.runtimeId) || agentMatches(agent, query),
     );
     const matchingAgentIds = new Set(matchingAgents.map((agent) => agent.id));
-    const matchingTasks = tasks.filter((task) => matchingAgentIds.has(task.agentId) || taskMatches(task, query));
-    const taskAgentIds = new Set(matchingTasks.map((task) => task.agentId));
 
-    agents = agents.filter((agent) => matchingAgentIds.has(agent.id) || taskAgentIds.has(agent.id));
+    agents = agents.filter((agent) => matchingAgentIds.has(agent.id));
     const visibleRuntimeIds = new Set([
       ...matchingRuntimeIds,
       ...agents.map((agent) => agent.runtimeId),
@@ -274,18 +288,18 @@ export function filterRuntimeFleet(
     runtimes = runtimes.filter((runtime) =>
       visibleRuntimeIds.has(runtime.id) || matchingDeviceIds.has(runtime.deviceId),
     );
-    const visibleAgentIds = new Set(agents.map((agent) => agent.id));
-    tasks = tasks.filter((task) => matchingTasks.some((candidate) => candidate.id === task.id) || visibleAgentIds.has(task.agentId));
+    const visibleDeviceIds = new Set([
+      ...matchingDeviceIds,
+      ...runtimes.map((runtime) => runtime.deviceId),
+    ]);
+    devices = devices.filter((device) => visibleDeviceIds.has(device.id));
   }
-
-  const visibleDeviceIds = new Set(runtimes.map((runtime) => runtime.deviceId));
-  devices = devices.filter((device) => visibleDeviceIds.has(device.id));
 
   return {
     devices,
     runtimes,
     agents,
-    tasks,
+    taskSummary: pickRuntimeFleetTaskSummary(snapshot.taskSummary, devices, runtimes, agents),
   };
 }
 
@@ -303,8 +317,7 @@ export function getRuntimeFleetDetail(
     const runtimes = snapshot.runtimes.filter((runtime) => runtime.deviceId === device.id);
     const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
     const agents = snapshot.agents.filter((agent) => runtimeIds.has(agent.runtimeId));
-    const agentIds = new Set(agents.map((agent) => agent.id));
-    const tasks = snapshot.tasks.filter((task) => agentIds.has(task.agentId));
+    const taskCounts = taskCountsForDevice(snapshot, device.id);
     const deviceHealth = deviceHealthByDeviceId?.get(device.id);
     const status = deviceHealth
       ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
@@ -342,7 +355,7 @@ export function getRuntimeFleetDetail(
             `Collector: ${device.collector?.version ?? "未上报"}`,
             `Runtime 数量: ${runtimes.length}`,
             `Agent 数量: ${agents.length}`,
-            `Task 数量: ${tasks.length}`,
+            `Task 数量: ${taskCounts.total}`,
             `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}`,
           ],
         },
@@ -358,8 +371,7 @@ export function getRuntimeFleetDetail(
     const runtime = snapshot.runtimes.find((candidate) => candidate.id === id);
     if (!runtime) return null;
     const agents = snapshot.agents.filter((agent) => agent.runtimeId === runtime.id);
-    const agentIds = new Set(agents.map((agent) => agent.id));
-    const tasks = snapshot.tasks.filter((task) => agentIds.has(task.agentId));
+    const taskCounts = taskCountsForRuntime(snapshot, runtime.id);
     const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
     const device = deviceForRuntime(snapshot, runtime);
 
@@ -387,7 +399,7 @@ export function getRuntimeFleetDetail(
         },
         {
           title: "任务统计",
-          items: taskStatisticsItems(tasks),
+          items: taskStatisticsItems(taskCounts),
         },
         {
           title: "本地路径",
@@ -403,7 +415,7 @@ export function getRuntimeFleetDetail(
     const runtime = snapshot.runtimes.find((candidate) => candidate.id === agent.runtimeId);
     const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
     const device = runtime ? deviceForRuntime(snapshot, runtime) : snapshot.devices[0];
-    const tasks = snapshot.tasks.filter((task) => task.agentId === agent.id);
+    const taskCounts = taskCountsForAgent(snapshot, agent.id);
 
     return {
       kind: "agent",
@@ -433,7 +445,7 @@ export function getRuntimeFleetDetail(
         },
         {
           title: "任务统计",
-          items: taskStatisticsItems(tasks),
+          items: taskStatisticsItems(taskCounts),
         },
         {
           title: "本地路径",
@@ -462,7 +474,8 @@ export function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeFl
     collectedAt?: unknown;
     devices?: unknown[];
     runtimes?: unknown[];
-    tasks?: unknown[];
+    summary?: unknown;
+    taskSummary?: unknown;
   };
   if (!Array.isArray(candidate.devices) || !Array.isArray(candidate.runtimes) || !Array.isArray(candidate.agents)) {
     return null;
@@ -475,20 +488,28 @@ export function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeFl
     device: candidate.devices[0] ?? { id: "backend", hostname: "backend", os: "unknown" },
     runtimes: candidate.runtimes,
     agents: candidate.agents,
-    tasks: Array.isArray(candidate.tasks) ? candidate.tasks : [],
+    tasks: [],
   });
+  const devices = candidate.devices.map((device) => createDeviceStateSnapshot({
+    collectedAt,
+    device,
+    runtimes: [],
+    agents: [],
+    tasks: [],
+  }).device);
+  const taskSummary = normalizeRuntimeFleetTaskSummary(candidate.taskSummary);
   return {
     collectedAt: snapshot.collectedAt,
-    devices: candidate.devices.map((device) => createDeviceStateSnapshot({
-      collectedAt,
-      device,
-      runtimes: [],
-      agents: [],
-      tasks: [],
-    }).device),
+    devices,
     runtimes: snapshot.runtimes,
     agents: snapshot.agents,
-    tasks: snapshot.tasks,
+    taskSummary,
+    summary: normalizeRuntimeFleetQuerySummary(candidate.summary, {
+      agentCount: snapshot.agents.length,
+      deviceCount: devices.length,
+      runtimeCount: snapshot.runtimes.length,
+      taskCount: totalTaskCount(taskSummary),
+    }),
   };
 }
 
@@ -568,36 +589,14 @@ function agentMatches(agent: Agent, query: string): boolean {
   );
 }
 
-function taskMatches(task: Task, query: string): boolean {
-  return includesQuery(
-    [
-      task.id,
-      task.userMessage,
-      task.agentReply,
-      task.status,
-      task.channel?.kind,
-      task.conversation?.title,
-      task.creator?.name,
-      task.assignee?.name,
-      task.error,
-    ],
-    query,
-  );
-}
-
-function taskActivityAt(task: Task): string | undefined {
-  return task.updatedAt ?? task.createdAt;
-}
-
 function registeredRuntimeLabels(runtimes: Runtime[]): string[] {
   const labels = runtimes.map(runtimeDisplayName);
   return labels.length ? Array.from(new Set(labels)).sort() : ["暂无已注册 Runtime"];
 }
 
-function taskStatisticsItems(tasks: Task[]): string[] {
-  const counts = countTasksByStatus(tasks);
+function taskStatisticsItems(counts: TaskStatusCounts): string[] {
   return [
-    `全部任务: ${tasks.length}`,
+    `全部任务: ${counts.total}`,
     `待处理: ${counts.todo}`,
     `进行中: ${counts.in_progress}`,
     `待验收: ${counts.review}`,
@@ -606,10 +605,100 @@ function taskStatisticsItems(tasks: Task[]): string[] {
   ];
 }
 
-function countTasksByStatus(tasks: Task[]): Record<TaskStatus, number> {
-  const counts = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<TaskStatus, number>;
-  for (const task of tasks) counts[task.status] += 1;
+function taskCountsForDevice(snapshot: RuntimeFleetSnapshot, deviceId: string): TaskStatusCounts {
+  return snapshot.taskSummary.byDeviceId[deviceId] ?? createEmptyTaskStatusCounts();
+}
+
+function taskCountsForRuntime(snapshot: RuntimeFleetSnapshot, runtimeId: string): TaskStatusCounts {
+  return snapshot.taskSummary.byRuntimeId[runtimeId] ?? createEmptyTaskStatusCounts();
+}
+
+function taskCountsForAgent(snapshot: RuntimeFleetSnapshot, agentId: string): TaskStatusCounts {
+  return snapshot.taskSummary.byAgentId[agentId] ?? createEmptyTaskStatusCounts();
+}
+
+function pickRuntimeFleetTaskSummary(
+  taskSummary: RuntimeFleetTaskSummary,
+  devices: Device[],
+  runtimes: Runtime[],
+  agents: Agent[],
+): RuntimeFleetTaskSummary {
+  return {
+    byAgentId: pickTaskCountRecords(taskSummary.byAgentId, agents.map((agent) => agent.id)),
+    byDeviceId: pickTaskCountRecords(taskSummary.byDeviceId, devices.map((device) => device.id)),
+    byRuntimeId: pickTaskCountRecords(taskSummary.byRuntimeId, runtimes.map((runtime) => runtime.id)),
+  };
+}
+
+function pickTaskCountRecords(
+  source: Record<string, TaskStatusCounts>,
+  ids: string[],
+): Record<string, TaskStatusCounts> {
+  const picked: Record<string, TaskStatusCounts> = {};
+  for (const id of ids) {
+    if (source[id]) picked[id] = source[id];
+  }
+  return picked;
+}
+
+function normalizeRuntimeFleetTaskSummary(value: unknown): RuntimeFleetTaskSummary {
+  if (!value || typeof value !== "object") return createEmptyRuntimeFleetTaskSummary();
+  const candidate = value as Partial<Record<keyof RuntimeFleetTaskSummary, unknown>>;
+  return {
+    byAgentId: normalizeTaskCountMap(candidate.byAgentId),
+    byDeviceId: normalizeTaskCountMap(candidate.byDeviceId),
+    byRuntimeId: normalizeTaskCountMap(candidate.byRuntimeId),
+  };
+}
+
+function normalizeTaskCountMap(value: unknown): Record<string, TaskStatusCounts> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const output: Record<string, TaskStatusCounts> = {};
+  for (const [id, counts] of Object.entries(value)) {
+    if (!id) continue;
+    output[id] = normalizeTaskStatusCounts(counts);
+  }
+  return output;
+}
+
+function normalizeTaskStatusCounts(value: unknown): TaskStatusCounts {
+  const counts = createEmptyTaskStatusCounts();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return counts;
+  const candidate = value as Record<string, unknown>;
+  counts.todo = normalizeCount(candidate.todo);
+  counts.in_progress = normalizeCount(candidate.in_progress);
+  counts.review = normalizeCount(candidate.review);
+  counts.done = normalizeCount(candidate.done);
+  counts.blocked = normalizeCount(candidate.blocked);
+  counts.failed = normalizeCount(candidate.failed);
+  counts.cancelled = normalizeCount(candidate.cancelled);
+  counts.unknown = normalizeCount(candidate.unknown);
+  const explicitTotal = normalizeCount(candidate.total);
+  counts.total = explicitTotal || counts.todo + counts.in_progress + counts.review + counts.done + counts.blocked + counts.failed + counts.cancelled + counts.unknown;
   return counts;
+}
+
+function normalizeRuntimeFleetQuerySummary(
+  value: unknown,
+  fallback: RuntimeFleetQuerySummary,
+): RuntimeFleetQuerySummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+  const candidate = value as Record<string, unknown>;
+  return {
+    agentCount: normalizeCount(candidate.agentCount, fallback.agentCount),
+    deviceCount: normalizeCount(candidate.deviceCount, fallback.deviceCount),
+    runtimeCount: normalizeCount(candidate.runtimeCount, fallback.runtimeCount),
+    taskCount: normalizeCount(candidate.taskCount, fallback.taskCount),
+  };
+}
+
+function totalTaskCount(taskSummary: RuntimeFleetTaskSummary): number {
+  return Object.values(taskSummary.byAgentId).reduce((sum, counts) => sum + counts.total, 0);
+}
+
+function normalizeCount(value: unknown, fallback = 0): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : fallback;
 }
 
 function localPathItems(paths?: Array<{ label: string; path: string }>): string[] {

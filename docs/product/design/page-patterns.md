@@ -71,17 +71,17 @@ Rules:
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
 - Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
 
-## Runs / Work Board
+## Runs
 
-Purpose: View Agent work items, creator, Channel, conversation/group, message summary, current stage, and selected details.
+Purpose: View conversation Tasks, creator, Channel, conversation/group, message summary, current stage, and selected details.
 
 Rules:
 
 - The board only shows real work items.
 - Do not render listener status, raw execution records, adapter evidence, or debugging notes as task cards.
 - Runtime and Channel filters are separate.
-- Channel options are derived from real data.
-- Time range supports quick, custom, and clear states.
+- Channel options come from backend facets, not from currently loaded rows.
+- Time range uses explicit start/end controls.
 - Long text wraps or clamps without body-level horizontal scroll.
 - Raw IDs, `cid...`, phone numbers, and opaque conversation IDs are not used as conversation names.
 - Wide screens keep the selected detail inspector visible.

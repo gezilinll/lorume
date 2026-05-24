@@ -67,9 +67,17 @@ test.describe("Runtime backend API", () => {
       devices: [expect.objectContaining({ id: "fixture-mac", hostname: "fixture-mac.local" })],
       runtimes: [expect.objectContaining({ id: "fixture-mac:runtime:openclaw", kind: "openclaw" })],
       summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
-      tasks: expect.arrayContaining([
-        expect.objectContaining({ id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1" }),
-      ]),
+      taskSummary: {
+        byAgentId: {
+          "fixture-mac:runtime:openclaw:agent:main": expect.objectContaining({ todo: 1, total: 2 }),
+        },
+        byDeviceId: {
+          "fixture-mac": expect.objectContaining({ todo: 1, total: 2 }),
+        },
+        byRuntimeId: {
+          "fixture-mac:runtime:openclaw": expect.objectContaining({ todo: 1, total: 2 }),
+        },
+      },
     });
 
     const tasksResponse = await request.get("/api/runtime-tasks?status=todo&channelKind=dingtalk");

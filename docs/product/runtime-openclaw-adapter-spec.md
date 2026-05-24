@@ -17,7 +17,7 @@ Lorume 当前只有四个 Runtime 资产对象：
 
 ## Task 字段
 
-Task 是 Runs / Work Board 的唯一业务工作单元。
+Task 是 Runs 会话任务页的唯一业务工作单元。
 
 ```ts
 export interface Task {
@@ -211,4 +211,4 @@ Collector 不调用旧 inventory 或旧工作态命令，不直接读取第三�
 - `src/cli/lorume-cli.test.ts` 覆盖 `lorume collect device-state`、JSON 错误码和路径安全。
 - `src/runtime/device-collector-script.test.ts` 覆盖 collector 只通过 CLI 获取 `device_state`、拆分上报 `/api/device-state-snapshots` 与 `/api/device-task-batches`、安装/卸载文件完整性。
 - `src/runtime/runtime-work-query-api.test.ts` 覆盖 Runs Task 查询响应解析、筛选和分页。
-- `e2e/runtime-work-board.spec.ts` 覆盖浏览器级 Runs / Work Board 展示，不依赖旧 latest snapshot 或旧 work item API。
+- `e2e/runtime-work-board.spec.ts` 覆盖浏览器级 Runs 会话任务展示，不依赖旧 latest snapshot 或旧 work item API。

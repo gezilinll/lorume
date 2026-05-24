@@ -18,9 +18,11 @@ describe("Runtime task query API helpers", () => {
     expect(url.pathname).toBe("/api/runtime-tasks");
     expect(url.searchParams.get("channelKind")).toBe("dingtalk");
     expect(url.searchParams.get("cursor")).toBe("cursor-1");
+    expect(url.searchParams.get("limit")).toBe("50");
     expect(url.searchParams.get("search")).toBe("handoff");
     expect(url.searchParams.get("status")).toBe("in_progress");
     expect(url.searchParams.get("startAt")).toBe("2026-05-21T02:00:00.000Z");
+    expect(url.searchParams.get("taskType")).toBe("conversation");
     expect(url.searchParams.get("endAt")).toBe("2026-05-21T03:00:00.000Z");
   });
 
@@ -43,12 +45,16 @@ describe("Runtime task query API helpers", () => {
         assignee: { name: "main" },
         lastSeenAt: "2026-05-21T10:00:00.000Z",
       }],
+      facets: { channels: [{ kind: "dingtalk", label: "DingTalk", count: 1 }] },
       nextCursor: "cursor-2",
+      summary: { byStatus: { in_progress: 1, total: 1 }, total: 1 },
       total: 2,
     });
 
     expect(page).toMatchObject({
       nextCursor: "cursor-2",
+      channelOptions: [{ count: 1, label: "DingTalk", value: "dingtalk" }],
+      summary: expect.objectContaining({ in_progress: 1, total: 1 }),
       total: 2,
       tasks: [expect.objectContaining({
         agentId: "agent-1",
@@ -73,11 +79,12 @@ describe("Runtime task query API helpers", () => {
         { id: "task-2", agentId: "agent-1", userMessage: "Running", status: "in_progress", adapter: { kind: "openclaw" } },
         { id: "task-3", agentId: "agent-1", userMessage: "Failed", status: "failed", error: "timeout", adapter: { kind: "openclaw" } },
       ],
+      summary: { byStatus: { failed: 1, in_progress: 1, todo: 1, total: 3 }, total: 3 },
       total: 3,
     });
 
     if (!page) throw new Error("query page should be parsed");
-    const board = createRuntimeTaskBoard(page.tasks, { status: "failed" });
+    const board = createRuntimeTaskBoard(page.tasks, { status: "failed" }, page.summary);
 
     expect(board.summary).toMatchObject({
       failed: 1,
@@ -91,7 +98,7 @@ describe("Runtime task query API helpers", () => {
     ]);
   });
 
-  it("lists user-facing channel filters from Task context only", () => {
+  it("lists user-facing channel filters from backend facets", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
         { id: "task-1", agentId: "agent-1", userMessage: "One", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
@@ -99,13 +106,20 @@ describe("Runtime task query API helpers", () => {
         { id: "task-3", agentId: "agent-1", userMessage: "Three", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "webchat" } },
         { id: "task-4", agentId: "agent-1", userMessage: "Four", status: "todo", adapter: { kind: "slock" }, channel: { kind: "slock" } },
       ],
+      facets: {
+        channels: [
+          { count: 2, kind: "dingtalk", label: "DingTalk" },
+          { count: 1, kind: "slock", label: "Slock" },
+          { count: 1, kind: "webchat", label: "Web Chat" },
+        ],
+      },
       total: 4,
     });
 
-    expect(listRuntimeTaskChannelOptions(page?.tasks ?? [])).toEqual([
-      { label: "DingTalk", value: "dingtalk" },
-      { label: "Slock", value: "slock" },
-      { label: "Web Chat", value: "webchat" },
+    expect(listRuntimeTaskChannelOptions(page?.channelOptions ?? [])).toEqual([
+      { count: 2, label: "DingTalk", value: "dingtalk" },
+      { count: 1, label: "Slock", value: "slock" },
+      { count: 1, label: "Web Chat", value: "webchat" },
     ]);
   });
 });

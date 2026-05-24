@@ -1,13 +1,13 @@
 # Runtime Fleet Page Spec
 
-版本：TinySpec v1.1
+版本：TinySpec v1.2
 
 Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。页面只展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
 
 ## 分层原则
 
 - Device 管机器事实、collector 元信息和采集状态。
-- Runtime 管设备上的运行环境；当前已实现的 Runtime kind 只有 OpenClaw。
+- Runtime 管设备上的运行环境；当前已实现的 Runtime kind 只有 OpenClaw 和 Codex。
 - Agent 管 Runtime 下的工作主体。
 - Task 管 Agent 承接的任务。
 - Runtime Fleet 不把任务忙闲写进 Runtime/Agent 状态。Runtime/Agent 状态只表示 collection status。
@@ -36,8 +36,8 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 
 ## 数据源
 
-- `GET /api/runtime-fleet`：正式 Runtime Fleet 查询 API，返回 Device、Runtime、Agent 和派生 Task 计数。
-- `GET /api/runtime-tasks`：正式 Runs / Work Board 查询 API，返回 Task 查询页。
+- `GET /api/runtime-fleet`：正式 Runtime Fleet 查询 API，返回 Device、Runtime、Agent 和派生 Task 计数摘要，不返回 Task 明细数组。
+- `GET /api/runtime-tasks`：正式 Runs 会话任务查询 API，返回 Task 查询页、summary 和 channel facets。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，用于解释 `collectionStatus`，不渲染成独立健康区块，只返回 `device_state` 检查项。
 - `GET /api/agents/:agentId/skill-probe`：读取目标 Agent 最近一次已存储的只读 Skill metadata。
 
@@ -56,7 +56,7 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
 
-Task 页面或 Runs / Work Board 对 Task 展示 `Task.status`：
+Runs 会话任务页对 Task 展示 `Task.status`：
 
 | 状态 | 中文标签 |
 |---|---|
@@ -92,19 +92,39 @@ Task 页面或 Runs / Work Board 对 Task 展示 `Task.status`：
 
 ### Task Context
 
-Runtime Fleet 可以在 Agent 详情里展示 Task 摘要，但 Task 本体和泳道分组属于 Runs / Work Board。
+Runtime Fleet 可以在 Agent 详情里展示 Task 摘要，但 Task 本体和泳道分组属于 Runs 会话任务页。
 
 Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体。页面可以展示如 DingTalk 群聊名、私聊名、会话标题和最近活动时间。
+
+## API 契约
+
+`GET /api/runtime-fleet` 必须返回轻量聚合视图：
+
+- `devices`: Device 数组。
+- `runtimes`: Runtime 数组。
+- `agents`: Agent 数组。
+- `taskSummary`: 由 active non-stale Task 派生的计数摘要。
+- `summary`: 顶部统计。
+
+`taskSummary` 必须至少包含：
+
+- `byAgentId`: 按 `Task.agentId` 聚合的状态计数。
+- `byRuntimeId`: 通过 `Task.agentId -> Agent.runtimeId` 聚合的状态计数。
+- `byDeviceId`: 通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 聚合的状态计数。
+
+每个计数对象包含全部 `Task.status` 计数和 `total`。缺少某个对象 id 时，前端按全 0 处理。Runtime Fleet 不为搜索或详情请求 Task 明细。
 
 ## 验收标准
 
 - 主导航可以进入 Runtime Fleet 页面。
 - 顶部统计显示设备、Runtime、Agent 数量；不显示独立异常统计卡。
-- Runtime 筛选项来自当前后端数据；如果当前数据只有 OpenClaw，就只显示 `全部 / OpenClaw`。
+- Runtime 筛选项来自当前后端数据；如果当前数据只有 OpenClaw，就只显示 `全部 / OpenClaw`；如果同时存在 Codex，就显示 `全部 / OpenClaw / Codex`。
 - Device、Runtime、Agent 状态只显示 `同步中 / 在线 / 离线 / 异常`。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
 - Agent 任务数量由 `Task.agentId` 聚合。
 - Runtime 任务数量通过 `Task.agentId -> Agent.runtimeId` 聚合。
+- Device 任务数量通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 聚合。
+- 设备即使暂时没有 Runtime，也必须在 Device 列表里可见。
 - 页面不展示 Runtime `capabilities/endpoint/sourceRefs`。
 - 页面不展示 Agent `origin/sourceRefs/load`。
 - Production 查询失败时展示错误状态，不回退 fixture。

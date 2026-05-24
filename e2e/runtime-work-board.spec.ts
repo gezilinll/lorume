@@ -48,7 +48,7 @@ const backendDeviceState: DeviceStateSnapshot = {
   tasks: [reviewTask, runningTask, longTask],
 };
 
-test.describe("Runs / Work Board", () => {
+test.describe("Runs conversation tasks", () => {
   test.beforeEach(async () => {
     await resetE2eDatabase();
   });
@@ -60,13 +60,13 @@ test.describe("Runs / Work Board", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
 
-    await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
-    await expect(page.getByText("统一查看 Agent 承接的任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
+    await expect(page.getByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeVisible();
     for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       await expect(page.getByRole("heading", { name: lane })).toBeVisible();
     }
     await expect(page.getByLabel("渠道")).toHaveValue("all");
-    await expect(page.getByLabel("渠道").locator("option")).toHaveText(["全部", "DingTalk"]);
+    await expect(page.getByLabel("渠道").locator("option")).toHaveText(["全部", "DingTalk（3）"]);
     await expect(page.getByLabel("状态")).toHaveValue("all");
     await expect(page.getByLabel("开始时间")).toHaveCount(1);
     await expect(page.getByLabel("结束时间")).toHaveCount(1);
@@ -129,7 +129,7 @@ test.describe("Runs / Work Board", () => {
     expect(longDetailFits).toBe(true);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -143,7 +143,7 @@ test.describe("Runs / Work Board", () => {
     await page.setViewportSize({ width: 1185, height: 900 });
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
-    await expect(page.getByRole("heading", { name: "工作看板" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,

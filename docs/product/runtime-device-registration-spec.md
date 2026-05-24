@@ -391,7 +391,7 @@ Collector 必须记录本地结构化耗时指标，至少包含 run id、总耗
 - Collector 必须记录采集与上传阶段耗时指标，并支持本地配置 interval 和 CLI timeout。
 - Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
-- Runs / Work Board 消费 Task 数组，并按 `Task.status` 分组。
+- Runs 会话任务页消费 `taskType=conversation` 的 Task 查询页、summary 和 channel facets，并按 `Task.status` 分组。
 - Installer harness 必须验证安装目录文件完整性，并验证已安装 CLI 能执行 `collector uninstall`。
 - 自动化测试只使用本地 isolated backend/Postgres，不写真实生产后端。
 - 真实设备验收采用观察者方式：发现产品能力残留或采集缺口时修代码和测试，不手动清理掩盖问题。

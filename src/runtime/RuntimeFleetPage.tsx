@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
+import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
 import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
@@ -19,7 +19,7 @@ import {
   type RuntimeFleetLastSeenRange,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
-import type { Agent, Runtime, RuntimeKind } from "./runtime-model";
+import { createEmptyRuntimeFleetTaskSummary, type Agent, type Runtime, type RuntimeKind } from "./runtime-model";
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
@@ -349,7 +349,8 @@ function createEmptyRuntimeInventorySnapshot(): RuntimeFleetSnapshot {
     devices: [],
     runtimes: [],
     agents: [],
-    tasks: [],
+    taskSummary: createEmptyRuntimeFleetTaskSummary(),
+    summary: { agentCount: 0, deviceCount: 0, runtimeCount: 0, taskCount: 0 },
   };
 }
 

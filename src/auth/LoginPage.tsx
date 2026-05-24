@@ -16,9 +16,9 @@ export function LoginPage({ error, onSubmit }: LoginPageProps) {
   return (
     <AuthLayout
       title="登录 Lorume"
-      subtitle="使用团队邮箱接收验证码，进入组织内的 Device、Runtime、Agent 与工作看板。"
+      subtitle="使用团队邮箱接收验证码，进入组织内的 Device、Runtime、Agent 与会话任务。"
       preview={<AuthOperationsPreview />}
-      notice="登录后可统一管理组织内 Device、Runtime、Agent 与工作看板。"
+      notice="登录后可统一管理组织内 Device、Runtime、Agent 与会话任务。"
     >
       <form
         className="auth-form"

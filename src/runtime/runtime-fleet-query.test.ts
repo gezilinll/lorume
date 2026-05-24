@@ -13,8 +13,15 @@ import {
   summarizeRuntimeFleet,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
+import { createEmptyTaskStatusCounts } from "./runtime-model";
 
 const fixtureLastSeenAt = formatRuntimeTimestamp("2026-05-21T10:00:00.000Z");
+const fixtureTaskCounts = {
+  ...createEmptyTaskStatusCounts(),
+  in_progress: 1,
+  todo: 1,
+  total: 2,
+};
 
 const snapshot: RuntimeFleetSnapshot = {
   collectedAt: "2026-05-21T10:00:00.000Z",
@@ -46,32 +53,12 @@ const snapshot: RuntimeFleetSnapshot = {
     collectionStatus: "online",
     lastSeenAt: "2026-05-21T10:00:00.000Z",
   }],
-  tasks: [
-    {
-      id: "fixture-mac:runtime:openclaw:agent:main:task:todo-1",
-      agentId: "fixture-mac:runtime:openclaw:agent:main",
-      taskType: "conversation",
-      userMessage: "PMO asked OpenClaw to inspect the handoff.",
-      agentReply: "The handoff looks ready for review.",
-      status: "todo",
-      adapter: { kind: "openclaw" },
-      channel: { kind: "dingtalk", externalId: "group-live" },
-      conversation: { title: "DingTalk 群聊", externalId: "conversation-1" },
-      creator: { name: "PMO" },
-      assignee: { name: "main" },
-      updatedAt: "2026-05-21T09:59:00.000Z",
-    },
-    {
-      id: "fixture-mac:runtime:openclaw:agent:main:task:running-1",
-      agentId: "fixture-mac:runtime:openclaw:agent:main",
-      taskType: "conversation",
-      userMessage: "Execute OpenClaw run",
-      status: "in_progress",
-      adapter: { kind: "openclaw" },
-      channel: { kind: "dingtalk" },
-      updatedAt: "2026-05-21T10:00:00.000Z",
-    },
-  ],
+  taskSummary: {
+    byAgentId: { "fixture-mac:runtime:openclaw:agent:main": fixtureTaskCounts },
+    byDeviceId: { "fixture-mac": fixtureTaskCounts },
+    byRuntimeId: { "fixture-mac:runtime:openclaw": fixtureTaskCounts },
+  },
+  summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
 };
 
 describe("runtime fleet query", () => {
@@ -117,24 +104,26 @@ describe("runtime fleet query", () => {
     expect(deriveRuntimeFleetStatus(snapshot, runtime)).toBe("online");
     expect(deriveAgentFleetStatus(snapshot, agent)).toBe("online");
 
-    const changedTaskSnapshot: RuntimeFleetSnapshot = {
+    expect(deriveRuntimeFleetStatus({
       ...snapshot,
-      tasks: snapshot.tasks.map((task) => ({ ...task, status: "failed" })),
-    };
-    expect(deriveRuntimeFleetStatus(changedTaskSnapshot, runtime)).toBe("online");
-    expect(deriveAgentFleetStatus(changedTaskSnapshot, agent)).toBe("online");
+      taskSummary: {
+        ...snapshot.taskSummary,
+        byAgentId: {
+          [agent.id]: { ...fixtureTaskCounts, failed: 2, in_progress: 0, todo: 0 },
+        },
+      },
+    }, runtime)).toBe("online");
+    expect(deriveAgentFleetStatus(snapshot, agent)).toBe("online");
   });
 
-  it("filters fleet objects without relying on removed fields", () => {
-    const result = filterRuntimeFleet(snapshot, { query: "dingtalk" });
+  it("filters fleet objects without requesting Task rows", () => {
+    const result = filterRuntimeFleet(snapshot, { query: "openclaw" });
 
     expect(result.devices.map((device) => device.id)).toEqual(["fixture-mac"]);
     expect(result.runtimes.map((runtime) => runtime.name)).toEqual(["OpenClaw Gateway"]);
     expect(result.agents.map((agent) => agent.name)).toEqual(["main"]);
-    expect(result.tasks.map((task) => task.userMessage)).toEqual([
-      "PMO asked OpenClaw to inspect the handoff.",
-      "Execute OpenClaw run",
-    ]);
+    expect(result).not.toHaveProperty("tasks");
+    expect(result.taskSummary.byAgentId["fixture-mac:runtime:openclaw:agent:main"]).toMatchObject({ total: 2 });
   });
 
   it("resolves device detail with only device facts, collector facts, and derived task counts", () => {
@@ -248,8 +237,9 @@ describe("runtime fleet query", () => {
         load: { activeTasks: 99 },
         sourceRefs: [{ source: "openclaw", externalId: "main" }],
       }],
+      summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
+      taskSummary: snapshot.taskSummary,
       tasks: [{
-        ...snapshot.tasks[0],
         runtimeId: "must-not-leak",
         lastRun: { status: "running" },
         title: "should not leak",
@@ -268,11 +258,9 @@ describe("runtime fleet query", () => {
     expect(parsed?.agents[0]).not.toHaveProperty("origin");
     expect(parsed?.agents[0]).not.toHaveProperty("load");
     expect(parsed?.agents[0]).not.toHaveProperty("sourceRefs");
-    expect(parsed?.tasks[0]).not.toHaveProperty("runtimeId");
-    expect(parsed?.tasks[0]).not.toHaveProperty("lastRun");
-    expect(parsed?.tasks[0]).not.toHaveProperty("title");
-    expect(parsed?.tasks[0]).not.toHaveProperty("description");
-    expect(parsed?.tasks[0]).not.toHaveProperty("lastSeenAt");
+    expect(parsed).not.toHaveProperty("tasks");
+    expect(parsed?.summary.taskCount).toBe(2);
+    expect(parsed?.taskSummary.byAgentId["fixture-mac:runtime:openclaw:agent:main"]).toMatchObject({ total: 2 });
   });
 
   it("uses runtime names as the stable display label", () => {

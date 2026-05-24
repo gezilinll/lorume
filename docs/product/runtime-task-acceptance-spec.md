@@ -1,12 +1,12 @@
 # Runtime Task Acceptance Spec
 
-版本：TinySpec v1.4
+版本：TinySpec v1.5
 
-本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs / Work Board 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
+本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
 
 ## 验收目标
 
-Runs / Work Board 必须让用户看清：
+Runs 的会话任务页必须让用户看清：
 
 - 哪个 Agent 承接了任务。
 - 任务来自哪个用户触达渠道或会话。
@@ -14,7 +14,9 @@ Runs / Work Board 必须让用户看清：
 - 任务在源系统中的最近业务时间。
 - 失败时是否有用户可读的错误摘要。
 
-页面只消费后端 `GET /api/runtime-tasks` 返回的 `Task` 查询模型。生产构建不得读取旧 latest snapshot，不得请求旧 work item API，不得由前端解释平台 raw payload。
+页面只消费后端 `GET /api/runtime-tasks?taskType=conversation` 返回的 `Task` 查询模型、summary 和 facets。生产构建不得读取旧 latest snapshot，不得请求旧 work item API，不得由前端解释平台 raw payload。
+
+定时任务当前允许采集和入库，但不在本阶段 Runs 页面展示。新增定时任务页面前，必须先补页面 spec 和 harness。
 
 ## 当前范围
 
@@ -39,6 +41,26 @@ Runs / Work Board 必须让用户看清：
 - Runs Channel 筛选只能使用 Task 中实际出现的用户触达渠道，不能把 Runtime kind 或 adapter kind 当作渠道。
 - 不能把裸 execution、adapter capability gap、监听缺口或诊断项伪造成任务卡。
 - 不能展示 adapter evidence、英文 limitation、原始 command、原始 API 字段或不可读外部 id。
+
+## Runs 查询契约
+
+`GET /api/runtime-tasks` 必须支持 `taskType=conversation`。Runs 会话任务页必须始终传入该参数，不展示“全部 Task”视图。
+
+响应必须包含：
+
+- `items`: 当前页 Task。
+- `total`: 当前筛选条件下的 Task 总数。
+- `nextCursor`: 下一页 cursor，可为空。
+- `summary.byStatus`: 按状态聚合的数量。它应用当前 search/time/channel 过滤，但不被当前选中的 status 再次收窄。
+- `facets.channels`: 当前可选 Channel kind 和用户可读 label。它应用当前 search/time/status 过滤，但不被当前选中的 channel 再次收窄。
+
+Runs 页面可以按状态泳道分别分页请求。每个泳道的加载、错误、空态和“加载更多”互相独立。
+
+无 channel/conversation 的会话任务必须使用用户可读兜底：
+
+- Codex：`本地 Codex 会话`。
+- Slock：`Slock 会话`。
+- 其他 adapter：使用该 adapter spec 中定义的兜底；不能展示 raw id。
 
 ## OpenClaw 验收
 

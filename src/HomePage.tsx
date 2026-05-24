@@ -18,7 +18,7 @@ const networkLayers = [
 
 const consoleCards: Array<{ detail: string; icon: PixelIconName; title: string }> = [
   { detail: "设备、Runtime、Agent 的采集状态、归属关系和最近活动。", icon: "server", title: "Runtime Fleet" },
-  { detail: "任务上下文优先的工作看板，不暴露原始 payload。", icon: "chart", title: "Runs Board" },
+  { detail: "任务上下文优先的会话任务视图，不暴露原始 payload。", icon: "chart", title: "Runs" },
   { detail: "组织成员、邀请链接和角色边界。", icon: "shield", title: "组织设置" },
 ];
 

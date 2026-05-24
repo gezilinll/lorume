@@ -64,6 +64,22 @@ describeDb("Postgres runtime store", () => {
 
         const fleet = await store.readRuntimeFleet();
         expect(fleet.summary).toEqual({ agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 });
+        expect(fleet).not.toHaveProperty("tasks");
+        expect(fleet.taskSummary.byAgentId["fixture-mac:runtime:openclaw:agent:main"]).toMatchObject({
+          in_progress: 1,
+          todo: 1,
+          total: 2,
+        });
+        expect(fleet.taskSummary.byRuntimeId["fixture-mac:runtime:openclaw"]).toMatchObject({
+          in_progress: 1,
+          todo: 1,
+          total: 2,
+        });
+        expect(fleet.taskSummary.byDeviceId["fixture-mac"]).toMatchObject({
+          in_progress: 1,
+          todo: 1,
+          total: 2,
+        });
         expect(fleet.runtimes[0]).not.toHaveProperty("endpoint");
         expect(fleet.runtimes[0]).not.toHaveProperty("capabilities");
         expect(fleet.runtimes[0]).not.toHaveProperty("sourceRefs");
@@ -73,11 +89,22 @@ describeDb("Postgres runtime store", () => {
 
         const tasks = await store.listRuntimeTasks({ channelKind: "dingtalk", status: "in_progress" });
         expect(tasks).toMatchObject({
+          facets: {
+            channels: [{ count: 1, kind: "dingtalk", label: "DingTalk" }],
+          },
           items: [expect.objectContaining({
             agentId: "fixture-mac:runtime:openclaw:agent:main",
             id: "fixture-mac:runtime:openclaw:agent:main:task:running-1",
             status: "in_progress",
           })],
+          summary: {
+            byStatus: expect.objectContaining({
+              in_progress: 1,
+              todo: 1,
+              total: 2,
+            }),
+            total: 2,
+          },
           total: 1,
         });
         expect(tasks.items[0]).not.toHaveProperty("runtimeId");

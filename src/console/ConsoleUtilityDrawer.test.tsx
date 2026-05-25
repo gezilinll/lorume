@@ -35,6 +35,13 @@ describe("ConsoleUtilityDrawer", () => {
     expect(await screen.findByRole("button", { name: "通知 1" })).toBeInTheDocument();
   });
 
+  it("marks the active utility button as the expanded drawer control", async () => {
+    render(<ConsoleUtilityBar activeView="operations" organizationId="org_1" utilityDataEnabled={false} onOpen={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "任务 0" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "通知 0" })).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("shows operations as a right-side drawer with selectable details", async () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();

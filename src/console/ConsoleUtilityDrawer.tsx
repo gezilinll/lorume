@@ -132,7 +132,7 @@ export function ConsoleUtilityBar({ activeView, organizationId, utilityDataEnabl
     <div className="consoleUtilityBar" aria-label="控制台工具">
       <button
         aria-label={`任务 ${operationCount}`}
-        aria-pressed={activeView === "operations"}
+        aria-expanded={activeView === "operations"}
         className={activeView === "operations" ? "consoleUtilityButton consoleUtilityButtonActive" : "consoleUtilityButton"}
         type="button"
         onClick={() => onOpen("operations")}
@@ -143,7 +143,7 @@ export function ConsoleUtilityBar({ activeView, organizationId, utilityDataEnabl
       </button>
       <button
         aria-label={`通知 ${notificationCount}`}
-        aria-pressed={activeView === "notifications"}
+        aria-expanded={activeView === "notifications"}
         className={activeView === "notifications" ? "consoleUtilityButton consoleUtilityButtonActive" : "consoleUtilityButton"}
         type="button"
         onClick={() => onOpen("notifications")}

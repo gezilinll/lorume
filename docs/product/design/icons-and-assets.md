@@ -2,21 +2,15 @@
 
 Lorume icons, logo, and decorative assets must use a unified modern visual weight. Consistency is more important than quick one-off SVGs.
 
-## Brand Mark
-
-The brand mark source of truth:
-
-- [../../../src/ui/PixelLogo.tsx](../../../src/ui/PixelLogo.tsx)
-- [../../../public/favicon.svg](../../../public/favicon.svg)
-
-`PixelLogo` is a legacy implementation name. The rendered mark should be a compact, modern Lorume mark and the browser tab icon should stay visually aligned with it.
-
 ## Icon System
 
-- Product icons enter pages through [../../../src/ui/PixelIcon.tsx](../../../src/ui/PixelIcon.tsx).
+- Product icons use `lucide-react`. Do not add ad hoc SVG icons in page components when a lucide icon exists.
 - Do not mix icon libraries, text symbols, ad hoc SVGs, and different stroke weights on one page.
-- New icons first enter the shared icon primitive.
 - Icons should feel simple, modern, and operational; they should not rely on retro pixel-grid styling.
+
+## Brand Mark
+
+The brand mark and browser tab icon should stay visually aligned. Update the app chrome source, [../../../public/favicon.svg](../../../public/favicon.svg), relevant tests, and product visual rules in the same change when the mark changes.
 
 ## Asset Sources
 
@@ -29,11 +23,7 @@ SVG, PNG, generated bitmap assets, or external icon sources can be used only whe
 
 ## Decorations
 
-Decorations are optional and quiet:
-
-- Low-noise grid backgrounds.
-- Hairline traces.
-- Subtle product-preview structure.
+Decorations are optional and quiet, such as low-noise grid backgrounds, hairline traces, or subtle product-preview structure.
 
 Rules:
 

@@ -4,10 +4,10 @@ Lorume uses a two-role typography system: Sans for product reading and interacti
 
 ## Font Roles
 
-| Role | Token | Use |
+| Role | Source | Use |
 |---|---|---|
-| Sans | `--font-sans` / `--lorume-font-body` | Page titles, Chinese body, buttons, forms, work items, details |
-| Mono | `--font-mono` / `--lorume-font-mono` | Runtime names, technical labels, numbers, timestamps, short IDs |
+| Sans | `--font-sans`, shadcn theme variables, and Tailwind font utilities | Page titles, Chinese body, buttons, forms, work items, details |
+| Mono | `--font-mono`, shadcn theme variables, and Tailwind font utilities | Runtime names, technical labels, numbers, timestamps, short IDs |
 
 ## Sans Rules
 
@@ -44,10 +44,11 @@ Mono is not used for long Chinese sentences.
 
 ## Implementation Mapping
 
-- `.homeTitle`, `.auth-layout__title`, `h1`, `h2`, `.detailHeader h2`, `.workCard strong`, `.primaryButton`, `.secondaryButton`, `.quickRangeButton`, `.toolbarField select`, `.detailBlock p`, and `.detailBlock li` use `--lorume-font-body`.
-- `.navItem`, `.metricCard strong`, `.tableSummary`, `.assetHeader`, short IDs, command fragments, and timestamps use `--lorume-font-mono`.
-- `.badge`, `.refPill`, and `.statusBadge` use `--lorume-font-body`; they are product labels/statuses, not code tokens.
-- `src/ui/ui-tokens.test.tsx` locks the core mapping; update this spec and the harness together.
+- Typography tokens live in `src/index.css` through shadcn theme variables and Tailwind v4 utility usage.
+- Generated shadcn components in `src/components/ui/` and app-owned wrappers should consume font styles through Tailwind classes and shadcn tokens.
+- Product labels, statuses, buttons, forms, cards, tables, sidebars, and sheets use Sans unless the value needs technical recognition or numeric alignment.
+- Runtime names, short IDs, command fragments, hashes, timestamps, and dense numeric metrics may use Mono.
+- `src/components/ui/shadcn-smoke.test.tsx` locks the shadcn foundation; component and page tests should cover typography behavior through generated primitives, wrappers, and user-visible structure instead of old page CSS selector contracts.
 
 ## Line Length
 

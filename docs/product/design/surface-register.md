@@ -22,7 +22,7 @@ Brand Surface cannot use unavailable modules as CTA and cannot replace product s
 
 ## Identity Surface
 
-Identity Surface shares the same Glacier Premium Precision system but focuses a single task:
+Identity Surface shares the same shadcn/ui and Tailwind v4 system but focuses a single task:
 
 - Enter email.
 - Send verification code.

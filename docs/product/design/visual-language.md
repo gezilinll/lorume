@@ -1,6 +1,6 @@
 # Visual Language
 
-Lorume uses **Glacier Premium Precision**: a modern operations console language built from cool white backgrounds, quiet grid texture, hairline borders, compact navigation, cobalt action blue, teal operational signal, restrained amber warnings, and document-like detail surfaces.
+Lorume uses a shadcn/ui and Tailwind CSS v4 design-system foundation initialized from preset `b1FS9kEKH`: a modern operations console language built from semantic CSS variables, cool white backgrounds, quiet grid texture, hairline borders, compact navigation, clear primary actions, operational signal accents, restrained warning states, and document-like detail surfaces.
 
 The UI must not rely on retro pixel styling, thick black borders, high-saturation yellow sidebars, decorative sprites, or large empty atmospheric panels.
 

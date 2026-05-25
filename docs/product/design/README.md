@@ -7,19 +7,21 @@
 设计或修改页面时按下面顺序阅读：
 
 1. [principles.md](principles.md): 总体设计原则和取舍顺序。
-2. [surface-register.md](surface-register.md): 页面类型和视觉强度边界。
-3. [visual-language.md](visual-language.md): Glacier Premium Precision 视觉语言。
-4. [tokens.md](tokens.md): 设计 token 组织方式。
-5. 按需阅读字体、颜色、布局、组件、图标、交互、动效、文案、响应式和页面规范。
-6. [review-and-harness.md](review-and-harness.md): 自我 Review 和 harness 规则。
+2. [shadcn-ui-system.md](shadcn-ui-system.md): shadcn/ui setup, theme, generated component, and wrapper rules.
+3. [surface-register.md](surface-register.md): 页面类型和视觉强度边界。
+4. [visual-language.md](visual-language.md): shadcn/ui + Tailwind v4 视觉语言。
+5. [tokens.md](tokens.md): 设计 token 组织方式。
+6. 按需阅读字体、颜色、布局、组件、图标、交互、动效、文案、响应式和页面规范。
+7. [review-and-harness.md](review-and-harness.md): 自我 Review 和 harness 规则。
 
 ## Spec Map
 
 | Spec | Responsibility |
 |---|---|
 | [principles.md](principles.md) | 产品级设计原则、反模式、取舍顺序 |
+| [shadcn-ui-system.md](shadcn-ui-system.md) | shadcn/ui setup, theme, generated component, and wrapper rules |
 | [surface-register.md](surface-register.md) | Brand Surface、Identity Surface、Console Surface 的规则 |
-| [visual-language.md](visual-language.md) | Glacier Premium Precision 的视觉目标、构图、氛围和禁区 |
+| [visual-language.md](visual-language.md) | shadcn/ui + Tailwind v4 的视觉目标、构图、氛围和禁区 |
 | [tokens.md](tokens.md) | token 分层、命名、修改规则和代码映射 |
 | [typography.md](typography.md) | Sans、Mono 字体分工和排版规则 |
 | [color.md](color.md) | 色彩系统、语义色、对比度和配色禁区 |

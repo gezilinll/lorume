@@ -148,10 +148,10 @@ Runtime / Runs 读取 API：
 
 ## UI 规则
 
-- 登录、验证码、创建组织、邀请加入页面使用 Glacier Premium Precision 视觉语言：冷白/冰蓝背景、现代品牌标识、hairline 边界、低噪声网格和清晰表单层级。
+- 登录、验证码、创建组织、邀请加入页面使用 shadcn/ui、Tailwind CSS v4 和 `b1FS9kEKH` preset 定义的当前视觉系统：语义 token、冷白/冰蓝背景、现代品牌标识、hairline 边界、低噪声网格和清晰表单层级。
 - Console 页面使用同一 token 系统，但优先保证 Runtime Fleet、Runs、组织设置，以及任务中心、通知中心工具抽屉的数据扫描效率。
 - 品牌标题、按钮、状态短标签、说明文字和表单均以 Sans 为主；Mono 只用于短技术标签、时间戳和数字，不作为身份页装饰字体。
-- 身份页和 Console 的图标都通过共享 `PixelIcon` 入口渲染；该入口名称为历史兼容，实际图标应为现代低噪声线性图标。表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚装饰不得使用零散图标体系。
+- 身份页和 Console 的图标使用 `lucide-react` 并通过 shadcn primitives 或 app-owned wrappers 组合；表单输入、按钮、运营概览、导航、刷新、搜索、时间选择和页脚装饰不得使用零散图标体系。
 - 不回退复古像素边框、厚黑线、高饱和黄色侧栏、错位阴影、像素 sprite 或装饰性调试文案。
 - 登录页的 `/api/me` 匿名会话探测返回 `401` 或 `404` 属于正常未登录状态，不能直接把 `Not Found`、接口错误或调试字段暴露在页面上；其他后端故障仍应展示可读错误，避免把真实服务异常吞掉。
 - Auth API 错误必须使用稳定 `error` code，并通过共享错误字典维护用户可读 `message`。前端遇到只有 code 的响应时，也必须映射成可读提示，不能把 `invalid_or_expired_code` 等技术字符串直接展示给用户。
@@ -181,7 +181,7 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 
 - 登录页、验证码页、创建组织页和邀请加入页必须有组件测试。
 - Console 必须被 `/api/me` gate 保护。
-- Glacier Premium Precision 组件测试必须覆盖现代 logo、基础面板/button/badge/token 类名和身份页结构，防止后续页面绕开共享 token。
+- shadcn auth component tests and behavior-focused tests must cover the modern logo, base form/button/badge/token usage, and identity page structure so later pages do not bypass shared shadcn tokens or generated primitives.
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。
 - Playwright Console harness 可以通过 `VITE_LORUME_APP_MODE=agent` 进入已验收页面，专注验证 Runtime Fleet 和 Runs 的布局与交互；Auth 流程由独立组件 harness 覆盖。受保护业务页面需要真实登录串联时，使用单独的 auth-backed Playwright harness，并确保它走正式 API 和组织上下文。
 - 已验收的 Runtime Fleet 和 Runs 交互不得因 auth 和视觉改造回退。

@@ -4,17 +4,17 @@ Component rules cover current UI primitives and page-level components. New compo
 
 ## Shared Primitives
 
-The following primitives keep their current filenames during this redesign:
+Shared UI primitives are generated shadcn files in `src/components/ui/`. App-owned product wrappers live in focused folders outside `src/components/ui/` and compose shadcn primitives.
 
-- `PixelButton`: primary, secondary, danger, and compact action buttons.
-- `PixelField`: labeled input controls.
-- `PixelPanel`: modern precision surface.
-- `PixelBadge`: status, source, channel, stage, and count badges.
-- `PixelIcon`: shared product icon entry.
-- `PixelLogo`: brand mark.
-- `PixelDecorations`: optional low-noise grid/trace decoration, not pixel sprites.
-
-`PixelIcon` keeps its legacy filename for import stability, but it renders modern line icons. New product icons must extend that primitive rather than reintroducing pixel-art packages or ad hoc SVGs in page components.
+- `Button`: actions.
+- `Badge`: status and metadata chips.
+- `Card`: panels and contained summaries.
+- `Sidebar`: Console navigation.
+- `Sheet`: utility drawers.
+- `Field` and `Input`: forms.
+- `Table`: dense object rows.
+- `Select`, `DropdownMenu`, and `Tabs`: filtering and view controls.
+- `Skeleton` and `Alert`: loading and error states.
 
 ## Buttons
 

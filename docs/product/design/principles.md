@@ -16,7 +16,7 @@ Lorume 是 Agent Network 控制平面。设计目标是让分散在设备、runt
 1. 正确表达产品对象和状态。
 2. 保证当前任务可完成、可理解、可回退。
 3. 保证文本、数据和交互在不同尺寸下不溢出、不遮挡。
-4. 保持 Glacier Premium Precision 视觉一致性。
+4. 保持 shadcn/ui、Tailwind CSS v4、`b1FS9kEKH` preset 和语义 token 的视觉一致性。
 5. 增加克制、清爽、有记忆点的现代控制台气质。
 
 ## Simplicity

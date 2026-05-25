@@ -29,7 +29,7 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 检查：
 
 - 是否存在新增硬编码色值。
-- 是否绕过共享组件写了临时按钮、输入框、badge。
+- 是否绕过 shadcn primitives 写了临时按钮、输入框、badge。
 - 是否新增了一次性 box-shadow、border、font-family、radius。
 - 是否在业务页面复制 logo 或 icon SVG。
 - 是否破坏 Brand、Identity、Console 之间的 token 一致性。
@@ -44,7 +44,7 @@ UI 工作完成前必须同时做视觉 Review、CSS/token Review 和相关 harn
 
 当前视觉 harness 锚点：
 
-- `src/ui/ui-tokens.test.tsx` 锁定 Logo / favicon 同源、共享按钮图标、Sans / Mono 字体角色、登录布局和运营概览 icon。
+- `src/components/ui/shadcn-smoke.test.tsx` 锁定 shadcn primitives 可导入、主题变量可用、`cn` 工具可组合类名。
 - `src/App.test.tsx` 锁定首页入口、已实现 Console 导航、不可用入口隐藏、Runtime Fleet / Runs / 组织设置的核心交互，以及任务/通知工具抽屉的打开、关闭和路由边界。
 - `src/console/ConsoleUtilityDrawer.test.tsx`、`src/settings/OrganizationSettingsPage.test.tsx` 锁定任务/通知抽屉、已读状态、组织邀请入口的 API 读取、权限显示和详情查看。
 - `e2e/runtime-fleet.spec.ts` 锁定 Runtime Fleet 的动态筛选、详情面板、响应式和无 Channel 筛选。

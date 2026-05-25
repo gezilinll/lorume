@@ -174,12 +174,15 @@ describe("Console shell", () => {
 
     render(<App runtimeMode="production" />);
 
-    expect(screen.getByRole("heading", { name: /把分散的 Agent 变成可运营的工作网络/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "登录" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("heading", { name: /Lorume/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "进入控制台" })).toHaveAttribute("href", "/login");
     expect(screen.queryByTestId("home-pixel-decorations")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "运营总览" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Agent 网络结构预览" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Agent Studio" })).not.toBeInTheDocument();
+    const capabilities = screen.getByRole("region", { name: "当前已实现能力" });
+    expect(capabilities).toBeInTheDocument();
+    expect(within(capabilities).getByText("Runtime Fleet")).toBeInTheDocument();
+    expect(within(capabilities).getByText("Runs")).toBeInTheDocument();
+    expect(within(capabilities).getByText("组织设置")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Agent Studio/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -188,14 +191,17 @@ describe("Console shell", () => {
 
     render(<App runtimeMode="production" />);
 
-    const previewNav = screen.getByRole("navigation", { name: "预览导航" });
-    expect(within(previewNav).getByText("Runtime")).toBeInTheDocument();
-    expect(within(previewNav).getByText("Runs")).toBeInTheDocument();
-    expect(within(previewNav).getByText("Settings")).toBeInTheDocument();
-    expect(screen.getByText("运行资产层")).toBeInTheDocument();
-    expect(screen.getByText("工作状态层")).toBeInTheDocument();
-    expect(within(previewNav).queryByText("对象目录")).not.toBeInTheDocument();
-    expect(within(previewNav).queryByText("总览")).not.toBeInTheDocument();
+    const homeNav = screen.getByRole("navigation", { name: "首页导航" });
+    expect(within(homeNav).getByRole("link", { name: "登录" })).toHaveAttribute("href", "/login");
+    expect(within(homeNav).getByRole("link", { name: "Runtime Fleet" })).toHaveAttribute("href", "/runtime");
+    expect(within(homeNav).getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/runs");
+    expect(within(homeNav).getByRole("link", { name: "组织设置" })).toHaveAttribute("href", "/settings");
+    expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runtime Fleet" })).toHaveAttribute("href", "/runtime");
+    expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runs" })).toHaveAttribute("href", "/runs");
+    expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 组织设置" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByText("Operations 与 Notifications 串联异步状态和提醒线程。")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "对象目录" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "总控台" })).not.toBeInTheDocument();
   });
 
   it("uses URL routes for implemented console pages and hides unavailable nav entries", async () => {

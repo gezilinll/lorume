@@ -18,8 +18,13 @@ const fixture = JSON.parse(
 };
 
 const defaultAgentId = fixture.agents[0].id;
+const rawDingTalkCid = "cid-private-raw-123";
 const reviewTask: Task = {
   ...fixture.tasks[0],
+  conversation: {
+    ...(fixture.tasks[0].conversation ?? {}),
+    externalId: rawDingTalkCid,
+  },
   updatedAt: "2026-05-09T15:50:00.000Z",
 };
 const runningTask: Task = {
@@ -60,30 +65,32 @@ test.describe("Runs conversation tasks", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
 
-    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
     await expect(page.getByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeVisible();
     for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       await expect(page.getByRole("heading", { name: lane })).toBeVisible();
     }
-    await expect(page.getByLabel("渠道")).toHaveValue("all");
-    await expect(page.getByLabel("渠道").locator("option")).toHaveText(["全部", "DingTalk（3）"]);
-    await expect(page.getByLabel("状态")).toHaveValue("all");
+    await expect(page.getByRole("combobox", { name: "渠道" })).toContainText("全部");
+    await page.getByRole("combobox", { name: "渠道" }).click();
+    await expect(page.getByRole("option", { name: "DingTalk（3）" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tab", { name: "全部" })).toHaveAttribute("data-state", "active");
     await expect(page.getByLabel("开始时间")).toHaveCount(1);
     await expect(page.getByLabel("结束时间")).toHaveCount(1);
     await expect(page.getByRole("button", { name: /选择时间范围/ })).toHaveCount(0);
 
     const searchBox = await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").boundingBox();
-    const statusBox = await page.getByLabel("状态").boundingBox();
     const startBox = await page.getByLabel("开始时间").boundingBox();
+    const endBox = await page.getByLabel("结束时间").boundingBox();
     expect(searchBox?.width ?? 0).toBeLessThan(620);
     expect(searchBox?.width ?? 0).toBeGreaterThan(300);
-    expect(startBox?.x ?? 0).toBeGreaterThan(statusBox?.x ?? 0);
+    expect(endBox?.x ?? 0).toBeGreaterThan(startBox?.x ?? 0);
 
     await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
-    await page.getByLabel("状态").selectOption("todo");
+    await page.getByRole("tab", { name: "待处理" }).click();
     await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Execute OpenClaw run/ })).not.toBeVisible();
-    await page.getByLabel("状态").selectOption("all");
+    await page.getByRole("tab", { name: "全部" }).click();
 
     await page.getByLabel("开始时间").fill("2026-05-08T00:00");
     await page.getByLabel("结束时间").fill("2026-05-10T23:59");
@@ -101,6 +108,7 @@ test.describe("Runs conversation tasks", () => {
     await expect(page.getByText(/OpenClaw execution/)).not.toBeVisible();
     await expect(page.getByText("直接证据")).not.toBeVisible();
     await expect(page.getByText("能力缺口")).not.toBeVisible();
+    await expect(page.locator("body")).not.toContainText(rawDingTalkCid);
     await expect(page.getByLabel("来源 Runtime")).toHaveCount(0);
 
     await reviewCard.click();
@@ -110,6 +118,7 @@ test.describe("Runs conversation tasks", () => {
     await expect(detail).toContainText("承接 Agent: main");
     await expect(detail).toContainText("会话/群组: DingTalk 群聊");
     await expect(detail).toContainText("任务状态: 待处理");
+    await expect(detail).not.toContainText(rawDingTalkCid);
     await expect(detail).not.toContainText("来源 Runtime:");
     await expect(detail).not.toContainText("执行状态:");
 
@@ -129,7 +138,7 @@ test.describe("Runs conversation tasks", () => {
     expect(longDetailFits).toBe(true);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -143,7 +152,7 @@ test.describe("Runs conversation tasks", () => {
     await page.setViewportSize({ width: 1185, height: 900 });
     await page.goto("/");
     await page.getByRole("button", { name: "Runs" }).click();
-    await expect(page.getByRole("heading", { name: "会话任务" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
 
     const pageOverflows = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,

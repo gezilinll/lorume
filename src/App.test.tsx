@@ -10,6 +10,7 @@ const originalFetch = globalThis.fetch;
 const originalPath = window.location.pathname;
 const fleetSnapshot = fleetFixture as RuntimeFleetSnapshot;
 const defaultAgentId = fleetSnapshot.agents[0].id;
+const rawDingTalkCid = "cid-private-raw-123";
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -133,6 +134,10 @@ function task(overrides: Partial<Task> & Pick<Task, "id">): Task {
   };
 }
 
+async function chooseRunsStatus(label: string) {
+  await userEvent.click(screen.getByRole("tab", { name: label }));
+}
+
 function fleetWithStatus(runtimeStatus: CollectionStatus, agentStatus: CollectionStatus): RuntimeFleetSnapshot {
   return {
     ...fleetSnapshot,
@@ -228,7 +233,7 @@ describe("Console shell", () => {
     await user.click(within(nav).getByRole("button", { name: "Runs" }));
 
     expect(window.location.pathname).toBe("/runs");
-    expect(screen.getByRole("heading", { name: "会话任务" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
 
     await user.click(operationsButton);
     expect(window.location.pathname).toBe("/operations");
@@ -281,17 +286,13 @@ describe("Console shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
-    expect(screen.getByRole("heading", { name: "会话任务" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
     for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
     expect(await screen.findByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
-    const channelSelect = screen.getByLabelText("渠道") as HTMLSelectElement;
-    expect(channelSelect.value).toBe("all");
-    expect(within(channelSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "全部",
-      "DingTalk（2）",
-    ]);
+    expect(screen.getByRole("combobox", { name: "渠道" })).toHaveTextContent("全部");
+    expect(screen.getByRole("tab", { name: "全部" })).toHaveAttribute("data-state", "active");
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
 
@@ -314,6 +315,7 @@ describe("Console shell", () => {
     expect(within(detail).getByText("承接 Agent: main")).toBeInTheDocument();
     expect(within(detail).getByText("会话/群组: DingTalk 群聊")).toBeInTheDocument();
     expect(within(detail).getByText("任务状态: 待处理")).toBeInTheDocument();
+    expect(within(detail).getByText("执行关联: 未关联执行")).toBeInTheDocument();
     expect(within(detail).queryByText(/来源 Runtime:/)).not.toBeInTheDocument();
     expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
   });
@@ -324,7 +326,7 @@ describe("Console shell", () => {
       task({
         assignee: { name: "main" },
         channel: { kind: "dingtalk" },
-        conversation: { title: "DingTalk 群聊" },
+        conversation: { title: "DingTalk 群聊", externalId: rawDingTalkCid },
         creator: { name: "PMO" },
         id: "task-no-execution",
         status: "in_progress",
@@ -344,7 +346,44 @@ describe("Console shell", () => {
 
     const detail = screen.getByRole("complementary", { name: "任务详情" });
     expect(within(detail).getByText("任务状态: 进行中")).toBeInTheDocument();
+    expect(within(detail).getByText("执行关联: 未关联执行")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(rawDingTalkCid);
     expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
+  });
+
+  it("selects Runs task cards with keyboard activation", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      task({
+        assignee: { name: "main" },
+        id: "keyboard-first-task",
+        status: "todo",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        userMessage: "Keyboard first task",
+      }),
+      task({
+        assignee: { name: "main" },
+        id: "keyboard-second-task",
+        status: "in_progress",
+        updatedAt: "2026-05-21T08:01:00.000Z",
+        userMessage: "Keyboard second task",
+      }),
+    ];
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(tasks));
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+    render(<App runtimeMode="agent" />);
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+    const secondCard = await screen.findByRole("button", { name: /Keyboard second task/ });
+
+    secondCard.focus();
+    await user.keyboard("{Enter}");
+
+    const detail = screen.getByRole("complementary", { name: "任务详情" });
+    expect(within(detail).getByRole("heading", { name: "Keyboard second task" })).toBeInTheDocument();
   });
 
   it("keeps long Runs detail titles constrained while preserving the full user message", async () => {
@@ -373,7 +412,6 @@ describe("Console shell", () => {
 
     const detail = screen.getByRole("complementary", { name: "任务详情" });
     const title = within(detail).getByRole("heading", { name: new RegExp(longTitle.slice(0, 12)) });
-    expect(title).toHaveClass("detailTitle");
     expect(title).toHaveAttribute("title", longTitle);
   });
 
@@ -475,7 +513,7 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: "加载更多" })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("状态"), "in_progress");
+    await chooseRunsStatus("进行中");
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
@@ -547,7 +585,9 @@ describe("Console shell", () => {
     });
     expect(screen.getByRole("button", { name: /Unfiltered todo task/ })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("状态"), { target: { value: "in_progress" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("tab", { name: "进行中" }));
+    });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
       await Promise.resolve();

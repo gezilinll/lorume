@@ -1,5 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { RefreshCw, Search } from "lucide-react";
 import fleetFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
+import { EmptyState } from "@/components/data/EmptyState";
+import { MetricCard } from "@/components/data/MetricCard";
+import { StatusBadge } from "@/components/data/StatusBadge";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import {
@@ -15,9 +30,9 @@ import {
   type RuntimeTasksQueryPage,
 } from "./runtime-work-query-api";
 import { createEmptyTaskStatusCounts, TASK_STATUSES, type Task, type TaskStatus, type TaskStatusCounts } from "./runtime-model";
-import { PixelIcon } from "../ui/PixelIcon";
 
 const autoRefreshIntervalMs = 30_000;
+const unlinkedExecutionLabel = "未关联执行";
 const statusOptions: Array<TaskStatus | "all"> = ["all", ...TASK_STATUSES];
 const statusLabels: Record<TaskStatus | "all", string> = {
   all: "全部",
@@ -210,160 +225,183 @@ export function RuntimeWorkBoardPage() {
   }
 
   return (
-    <section className="workspace">
-      <header className="pageHeader">
-        <div>
-          <p className="eyebrow">Agent / Tasks</p>
-          <h1>会话任务</h1>
-          <p className="pageSubtitle">
-            查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。
-          </p>
-          <p className="pageRefreshMeta">
-            {lastLoadedAt ? `上次刷新 ${formatRuntimeTimestamp(lastLoadedAt)}` : ""}
-          </p>
-        </div>
-        <div className="refreshControl">
-          <button
-            className="primaryButton"
-            type="button"
-            disabled={refreshState.status === "running"}
-            onClick={() => {
-              setRefreshState({ status: "running", message: "正在读取会话任务" });
-              void loadLatestTasks();
-            }}
-          >
-            <PixelIcon name="reload" size={16} />
-            {refreshState.status === "running" ? "刷新中" : "刷新任务"}
-          </button>
-          {refreshState.message ? (
-            <p className={`refreshMessage refresh-${refreshState.status}`} role="status">
-              {refreshState.message}
-            </p>
-          ) : null}
-        </div>
-      </header>
+    <section className="flex min-w-0 flex-col gap-6 overflow-x-hidden">
+      <PageHeader
+        eyebrow="Agent / Tasks"
+        title="Runs"
+        description={
+          <div className="space-y-1">
+            <p>会话任务</p>
+            <p>查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。</p>
+            {lastLoadedAt ? <p>上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p> : null}
+          </div>
+        }
+        actions={
+          <div className="flex flex-col items-end gap-2">
+            <Button
+              className="gap-2"
+              type="button"
+              disabled={refreshState.status === "running"}
+              onClick={() => {
+                setRefreshState({ status: "running", message: "正在读取会话任务" });
+                void loadLatestTasks();
+              }}
+            >
+              <RefreshCw className={cn("size-4", refreshState.status === "running" && "animate-spin")} />
+              {refreshState.status === "running" ? "刷新中" : "刷新任务"}
+            </Button>
+            {refreshState.message ? (
+              <p
+                className={cn(
+                  "max-w-64 text-right text-xs",
+                  refreshState.status === "error" ? "text-destructive" : "text-muted-foreground",
+                )}
+                role="status"
+              >
+                {refreshState.message}
+              </p>
+            ) : null}
+          </div>
+        }
+      />
 
-      <section className="toolbar workBoardToolbar" aria-label="会话任务筛选">
-        <label className="toolbarField toolbarSearch">
-          <span className="controlLabel">搜索</span>
-          <span className="searchBox">
-            <PixelIcon name="search" size={16} />
-            <input
+      {refreshState.status === "error" ? (
+        <Alert variant="destructive">
+          <AlertTitle>读取会话任务失败</AlertTitle>
+          <AlertDescription>{refreshState.message}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <section
+        className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-border bg-card p-3 md:grid-cols-[minmax(240px,1fr)_repeat(4,minmax(120px,auto))] md:items-end"
+        aria-label="会话任务筛选"
+      >
+        <div className="space-y-2">
+          <Label htmlFor="runs-search">搜索</Label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="runs-search"
+              className="pl-8"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="搜索任务、消息、发起人、Agent 或会话/群组"
             />
-          </span>
-        </label>
+          </div>
+        </div>
 
-        <label className="toolbarField">
-          <span className="controlLabel">渠道</span>
-          <select
+        <div className="space-y-2">
+          <Label htmlFor="runs-channel-filter">渠道</Label>
+          <Select
             value={channelKind}
-            onChange={(event) => setChannelKind(event.target.value as RuntimeTaskChannelKind | "all")}
+            onValueChange={(value) => setChannelKind(value as RuntimeTaskChannelKind | "all")}
           >
-            <option value="all">全部</option>
-            {channelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}（{option.count}）
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger id="runs-channel-filter" className="w-full md:w-40" aria-label="渠道">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              {channelOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}（{option.count}）
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <label className="toolbarField">
-          <span className="controlLabel">状态</span>
-          <select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus | "all")}>
-            {statusOptions.map((option) => (
-              <option key={option} value={option}>
-                {statusLabels[option]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="space-y-2 md:col-span-3">
+          <Label id="runs-status-filter-label">状态</Label>
+          <Tabs value={status} onValueChange={(value) => setStatus(value as TaskStatus | "all")}>
+            <TabsList
+              aria-labelledby="runs-status-filter-label"
+              className="grid h-auto w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-9"
+            >
+              {statusOptions.map((option) => (
+                <TabsTrigger key={option} value={option} className="h-7 text-xs" onClick={() => setStatus(option)}>
+                  {statusLabels[option]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
 
-        <label className="toolbarField">
-          <span className="controlLabel">开始时间</span>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="runs-time-start">开始时间</Label>
+          <Input
+            id="runs-time-start"
             aria-label="开始时间"
             type="datetime-local"
             step={1}
             value={timeStart}
             onChange={(event) => setTimeStart(event.target.value)}
           />
-        </label>
+        </div>
 
-        <label className="toolbarField">
-          <span className="controlLabel">结束时间</span>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="runs-time-end">结束时间</Label>
+          <Input
+            id="runs-time-end"
             aria-label="结束时间"
             type="datetime-local"
             step={1}
             value={timeEnd}
             onChange={(event) => setTimeEnd(event.target.value)}
           />
-        </label>
+        </div>
       </section>
 
-      <section className="metricGrid" aria-label="任务概览">
-        <Metric label="任务" value={board.summary.total} tone="blue" />
-        <Metric label="待处理" value={board.summary.todo} tone="purple" />
-        <Metric label="进行中" value={board.summary.in_progress} tone="green" />
-        <Metric label="失败" value={board.summary.failed} tone="orange" />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="任务概览">
+        <MetricCard label="任务" value={board.summary.total} />
+        <MetricCard label="待处理" value={board.summary.todo} />
+        <MetricCard label="进行中" value={board.summary.in_progress} />
+        <MetricCard label="失败" value={board.summary.failed} />
       </section>
 
-      <section className="workBoardGrid">
-        <div className="workBoardMain">
-          <div className="boardResultMeta">
-            <span>已显示 {displayedItems} / {displayedTotal}</span>
+      <section className="grid min-w-0 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-3">
+          <div className="text-sm text-muted-foreground">
+            已显示 {displayedItems} / {displayedTotal}
           </div>
-          <div className="workBoardLanes" aria-label="任务泳道">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2 2xl:grid-cols-4" aria-label="任务泳道">
             {board.lanes.map((lane) => (
-              <section className="workLane" key={lane.status} aria-label={`${lane.label}泳道`}>
-                <div className="workLaneHeader">
-                  <h2>{lane.label}</h2>
-                  <span>{lane.items.length} / {laneStates[lane.status].total}</span>
+              <section className="min-w-0 rounded-lg border border-border bg-muted/20" key={lane.status} aria-label={`${lane.label}泳道`}>
+                <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                  <h2 className="text-sm font-semibold">{lane.label}</h2>
+                  <span className="text-xs text-muted-foreground">{lane.items.length} / {laneStates[lane.status].total}</span>
                 </div>
-                <div className="workLaneItems">
-                  {lane.items.length ? (
-                    lane.items.map((item) => (
-                      <button
-                        className={item.id === selectedItem?.id ? "workCard workCardActive" : "workCard"}
-                        key={item.id}
+                <ScrollArea className="h-[32rem]">
+                  <div className="workLaneItems space-y-3 p-3">
+                    {lane.items.length ? (
+                      lane.items.map((item) => (
+                        <TaskCard
+                          active={item.id === selectedItem?.id}
+                          item={item}
+                          key={item.id}
+                          onSelect={() => setSelectedId(item.id)}
+                        />
+                      ))
+                    ) : (
+                      <EmptyState title="无匹配项" description="当前筛选条件下没有会话任务。" />
+                    )}
+                    {laneStates[lane.status].nextCursor && paginationMatchesFilters ? (
+                      <Button
+                        className="w-full"
                         type="button"
-                        onClick={() => setSelectedId(item.id)}
+                        variant="outline"
+                        disabled={laneStates[lane.status].loading}
+                        onClick={() => void loadMoreTasks(lane.status)}
                       >
-                        <span className="workCardTopline">
-                          <Badge>{item.statusLabel}</Badge>
-                          {item.channelKindLabel ? <Badge>{item.channelKindLabel}</Badge> : null}
-                        </span>
-                        <strong>{item.displayTitle}</strong>
-                        <small>{item.requestExcerpt}</small>
-                        <span className="workCardMeta">发起人 {item.creatorLabel}</span>
-                        <span className="workCardMeta">承接 Agent {item.assigneeLabel}</span>
-                        <span className="workCardMeta">
-                          会话/群组 {item.channelLabel ?? "未上报"}
-                          {item.updatedAt ?? item.createdAt ? ` · ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}` : ""}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="emptyLane">无匹配项</p>
-                  )}
-                  {laneStates[lane.status].nextCursor && paginationMatchesFilters ? (
-                    <button
-                      className="loadMoreButton"
-                      type="button"
-                      disabled={laneStates[lane.status].loading}
-                      onClick={() => void loadMoreTasks(lane.status)}
-                    >
-                      {laneStates[lane.status].loading ? "加载中" : "加载更多"}
-                    </button>
-                  ) : null}
-                  {laneStates[lane.status].error ? (
-                    <p className="refreshMessage refresh-error" role="status">{laneStates[lane.status].error}</p>
-                  ) : null}
-                </div>
+                        {laneStates[lane.status].loading ? "加载中" : "加载更多"}
+                      </Button>
+                    ) : null}
+                    {laneStates[lane.status].error ? (
+                      <Alert variant="destructive">
+                        <AlertDescription>{laneStates[lane.status].error}</AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </div>
+                </ScrollArea>
               </section>
             ))}
           </div>
@@ -374,90 +412,144 @@ export function RuntimeWorkBoardPage() {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
+function TaskCard({
+  active,
+  item,
+  onSelect,
+}: {
+  active: boolean;
+  item: RuntimeTaskBoardItem;
+  onSelect: () => void;
+}) {
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect();
+  }
+
   return (
-    <div className={`metricCard metric${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <Card
+      aria-pressed={active}
+      className={cn(
+        "min-w-0 cursor-pointer gap-3 overflow-hidden text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "ring-2 ring-ring",
+      )}
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
+      role="button"
+      size="sm"
+      tabIndex={0}
+    >
+      <CardHeader className="space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusBadge tone={statusTone(item.status)}>{item.statusLabel}</StatusBadge>
+          {item.channelKindLabel ? <Badge variant="outline">{item.channelKindLabel}</Badge> : null}
+          <StatusBadge tone="neutral">{unlinkedExecutionLabel}</StatusBadge>
+        </div>
+        <CardTitle className="break-words text-sm" title={item.userMessage ?? item.displayTitle}>
+          {item.displayTitle}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="break-words text-sm text-muted-foreground">{item.requestExcerpt}</p>
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <p>发起人 {item.creatorLabel}</p>
+          <p>承接 Agent {item.assigneeLabel}</p>
+          <p className="break-words">
+            会话/群组 {item.channelLabel ?? "未上报"}
+            {item.updatedAt ?? item.createdAt ? ` · ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}` : ""}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function TaskDetail({ item }: { item: RuntimeTaskBoardItem | null }) {
   if (!item) {
     return (
-      <aside className="detailPanel workBoardDetailPanel" aria-label="任务详情">
-        <h2>任务详情</h2>
-        <p>选择一个任务查看详情。</p>
+      <aside aria-label="任务详情">
+        <EmptyState title="任务详情" description="选择一个任务查看详情。" />
       </aside>
     );
   }
 
   return (
-    <aside className="detailPanel workBoardDetailPanel" aria-label="任务详情">
-      <div className="detailHeader">
-        <div>
-          <p className="eyebrow">Task</p>
-          <h2 className="detailTitle" title={item.userMessage ?? item.displayTitle}>{item.displayTitle}</h2>
-        </div>
-        <StatusPill>{item.statusLabel}</StatusPill>
-      </div>
-      <DetailBlock title="概览">{`${item.statusLabel} · ${item.agentId}`}</DetailBlock>
-      <DetailList
-        title="任务上下文"
-        items={[
-          `Channel: ${item.channelKindLabel ?? "默认渠道"}`,
-          `发起人: ${item.creatorLabel}`,
-          `承接 Agent: ${item.assigneeLabel}`,
-          `会话/群组: ${item.channelLabel ?? "未上报"}`,
-        ]}
-      />
-      <DetailList
-        title="最近状态"
-        items={[
-          `最近更新: ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}`,
-          `任务状态: ${item.statusLabel}`,
-          ...(item.error ? [`最近错误: ${item.error}`] : []),
-        ]}
-      />
-      <DetailBlock title="用户消息">{item.userMessage ?? "未上报用户消息"}</DetailBlock>
-      {item.agentReply ? <DetailBlock title="Agent 回复">{item.agentReply}</DetailBlock> : null}
+    <aside aria-label="任务详情">
+      <Card className="sticky top-4 min-w-0">
+        <CardHeader className="space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusBadge tone={statusTone(item.status)}>{item.statusLabel}</StatusBadge>
+            <StatusBadge tone="neutral">{unlinkedExecutionLabel}</StatusBadge>
+            {item.channelKindLabel ? <Badge variant="outline">{item.channelKindLabel}</Badge> : null}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Task</p>
+            <h2 className="break-words text-lg font-semibold" title={item.userMessage ?? item.displayTitle}>
+              {item.displayTitle}
+            </h2>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <DetailBlock title="概览">{`${item.statusLabel} · ${item.agentId}`}</DetailBlock>
+          <DetailList
+            title="任务上下文"
+            items={[
+              `Channel: ${item.channelKindLabel ?? "默认渠道"}`,
+              `发起人: ${item.creatorLabel}`,
+              `承接 Agent: ${item.assigneeLabel}`,
+              `会话/群组: ${item.channelLabel ?? "未上报"}`,
+            ]}
+          />
+          <DetailList
+            title="最近状态"
+            items={[
+              `最近更新: ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}`,
+              `任务状态: ${item.statusLabel}`,
+              `执行关联: ${unlinkedExecutionLabel}`,
+              ...(item.error ? [`最近错误: ${item.error}`] : []),
+            ]}
+          />
+          <DetailBlock title="用户消息">{item.userMessage ?? "未上报用户消息"}</DetailBlock>
+          {item.agentReply ? <DetailBlock title="Agent 回复">{item.agentReply}</DetailBlock> : null}
+        </CardContent>
+      </Card>
     </aside>
   );
 }
 
 function DetailBlock({ title, children }: { title: string; children: string }) {
   return (
-    <section className="detailBlock">
-      <h3>{title}</h3>
-      <p>{children}</p>
+    <section className="space-y-1">
+      <h3 className="text-sm font-medium">{title}</h3>
+      <p className="break-words text-sm text-muted-foreground">{children}</p>
     </section>
   );
 }
 
 function DetailList({ title, items }: { title: string; items: string[] }) {
   return (
-    <section className="detailBlock">
-      <h3>{title}</h3>
+    <section className="space-y-1">
+      <h3 className="text-sm font-medium">{title}</h3>
       {items.length ? (
-        <ul>
+        <ul className="space-y-1 text-sm text-muted-foreground">
           {items.map((item) => (
-            <li key={item}>{item}</li>
+            <li className="break-words" key={item}>{item}</li>
           ))}
         </ul>
       ) : (
-        <p className="mutedText">暂无</p>
+        <p className="text-sm text-muted-foreground">暂无</p>
       )}
     </section>
   );
 }
 
-function Badge({ children }: { children: string }) {
-  return <span className="badge">{children}</span>;
-}
-
-function StatusPill({ children }: { children: string }) {
-  return <span className="statusBadge">{children}</span>;
+function statusTone(status: TaskStatus): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (status === "done") return "success";
+  if (status === "failed" || status === "blocked") return "danger";
+  if (status === "in_progress" || status === "review") return "info";
+  if (status === "todo") return "warning";
+  return "neutral";
 }
 
 function createTimeRangeFilter(start: string, end: string): RuntimeTaskTimeRangeFilter | undefined {

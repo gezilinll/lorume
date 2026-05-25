@@ -2,8 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { resolveLorumeAppMode } from "./app-mode";
-import "./ui/tokens.css";
-import "./styles.css";
+import "./index.css";
 
 const runtimeMode = resolveLorumeAppMode(import.meta.env.VITE_LORUME_APP_MODE);
 

@@ -9,6 +9,11 @@
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,

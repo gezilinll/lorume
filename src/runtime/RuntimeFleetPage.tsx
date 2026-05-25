@@ -1,5 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
+import { Bot, Copy, Cpu, Monitor, RefreshCw, Server } from "lucide-react";
 import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { MetricCard } from "@/components/data/MetricCard";
+import { StatusBadge as AppStatusBadge } from "@/components/data/StatusBadge";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { cn } from "@/lib/utils";
 import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
@@ -13,6 +31,7 @@ import {
   runtimeKindLabels,
   summarizeRuntimeFleet,
   type RuntimeFleetDetail,
+  type RuntimeFleetObjectStatus,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
 import { createEmptyRuntimeFleetTaskSummary, type Agent, type Runtime } from "./runtime-model";
@@ -24,7 +43,6 @@ import {
   type AgentSkillProbeSnapshot,
   type AgentSkillProbeStatus,
 } from "./agent-skill-probe";
-import { PixelIcon } from "../ui/PixelIcon";
 
 const fixtureRuntimeSnapshot = runtimeFleetSnapshotFromQueryResponse(fixtureSnapshot) ?? createEmptyRuntimeInventorySnapshot();
 const autoRefreshIntervalMs = 30_000;
@@ -57,6 +75,7 @@ export function RuntimeFleetPage() {
   );
   const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth[]>([]);
   const [deviceDiagnostics, setDeviceDiagnostics] = useState<DeviceHealthStatusResult[]>([]);
+  const [isLoading, setIsLoading] = useState(!allowFixtureFallback);
   const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [selection, setSelection] = useState<RuntimeFleetSelection | null>(null);
@@ -119,10 +138,30 @@ export function RuntimeFleetPage() {
     setLastLoadedAt(new Date().toISOString());
   }
 
+  async function loadLatestRuntimeFleet() {
+    setIsLoading(true);
+    try {
+      const latestSnapshot = await fetchLatestSnapshot();
+      if (!latestSnapshot) return;
+      const [latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
+        fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
+        fetchDeviceDiagnosticsForDevices(latestSnapshot).catch(() => []),
+      ]);
+      applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics);
+    } catch {
+      if (!allowFixtureFallback) {
+        setLoadError("后端查询失败，无法读取正式运行资产");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadInitialSnapshot() {
+      setIsLoading(true);
       try {
         const latestSnapshot = await fetchLatestSnapshot();
         if (!latestSnapshot) return;
@@ -137,6 +176,8 @@ export function RuntimeFleetPage() {
         if (!allowFixtureFallback && !cancelled) {
           setLoadError("后端查询失败，无法读取正式运行资产");
         }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     }
 
@@ -204,73 +245,92 @@ export function RuntimeFleetPage() {
   }
 
   return (
-    <section className="workspace">
-      <header className="pageHeader">
-        <div>
-          <p className="eyebrow">Runtime / Device / Agent</p>
-          <h1>运行资产</h1>
-          <p className="pageSubtitle">查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。</p>
-          {lastLoadedAt ? (
-            <p className="pageRefreshMeta">上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p>
-          ) : null}
-        </div>
-      </header>
+    <section className="space-y-6">
+      <PageHeader
+        eyebrow="Runtime / Device / Agent"
+        title="运行资产"
+        description={(
+          <div className="space-y-1">
+            <p>查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。</p>
+            {lastLoadedAt ? <p>上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p> : null}
+          </div>
+        )}
+        actions={(
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoading}
+            onClick={() => {
+              void loadLatestRuntimeFleet();
+            }}
+          >
+            <RefreshCw aria-hidden="true" className={cn("size-4", isLoading && "animate-spin")} />
+            刷新
+          </Button>
+        )}
+      />
+
       {loadError ? (
-        <p className="pageStatus pageStatusError" role="status">
-          {loadError}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
       ) : null}
 
-      <section className="metricGrid" aria-label="运行资产概览">
-        <Metric label="设备" value={summary.devices} tone="blue" />
-        <Metric label="Runtime" value={summary.runtimes} tone="green" />
-        <Metric label="Agent" value={summary.agents} tone="purple" />
+      <section className="grid gap-3 sm:grid-cols-3" aria-label="运行资产概览">
+        <MetricCard icon={<Server aria-hidden="true" className="size-5" />} label="设备" value={summary.devices} />
+        <MetricCard icon={<Cpu aria-hidden="true" className="size-5" />} label="Runtime" value={summary.runtimes} />
+        <MetricCard icon={<Bot aria-hidden="true" className="size-5" />} label="Agent" value={summary.agents} />
       </section>
 
-      <section className="runtimeFleetGrid">
-        <div className="runtimeStack">
-          <DevicePanel
-            collectionHealthByDeviceId={collectionHealthByDeviceId}
-            deviceDiagnosticsByDeviceId={deviceDiagnosticsByDeviceId}
-            devices={snapshot.devices}
-            snapshot={snapshot}
-            selectedId={selection?.kind === "device" ? selection.id : undefined}
-            onSelect={(deviceId) => setSelection({ kind: "device", id: deviceId })}
-          />
-          <RuntimeTable
-            collectionHealthByDeviceId={collectionHealthByDeviceId}
-            snapshot={snapshot}
-            runtimes={snapshot.runtimes}
-            selectedId={selection?.kind === "runtime" ? selection.id : undefined}
-            onSelect={(runtime) => setSelection({ kind: "runtime", id: runtime.id })}
-          />
-          <AgentTable
-            agents={snapshot.agents}
-            collectionHealthByDeviceId={collectionHealthByDeviceId}
-            runtimes={snapshot.runtimes}
-            snapshot={snapshot}
-            selectedId={selection?.kind === "agent" ? selection.id : undefined}
-            onSelect={(agent) => setSelection({ kind: "agent", id: agent.id })}
-            onShowSkillProbe={(agent) => {
-              setSelection({ kind: "agent", id: agent.id });
-              const agentDetail = getRuntimeFleetDetail(
-                snapshot,
-                "agent",
-                agent.id,
-                collectionHealthByDeviceId,
-              );
-              if (agentDetail?.kind === "agent") void handleShowAgentSkillProbe(agentDetail);
+      {isLoading && !allowFixtureFallback && snapshot.devices.length === 0 ? (
+        <RuntimeFleetSkeleton />
+      ) : (
+        <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
+          <div className="min-w-0 space-y-4">
+            <DevicePanel
+              collectionHealthByDeviceId={collectionHealthByDeviceId}
+              deviceDiagnosticsByDeviceId={deviceDiagnosticsByDeviceId}
+              devices={snapshot.devices}
+              snapshot={snapshot}
+              selectedId={selection?.kind === "device" ? selection.id : undefined}
+              onSelect={(deviceId) => setSelection({ kind: "device", id: deviceId })}
+            />
+            <RuntimeTable
+              collectionHealthByDeviceId={collectionHealthByDeviceId}
+              snapshot={snapshot}
+              runtimes={snapshot.runtimes}
+              selectedId={selection?.kind === "runtime" ? selection.id : undefined}
+              onSelect={(runtime) => setSelection({ kind: "runtime", id: runtime.id })}
+            />
+            <AgentTable
+              agents={snapshot.agents}
+              collectionHealthByDeviceId={collectionHealthByDeviceId}
+              runtimes={snapshot.runtimes}
+              snapshot={snapshot}
+              selectedId={selection?.kind === "agent" ? selection.id : undefined}
+              onSelect={(agent) => setSelection({ kind: "agent", id: agent.id })}
+              onShowSkillProbe={(agent) => {
+                setSelection({ kind: "agent", id: agent.id });
+                const agentDetail = getRuntimeFleetDetail(
+                  snapshot,
+                  "agent",
+                  agent.id,
+                  collectionHealthByDeviceId,
+                  deviceDiagnosticsByDeviceId,
+                );
+                if (agentDetail?.kind === "agent") void handleShowAgentSkillProbe(agentDetail);
+              }}
+            />
+          </div>
+          <RuntimeDetail
+            detail={detail}
+            skillProbeState={agentSkillProbeState}
+            onRefreshSkillProbe={(agentDetail) => {
+              void handleShowAgentSkillProbe(agentDetail);
             }}
           />
-        </div>
-        <RuntimeDetail
-          detail={detail}
-          skillProbeState={agentSkillProbeState}
-          onRefreshSkillProbe={(agentDetail) => {
-            void handleShowAgentSkillProbe(agentDetail);
-          }}
-        />
-      </section>
+        </section>
+      )}
     </section>
   );
 }
@@ -379,15 +439,6 @@ function isCollectionHealthStatus(value: unknown): value is DeviceCollectionHeal
   return value === "healthy" || value === "failed";
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return (
-    <div className={`metricCard metric${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function DevicePanel({
   collectionHealthByDeviceId,
   deviceDiagnosticsByDeviceId,
@@ -404,46 +455,54 @@ function DevicePanel({
   onSelect: (deviceId: string) => void;
 }) {
   return (
-    <section className="tablePanel devicePanel" aria-label="设备">
-      <div className="runtimePanelHeader">
+    <Card size="sm" aria-label="设备">
+      <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
-          <h2>设备</h2>
-          <p>{devices.length} 台已注册设备</p>
+          <CardTitle>设备</CardTitle>
+          <p className="text-sm text-muted-foreground">{devices.length} 台已注册设备</p>
         </div>
-        <PixelIcon name="server" size={18} />
-      </div>
-      {devices.length === 0 ? (
-        <EmptyAsset message="暂无设备" />
-      ) : (
-        devices.map((device) => {
-          const deviceHealth = deviceDiagnosticsByDeviceId.get(device.id);
-          const status = deviceHealth
-            ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
-            : deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
-          const label = deviceHealth?.label ?? runtimeFleetObjectStatusLabels[status];
-          return (
-            <button
-              className={
-                device.id === selectedId ? "deviceSummary deviceSummaryActive" : "deviceSummary"
-              }
-              key={device.id}
-              type="button"
-              onClick={() => onSelect(device.id)}
-            >
-              <span className="iconSquare">
-                <PixelIcon name="monitor" size={18} />
-              </span>
-              <span>
-                <strong>{device.id}</strong>
-                <small>{device.hostname}</small>
-                <small>最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}</small>
-              </span>
-              <StatusBadge label={label} status={status} />
-            </button>
-          );
-        })
-      )}
-    </section>
+        <Server aria-hidden="true" className="size-5 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {devices.length === 0 ? (
+          <EmptyAsset message="暂无设备" />
+        ) : (
+          <div className="grid gap-2">
+            {devices.map((device) => {
+              const deviceHealth = deviceDiagnosticsByDeviceId.get(device.id);
+              const status = deviceHealth
+                ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
+                : deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
+              const label = deviceHealth?.label ?? runtimeFleetObjectStatusLabels[status];
+              return (
+                <Button
+                  className="h-auto w-full justify-between gap-3 border-border/80 px-3 py-3 text-left whitespace-normal data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                  data-active={device.id === selectedId}
+                  key={device.id}
+                  type="button"
+                  variant="outline"
+                  onClick={() => onSelect(device.id)}
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+                      <Monitor aria-hidden="true" className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block truncate font-medium">{device.id}</strong>
+                      <span className="block truncate text-xs text-muted-foreground">{device.hostname}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}
+                      </span>
+                    </span>
+                  </span>
+                  <FleetStatusBadge label={label} status={status} />
+                </Button>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -462,61 +521,66 @@ function RuntimeTable({
 }) {
   const deviceById = new Map(snapshot.devices.map((device) => [device.id, device]));
   return (
-    <section className="tablePanel runtimeAssetPanel" aria-label="Runtime 列表">
-      <div className="runtimePanelHeader">
+    <Card size="sm" aria-label="Runtime 列表">
+      <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
-          <h2>Runtime</h2>
-          <p>{runtimes.length} 个已采集 Runtime</p>
+          <CardTitle>Runtime</CardTitle>
+          <p className="text-sm text-muted-foreground">{runtimes.length} 个已采集 Runtime</p>
         </div>
-        <PixelIcon name="cpu" size={18} />
-      </div>
-      {runtimes.length === 0 ? (
-        <EmptyAsset message="暂无 Runtime" />
-      ) : (
-        <div className="assetTable runtimeTable" role="table" aria-label="Runtime 列表">
-          <div className="assetRow assetHeader runtimeTableRow" role="row">
-            <span role="columnheader">名称</span>
-            <span role="columnheader">Runtime</span>
-            <span role="columnheader">所属设备</span>
-            <span role="columnheader">状态</span>
-            <span role="columnheader">最近同步</span>
-          </div>
-          {runtimes.map((runtime) => {
-            const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
-            return (
-              <button
-                className={
-                  runtime.id === selectedId
-                    ? "assetRow assetDataRow runtimeTableRow tableRowActive"
-                    : "assetRow assetDataRow runtimeTableRow"
-                }
-                key={runtime.id}
-                type="button"
-                role="row"
-                onClick={() => onSelect(runtime)}
-              >
-                <span className="nameCell" role="cell">
-                  <strong>{runtime.name}</strong>
-                  <small>{runtime.id}</small>
-                </span>
-                <span role="cell">
-                  <Badge>{runtimeKindLabels[runtime.kind]}</Badge>
-                </span>
-                <span className="mutedAssetText" role="cell">
-                  {deviceById.get(runtime.deviceId)?.id ?? runtime.deviceId}
-                </span>
-                <span role="cell">
-                  <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
-                </span>
-                <span className="mutedAssetText" role="cell">
-                  {formatRuntimeTimestamp(runtime.lastSeenAt)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </section>
+        <Cpu aria-hidden="true" className="size-5 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {runtimes.length === 0 ? (
+          <EmptyAsset message="暂无 Runtime" />
+        ) : (
+          <Table aria-label="Runtime 列表">
+            <TableHeader>
+              <TableRow>
+                <TableHead>名称</TableHead>
+                <TableHead>Runtime</TableHead>
+                <TableHead>所属设备</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead className="text-right">最近同步</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {runtimes.map((runtime) => {
+                const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
+                return (
+                  <TableRow
+                    aria-selected={runtime.id === selectedId}
+                    className="cursor-pointer aria-selected:bg-muted/80"
+                    key={runtime.id}
+                    tabIndex={0}
+                    onClick={() => onSelect(runtime)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelect(runtime);
+                      }
+                    }}
+                  >
+                    <TableCell className="min-w-44 font-medium">{runtime.name}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{runtimeKindLabels[runtime.kind]}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {deviceById.get(runtime.deviceId)?.id ?? runtime.deviceId}
+                    </TableCell>
+                    <TableCell>
+                      <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {formatRuntimeTimestamp(runtime.lastSeenAt)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -540,70 +604,78 @@ function AgentTable({
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
   return (
-    <section className="tablePanel runtimeAssetPanel" aria-label="Agent 列表">
-      <div className="runtimePanelHeader">
+    <Card size="sm" aria-label="Agent 列表">
+      <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
-          <h2>Agent</h2>
-          <p>{agents.length} 个已采集 Agent</p>
+          <CardTitle>Agent</CardTitle>
+          <p className="text-sm text-muted-foreground">{agents.length} 个已采集 Agent</p>
         </div>
-        <PixelIcon name="bot" size={18} />
-      </div>
-      {agents.length === 0 ? (
-        <EmptyAsset message="暂无 Agent" />
-      ) : (
-        <div className="assetTable agentTable" role="table" aria-label="Agent 列表">
-          <div className="assetRow assetHeader agentTableRow" role="row">
-            <span role="columnheader">名称</span>
-            <span role="columnheader">归属 Runtime</span>
-            <span role="columnheader">状态</span>
-            <span role="columnheader">最近同步</span>
-            <span role="columnheader">Skill</span>
-          </div>
-          {agents.map((agent) => {
-            const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
-            return (
-              <div
-                className={
-                  agent.id === selectedId
-                    ? "assetRow assetDataRow agentTableRow tableRowActive"
-                    : "assetRow assetDataRow agentTableRow"
-                }
-                key={agent.id}
-                role="row"
-                onClick={() => onSelect(agent)}
-              >
-                <button className="rowCellButton nameCell" type="button" role="cell" onClick={() => onSelect(agent)}>
-                  <strong>{agent.name}</strong>
-                  <small>{agent.id}</small>
-                </button>
-                <span className="mutedAssetText" role="cell">
-                  {runtimeById.get(agent.runtimeId)?.name ?? agent.runtimeId}
-                </span>
-                <span role="cell">
-                  <StatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
-                </span>
-                <span className="mutedAssetText" role="cell">
-                  {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
-                </span>
-                <span role="cell">
-                  <button
-                    aria-label={`${agent.name} Skill 探测`}
-                    className="inlineActionButton"
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onShowSkillProbe(agent);
+        <Bot aria-hidden="true" className="size-5 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {agents.length === 0 ? (
+          <EmptyAsset message="暂无 Agent" />
+        ) : (
+          <Table aria-label="Agent 列表">
+            <TableHeader>
+              <TableRow>
+                <TableHead>名称</TableHead>
+                <TableHead>归属 Runtime</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>最近同步</TableHead>
+                <TableHead className="text-right">Skill</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {agents.map((agent) => {
+                const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
+                return (
+                  <TableRow
+                    aria-selected={agent.id === selectedId}
+                    className="cursor-pointer aria-selected:bg-muted/80"
+                    key={agent.id}
+                    tabIndex={0}
+                    onClick={() => onSelect(agent)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelect(agent);
+                      }
                     }}
                   >
-                    查看
-                  </button>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
+                    <TableCell className="min-w-36 font-medium">{agent.name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {runtimeById.get(agent.runtimeId)?.name ?? agent.runtimeId}
+                    </TableCell>
+                    <TableCell>
+                      <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        aria-label={`${agent.name} Skill 探测`}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onShowSkillProbe(agent);
+                        }}
+                      >
+                        查看
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -624,48 +696,63 @@ function RuntimeDetail({
 
   if (!detail) {
     return (
-      <aside className="detailPanel" aria-label="运行资产详情">
-        <h2>资产详情</h2>
-        <p>选择设备、Runtime 或 Agent 查看完整信息。</p>
+      <aside aria-label="运行资产详情" className="self-start xl:sticky xl:top-4">
+        <Card size="sm">
+          <CardHeader>
+            <h2 className="font-heading text-sm font-medium leading-snug">资产详情</h2>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">选择设备、Runtime 或 Agent 查看完整信息。</p>
+          </CardContent>
+        </Card>
       </aside>
     );
   }
 
+  const safeSections = detail.sections.filter((section) => section.title !== "本地路径");
+
   return (
-    <aside className="detailPanel" aria-label="运行资产详情">
-      <div className="detailHeader">
-        <div>
-          <p className="eyebrow">{detail.kind}</p>
-          <h2>{detail.title}</h2>
-        </div>
-        <div className="detailHeaderActions">
-          <StatusBadge label={detail.statusLabel} status={detail.status} />
-          <button
-            className="secondaryButton compactButton copyIdButton"
-            type="button"
-            onClick={() => {
-              void copyTextToClipboard(detail.id).then((copied) => {
-                if (copied) setCopiedObjectId(detail.id);
-              });
-            }}
-          >
-            <PixelIcon name="copy" size={14} />
-            <span>复制 ID</span>
-          </button>
-          {copiedObjectId === detail.id ? <span className="skillStatusInline">已复制</span> : null}
-        </div>
-      </div>
-      <DetailBlock title="概览">{detail.subtitle}</DetailBlock>
-      {detail.sections.map((section) => (
-        <DetailList key={section.title} title={section.title} items={section.items} />
-      ))}
-      {detail.kind === "agent" && skillProbeState.agentId === detail.id && skillProbeState.isVisible ? (
-        <AgentSkillProbePanel
-          detail={detail}
-          state={skillProbeState}
-          onRefresh={() => onRefreshSkillProbe(detail)}
-        />
-      ) : null}
+    <aside aria-label="运行资产详情" className="self-start xl:sticky xl:top-4">
+      <Card size="sm">
+        <CardHeader className="gap-3">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase text-muted-foreground">{detail.kind}</p>
+              <h2 className="mt-1 break-words font-heading text-sm font-medium leading-snug">{detail.title}</h2>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <FleetStatusBadge label={detail.statusLabel} status={detail.status} />
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void copyTextToClipboard(detail.id).then((copied) => {
+                    if (copied) setCopiedObjectId(detail.id);
+                  });
+                }}
+              >
+                <Copy aria-hidden="true" className="size-3.5" />
+                复制 ID
+              </Button>
+            </div>
+          </div>
+          {copiedObjectId === detail.id ? <p className="text-xs text-muted-foreground">已复制</p> : null}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <DetailBlock title="概览">{detail.subtitle}</DetailBlock>
+          {safeSections.map((section) => (
+            <DetailList key={section.title} title={section.title} items={section.items} />
+          ))}
+          {detail.kind === "agent" && skillProbeState.agentId === detail.id && skillProbeState.isVisible ? (
+            <AgentSkillProbePanel
+              detail={detail}
+              state={skillProbeState}
+              onRefresh={() => onRefreshSkillProbe(detail)}
+            />
+          ) : null}
+        </CardContent>
+      </Card>
     </aside>
   );
 }
@@ -708,26 +795,29 @@ function AgentSkillProbePanel({
   const status = snapshot?.status ?? "unknown";
 
   return (
-    <section className="detailBlock agentSkillProbeBlock" aria-label="Skill 探测">
-      <div className="detailBlockHeader">
-        <h3>Skill 探测</h3>
-        <button
-          className="secondaryButton compactButton"
+    <section className="rounded-lg border bg-muted/20 p-3" aria-label="Skill 探测">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-medium">Skill 探测</h3>
+        <Button
+          size="sm"
           type="button"
+          variant="outline"
           disabled={state.status === "loading"}
           onClick={onRefresh}
         >
           刷新
-        </button>
+        </Button>
       </div>
-      <div className="skillProbeActions">
-        <StatusBadge label={agentSkillProbeStatusLabels[status]} status={status} />
+      <div className="mt-3">
+        <SkillStatusBadge label={agentSkillProbeStatusLabels[status]} status={status} />
       </div>
-      {state.status === "loading" ? <p>正在读取 Skill 探测</p> : null}
-      {state.status === "error" ? <p className="healthIssueText">{state.errorMessage}</p> : null}
-      {snapshot ? <AgentSkillProbeSnapshotView snapshot={snapshot} /> : null}
-      {!snapshot && state.status !== "loading" && state.status !== "error" ? <p>尚未探测 Skill</p> : null}
-      <p className="mutedText">目标 Agent: {detail.title}</p>
+      <div className="mt-3 space-y-3 text-sm">
+        {state.status === "loading" ? <p>正在读取 Skill 探测</p> : null}
+        {state.status === "error" ? <p className="text-destructive">{state.errorMessage}</p> : null}
+        {snapshot ? <AgentSkillProbeSnapshotView snapshot={snapshot} /> : null}
+        {!snapshot && state.status !== "loading" && state.status !== "error" ? <p>尚未探测 Skill</p> : null}
+        <p className="text-muted-foreground">目标 Agent: {detail.title}</p>
+      </div>
     </section>
   );
 }
@@ -737,27 +827,23 @@ function AgentSkillProbeSnapshotView({ snapshot }: { snapshot: AgentSkillProbeSn
     return <p>尚未探测 Skill</p>;
   }
   if (snapshot.status === "unsupported") {
-    return (
-      <>
-        <p className="healthIssueText">{snapshot.errorSummary || "当前目标不支持本地 Skill 探测"}</p>
-      </>
-    );
+    return <p className="text-destructive">{snapshot.errorSummary || "当前目标不支持本地 Skill 探测"}</p>;
   }
   if (snapshot.status === "failed") {
-    return <p className="healthIssueText">{snapshot.errorSummary || "Skill 探测失败"}</p>;
+    return <p className="text-destructive">{snapshot.errorSummary || "Skill 探测失败"}</p>;
   }
   if (snapshot.skills.length === 0) {
     return <p>未发现本地 Skill。</p>;
   }
   return (
-    <div className="skillProbeList">
+    <div className="space-y-3">
       {snapshot.skills.map((skill) => (
-        <article className="skillProbeItem" key={`${skill.rootPath}:${skill.entryPath}`}>
-          <h4>{skill.name}</h4>
-          <p>Root: {skill.rootPath}</p>
-          <p>Entry: {skill.entryPath}</p>
-          <SkillProbeFileGroup title="Markdown" files={skill.markdownFiles} />
-          <SkillProbeFileGroup title="非 Markdown" files={skill.nonMarkdownFiles} />
+        <article className="rounded-lg border bg-background p-3" key={`${skill.rootPath}:${skill.entryPath}`}>
+          <h4 className="font-medium">{skill.name}</h4>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <SkillProbeFileGroup title="Markdown" files={skill.markdownFiles} />
+            <SkillProbeFileGroup title="非 Markdown" files={skill.nonMarkdownFiles} />
+          </div>
         </article>
       ))}
     </div>
@@ -773,11 +859,13 @@ function SkillProbeFileGroup({
 }) {
   if (files.length === 0) return <p>{title}: 暂无</p>;
   return (
-    <div className="skillProbeFileGroup">
-      <strong>{title}</strong>
-      <ul>
+    <div className="space-y-1">
+      <strong className="text-xs text-muted-foreground">{title}</strong>
+      <ul className="space-y-1">
         {files.map((file) => (
-          <li key={`${title}:${file.path}`}>{file.relativePath}</li>
+          <li className="break-all rounded-md bg-muted px-2 py-1 text-xs" key={`${title}:${file.path}`}>
+            {file.relativePath}
+          </li>
         ))}
       </ul>
     </div>
@@ -786,9 +874,9 @@ function SkillProbeFileGroup({
 
 function DetailBlock({ title, children }: { title: string; children: string }) {
   return (
-    <section className="detailBlock">
-      <h3>{title}</h3>
-      <p>{children}</p>
+    <section className="rounded-lg border bg-background p-3">
+      <h3 className="text-sm font-medium">{title}</h3>
+      <p className="mt-2 text-sm text-muted-foreground">{children}</p>
     </section>
   );
 }
@@ -803,16 +891,16 @@ function DetailList({
   emptyLabel?: string;
 }) {
   return (
-    <section className="detailBlock">
-      <h3>{title}</h3>
+    <section className="rounded-lg border bg-background p-3">
+      <h3 className="text-sm font-medium">{title}</h3>
       {items.length ? (
-        <ul>
+        <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {items.map((item) => (
-            <li key={item}>{item}</li>
+            <li className="break-words" key={item}>{item}</li>
           ))}
         </ul>
       ) : (
-        <p className="mutedText">{emptyLabel}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{emptyLabel}</p>
       )}
     </section>
   );
@@ -820,16 +908,43 @@ function DetailList({
 
 function EmptyAsset({ message }: { message: string }) {
   return (
-    <div className="emptyAsset">
+    <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
       <p>{message}</p>
     </div>
   );
 }
 
-function Badge({ children }: { children: string }) {
-  return <span className="badge">{children}</span>;
+function RuntimeFleetSkeleton() {
+  return (
+    <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]" aria-label="运行资产读取中">
+      <div className="space-y-4">
+        <Skeleton className="h-36 w-full" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+      <Skeleton className="h-80 w-full" />
+    </section>
+  );
 }
 
-function StatusBadge({ label, status }: { label: string; status: string }) {
-  return <span className={`statusBadge status-${status}`}>{label}</span>;
+function FleetStatusBadge({ label, status }: { label: string; status: RuntimeFleetObjectStatus }) {
+  return <AppStatusBadge tone={fleetStatusTone(status)}>{label}</AppStatusBadge>;
+}
+
+function SkillStatusBadge({ label, status }: { label: string; status: AgentSkillProbeStatus }) {
+  return <AppStatusBadge tone={skillStatusTone(status)}>{label}</AppStatusBadge>;
+}
+
+function fleetStatusTone(status: RuntimeFleetObjectStatus): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (status === "online") return "success";
+  if (status === "offline") return "neutral";
+  if (status === "error") return "danger";
+  return "info";
+}
+
+function skillStatusTone(status: AgentSkillProbeStatus): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (status === "succeeded") return "success";
+  if (status === "failed") return "danger";
+  if (status === "unsupported") return "warning";
+  return "neutral";
 }

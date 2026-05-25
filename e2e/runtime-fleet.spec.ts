@@ -72,6 +72,7 @@ test.describe("Runtime Fleet", () => {
 
     await page.getByRole("button", { name: "Runtime Fleet" }).click();
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
     await expect(page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ })).toBeVisible();
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
@@ -112,10 +113,11 @@ test.describe("Runtime Fleet", () => {
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("references/guide.md");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("scripts/probe.sh");
     await expect(detail.getByRole("link", { name: "scripts/probe.sh" })).toHaveCount(0);
+    await expect(detail.getByRole("region", { name: "Skill 探测" })).not.toContainText("/Users/example/.codex/skills/reviewer");
 
     const sideNavPosition = await page
-      .getByRole("complementary", { name: "主导航" })
-      .evaluate((node) => getComputedStyle(node).position);
+      .getByRole("navigation", { name: "主导航" })
+      .evaluate((node) => getComputedStyle(node.closest('[data-slot="sidebar-container"]') ?? node).position);
     expect(sideNavPosition).toBe("fixed");
 
     await expect(page.getByRole("button", { name: "请求设备刷新" })).toHaveCount(0);

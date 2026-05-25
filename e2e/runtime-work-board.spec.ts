@@ -149,15 +149,17 @@ test.describe("Runs conversation tasks", () => {
   test("keeps the board within the viewport on laptop widths", async ({ page, request }) => {
     await seedWorkBoardData(request, backendDeviceState);
 
-    await page.setViewportSize({ width: 1185, height: 900 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "Runs" }).click();
-    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
+    for (const width of [768, 1185]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await page.getByRole("button", { name: "Runs" }).click();
+      await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
 
-    const pageOverflows = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth + 1,
-    );
-    expect(pageOverflows).toBe(false);
+      const pageOverflows = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 1,
+      );
+      expect(pageOverflows).toBe(false);
+    }
   });
 
   test("keeps adapter diagnostic gaps out of task cards when no tasks are available", async ({ page, request }) => {

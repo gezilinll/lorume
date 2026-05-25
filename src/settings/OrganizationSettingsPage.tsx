@@ -1,6 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { AuthMemberRole, AuthSessionContext } from "../auth/auth-store";
-import { PixelIcon } from "../ui/PixelIcon";
+import { StatusBadge } from "@/components/data/StatusBadge";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface OrganizationSettingsPageProps {
   session?: AuthSessionContext;
@@ -110,183 +118,211 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
 
   if (!organization) {
     return (
-      <section className="workspace">
-        <header className="pageHeader">
-          <div>
-            <p className="eyebrow">Organization</p>
-            <h1>组织设置</h1>
-            <p className="pageSubtitle">请选择组织后管理成员与权限。</p>
-          </div>
-        </header>
-      </section>
+      <div className="space-y-6">
+        <PageHeader eyebrow="Organization" title="组织设置" description="请选择组织后管理成员与权限。" />
+      </div>
     );
   }
 
   return (
-    <section className="workspace">
-      <header className="pageHeader">
-        <div>
-          <p className="eyebrow">Organization</p>
-          <h1>组织设置</h1>
-          <p className="pageSubtitle">管理当前组织的成员身份、邀请链接和权限入口。</p>
-        </div>
-      </header>
+    <div className="space-y-6">
+      <PageHeader eyebrow="Organization" title="组织设置" description="管理当前组织的成员身份、邀请链接和设备接入入口。" />
 
-      <section className="metricGrid" aria-label="组织概览">
-        <Metric label="组织" value={1} tone="blue" />
-        <Metric label="当前角色" value={roleLabels[organization.role]} tone="green" />
-      </section>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>组织概览</CardTitle>
+            <CardDescription>当前 Console 使用的组织上下文。</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-3">
+            <SummaryItem label="组织名称" value={organization.name} />
+            <SummaryItem label="Slug" value={organization.slug} />
+            <SummaryItem label="当前角色" value={<StatusBadge tone={canManage ? "success" : "neutral"}>{roleLabels[organization.role]}</StatusBadge>} />
+          </CardContent>
+        </Card>
 
-      <section className="resourceCenterGrid">
-        <section className="tablePanel" aria-label="组织成员">
-          <div className="runtimePanelHeader">
-            <div>
-              <h2>{organization.name}</h2>
-              <p>{organization.slug}</p>
-            </div>
-            <PixelIcon name="settings" size={18} />
-          </div>
-          <div className="resourceList">
-            <article className="resourceListItem">
-              <strong>{session.user.email}</strong>
-              <span>{roleLabels[organization.role]}</span>
-              <small>当前登录成员</small>
-            </article>
-          </div>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>设备 Token</CardTitle>
+            <CardDescription>管理员创建后只在本次页面状态中显示明文 token。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {canManage ? (
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="device-id">Device ID</FieldLabel>
+                  <Input
+                    id="device-id"
+                    value={deviceId}
+                    onChange={(event) => setDeviceId(event.target.value)}
+                    placeholder="fixture-mac"
+                  />
+                  <FieldDescription>使用稳定、可读的本机设备标识。</FieldDescription>
+                </Field>
+                <Button
+                  className="w-fit"
+                  type="button"
+                  disabled={isCreatingDeviceToken || !deviceId.trim()}
+                  onClick={() => void createDeviceInstallCommand()}
+                >
+                  生成安装命令
+                </Button>
+                {deviceErrorMessage ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>设备 token 创建失败</AlertTitle>
+                    <AlertDescription>{deviceErrorMessage}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </FieldGroup>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前角色不能注册设备。</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-        <aside className="detailPanel resourceDetailPanel" aria-label="邀请成员">
-          <div className="detailHeader">
-            <div>
-              <p className="eyebrow">Invite</p>
-              <h2>邀请成员</h2>
-            </div>
-          </div>
-          {canManage ? (
-            <div className="skillForm">
-              <label className="toolbarField">
-                <span className="controlLabel">邮箱</span>
-                <input
-                  value={inviteEmail}
-                  onChange={(event) => setInviteEmail(event.target.value)}
-                  placeholder="name@company.com"
-                />
-              </label>
-              <label className="toolbarField">
-                <span className="controlLabel">角色</span>
-                <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as AuthMemberRole)}>
-                  <option value="member">成员</option>
-                  <option value="admin">管理员</option>
-                </select>
-              </label>
-              <button
-                className="primaryButton"
-                type="button"
-                disabled={isSubmitting || !inviteEmail.trim()}
-                onClick={() => void createInvitation()}
-              >
-                创建邀请链接
-              </button>
-              {inviteLink ? (
-                <div className="inviteLinkBlock">
-                  <label className="toolbarField inviteLinkControl">
-                    <span className="controlLabel">邀请链接</span>
-                    <input
-                      aria-label="邀请链接"
-                      className="inviteLinkInput"
-                      readOnly
-                      value={inviteLink}
-                      onFocus={(event) => event.currentTarget.select()}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>成员与邀请</CardTitle>
+            <CardDescription>查看当前成员身份，并为新成员生成一次性邀请链接。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Table aria-label="组织成员">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>成员</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead>状态</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="font-medium">{session.user.email}</TableCell>
+                  <TableCell>{roleLabels[organization.role]}</TableCell>
+                  <TableCell>
+                    <StatusBadge tone="info">当前登录成员</StatusBadge>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            {canManage ? (
+              <FieldGroup>
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+                  <Field>
+                    <FieldLabel htmlFor="invite-email">邮箱</FieldLabel>
+                    <Input
+                      id="invite-email"
+                      value={inviteEmail}
+                      onChange={(event) => setInviteEmail(event.target.value)}
+                      placeholder="name@company.com"
                     />
-                  </label>
-                  <button className="secondaryButton compactButton" type="button" onClick={() => void copyInviteLink()}>
-                    复制邀请链接
-                  </button>
-                  {copiedInviteLink ? <span className="skillStatusInline">已复制</span> : null}
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="invite-role">角色</FieldLabel>
+                    <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as AuthMemberRole)}>
+                      <SelectTrigger id="invite-role" aria-label="角色" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="member">成员</SelectItem>
+                        <SelectItem value="admin">管理员</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
-              ) : null}
-              {errorMessage ? <p className="skillErrorMessage">{errorMessage}</p> : null}
-            </div>
-          ) : (
-            <p>当前角色不能创建邀请链接。</p>
-          )}
-        </aside>
-      </section>
+                <Button
+                  className="w-fit"
+                  type="button"
+                  disabled={isSubmitting || !inviteEmail.trim()}
+                  onClick={() => void createInvitation()}
+                >
+                  创建邀请链接
+                </Button>
+                {inviteLink ? (
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="invite-link">邀请链接</FieldLabel>
+                      <Input
+                        id="invite-link"
+                        aria-label="邀请链接"
+                        readOnly
+                        value={inviteLink}
+                        onFocus={(event) => event.currentTarget.select()}
+                      />
+                    </Field>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" type="button" onClick={() => void copyInviteLink()}>
+                        复制邀请链接
+                      </Button>
+                      {copiedInviteLink ? <span className="text-sm text-muted-foreground">已复制</span> : null}
+                    </div>
+                  </FieldGroup>
+                ) : null}
+                {errorMessage ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>邀请创建失败</AlertTitle>
+                    <AlertDescription>{errorMessage}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </FieldGroup>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前角色不能创建邀请链接。</p>
+            )}
+          </CardContent>
+        </Card>
 
-      <section className="tablePanel deviceRegistrationPanel" aria-label="设备注册">
-        <div className="runtimePanelHeader">
-          <div>
-            <p className="eyebrow">Device</p>
-            <h2>设备注册</h2>
-          </div>
-          <PixelIcon name="terminal" size={18} />
-        </div>
-        {canManage ? (
-          <div className="skillForm">
-            <div className="deviceRegistrationGrid">
-              <label className="toolbarField">
-                <span className="controlLabel">Device ID</span>
-                <input
-                  value={deviceId}
-                  onChange={(event) => setDeviceId(event.target.value)}
-                  placeholder="fixture-mac"
-                />
-              </label>
-            </div>
-            <button
-              className="primaryButton"
-              type="button"
-              disabled={isCreatingDeviceToken || !deviceId.trim()}
-              onClick={() => void createDeviceInstallCommand()}
-            >
-              生成安装命令
-            </button>
+        <Card>
+          <CardHeader>
+            <CardTitle>安装命令</CardTitle>
+            <CardDescription>生成后复制到目标设备执行 Collector 安装。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             {installCommand ? (
-              <div className="installCommandBlock">
-                <label className="toolbarField installCommandControl">
-                  <span className="controlLabel">Device token</span>
-                  <input
+              <>
+                <Field>
+                  <FieldLabel htmlFor="device-token">Device token</FieldLabel>
+                  <Input
+                    id="device-token"
                     aria-label="Device token"
-                    className="inviteLinkInput"
                     readOnly
                     value={deviceToken}
                     onFocus={(event) => event.currentTarget.select()}
                   />
-                </label>
-                <label className="toolbarField installCommandControl">
-                  <span className="controlLabel">安装命令</span>
-                  <textarea
+                </Field>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">安装命令</p>
+                  <p className="text-sm text-muted-foreground">使用 install-device-collector 安装脚本注册目标设备。</p>
+                  <pre
                     aria-label="安装命令"
-                    className="installCommandInput"
-                    readOnly
-                    rows={3}
-                    value={installCommand}
-                    onFocus={(event) => event.currentTarget.select()}
-                  />
-                </label>
-                <div className="deviceRegistrationActions">
-                  <button className="secondaryButton compactButton" type="button" onClick={() => void copyInstallCommand()}>
-                    复制安装命令
-                  </button>
-                  {copiedInstallCommand ? <span className="skillStatusInline">已复制</span> : null}
+                    className="overflow-x-auto rounded-lg border bg-muted/50 p-3 text-xs leading-relaxed text-foreground"
+                  >
+                    <code className="whitespace-pre">{installCommand}</code>
+                  </pre>
                 </div>
-              </div>
-            ) : null}
-            {deviceErrorMessage ? <p className="skillErrorMessage">{deviceErrorMessage}</p> : null}
-          </div>
-        ) : (
-          <p>当前角色不能注册设备。</p>
-        )}
-      </section>
-    </section>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" type="button" onClick={() => void copyInstallCommand()}>
+                    复制安装命令
+                  </Button>
+                  {copiedInstallCommand ? <span className="text-sm text-muted-foreground">已复制</span> : null}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">输入 Device ID 后生成一行安装命令。</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number | string; tone: string }) {
+function SummaryItem({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className={`metricCard metric${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
     </div>
   );
 }

@@ -34,6 +34,10 @@ describe("OrganizationSettingsPage", () => {
 
     render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
 
+    expect(screen.getByRole("heading", { name: "组织设置" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "组织成员" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /创建邀请|生成邀请/ })).toBeInTheDocument();
+
     await user.type(screen.getByLabelText("邮箱"), "teammate@lorume.com");
     await user.click(screen.getByRole("button", { name: "创建邀请链接" }));
 
@@ -66,11 +70,12 @@ describe("OrganizationSettingsPage", () => {
 
     const tokenInput = await screen.findByLabelText("Device token");
     expect((tokenInput as HTMLInputElement).value).toBe("agt_device_secret_123");
-    const installCommand = screen.getByLabelText("安装命令") as HTMLTextAreaElement;
-    expect(installCommand.value).toContain(`${window.location.origin}/api/device-collector/install.sh`);
-    expect(installCommand.value).toContain("--device-token 'agt_device_secret_123'");
-    expect(installCommand.value).toContain("--device-id 'fixture-mac'");
-    expect(installCommand.value).not.toContain("--device-name");
+    const installCommand = screen.getByLabelText("安装命令");
+    expect(installCommand).toHaveTextContent(`${window.location.origin}/api/device-collector/install.sh`);
+    expect(installCommand).toHaveTextContent("--device-token 'agt_device_secret_123'");
+    expect(installCommand).toHaveTextContent("--device-id 'fixture-mac'");
+    expect(installCommand).not.toHaveTextContent("--device-name");
+    expect(screen.getByText(/install-device-collector/)).toBeInTheDocument();
   });
 
   it("hides invitation creation from regular members", () => {

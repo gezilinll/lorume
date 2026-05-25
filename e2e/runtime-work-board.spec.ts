@@ -162,6 +162,8 @@ test.describe("Runs conversation tasks", () => {
     await expect(detail).toHaveAttribute("data-surface", "task-detail");
     await expect(detail).toHaveAttribute("data-depth", "modal-3d");
     await expect(detail).toHaveAttribute("data-layout", "task-detail-simple");
+    await expect(page.locator("[data-slot='dialog-overlay']")).toHaveCSS("backdrop-filter", /blur\(2px\)/);
+    await expect(page.locator("[data-slot='dialog-title']")).toHaveCSS("line-height", "24px");
     const detailBox = await detail.boundingBox();
     expect(detailBox?.width ?? 0).toBeGreaterThanOrEqual(600);
     expect(detailBox?.width ?? 0).toBeLessThanOrEqual(680);

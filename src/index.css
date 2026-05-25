@@ -138,6 +138,12 @@
   --status-danger: color-mix(in oklch, var(--destructive) 10%, transparent);
   --status-danger-foreground: var(--destructive);
   --status-danger-border: color-mix(in oklch, var(--destructive) 20%, transparent);
+  --runs-lane-todo: color-mix(in oklch, var(--muted) 18%, var(--card));
+  --runs-lane-progress: color-mix(in oklch, var(--primary) 6%, var(--card));
+  --runs-lane-review: color-mix(in oklch, var(--chart-3) 5%, var(--card));
+  --runs-lane-done: color-mix(in oklch, var(--chart-2) 5%, var(--card));
+  --runs-lane-attention: color-mix(in oklch, var(--destructive) 5%, var(--card));
+  --runs-lane-cancelled: color-mix(in oklch, var(--muted) 24%, var(--card));
   --destructive-foreground: oklch(1.0000 0 0);
   --font-sans: Open Sans, sans-serif;
   --font-serif: Georgia, serif;
@@ -205,6 +211,12 @@
   --status-danger: color-mix(in oklch, var(--destructive) 14%, transparent);
   --status-danger-foreground: var(--destructive);
   --status-danger-border: color-mix(in oklch, var(--destructive) 28%, transparent);
+  --runs-lane-todo: color-mix(in oklch, var(--muted) 22%, var(--card));
+  --runs-lane-progress: color-mix(in oklch, var(--primary) 10%, var(--card));
+  --runs-lane-review: color-mix(in oklch, var(--chart-3) 8%, var(--card));
+  --runs-lane-done: color-mix(in oklch, var(--chart-2) 8%, var(--card));
+  --runs-lane-attention: color-mix(in oklch, var(--destructive) 10%, var(--card));
+  --runs-lane-cancelled: color-mix(in oklch, var(--muted) 28%, var(--card));
   --destructive-foreground: oklch(1.0000 0 0);
   --radius: 1.3rem;
   --font-sans: Open Sans, sans-serif;

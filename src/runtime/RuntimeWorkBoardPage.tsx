@@ -450,12 +450,12 @@ function RuntimeTaskLaneView({
 }
 
 function laneSurfaceClass(laneKey: RuntimeTaskBoardLane["key"]): string {
-  if (laneKey === "in_progress") return "bg-sky-50/45";
-  if (laneKey === "review") return "bg-amber-50/45";
-  if (laneKey === "done") return "bg-emerald-50/45";
-  if (laneKey === "attention") return "bg-rose-50/45";
-  if (laneKey === "cancelled") return "bg-muted/40";
-  return "bg-card";
+  if (laneKey === "in_progress") return "bg-[var(--runs-lane-progress)]";
+  if (laneKey === "review") return "bg-[var(--runs-lane-review)]";
+  if (laneKey === "done") return "bg-[var(--runs-lane-done)]";
+  if (laneKey === "attention") return "bg-[var(--runs-lane-attention)]";
+  if (laneKey === "cancelled") return "bg-[var(--runs-lane-cancelled)]";
+  return "bg-[var(--runs-lane-todo)]";
 }
 
 function createTimeRangeFilter(start: string, end: string): RuntimeTaskTimeRangeFilter | undefined {

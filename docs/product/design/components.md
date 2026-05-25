@@ -22,7 +22,7 @@ App-owned wrappers:
 - `Pill`: normalized status/channel/runtime/assignee metadata chips. Use stable `data-pill-kind` and `data-pill-tone` attributes for harnesses. Compact card pills use a stable `h-6` hit/readability box with `leading-4` so labels do not look clipped.
 - `StatusBadge`: product status wrapper over `Pill`; use it instead of hand-colored badges.
 - `SpotlightSurface`: click/hover surface for Runs task cards. It composes shadcn-style card surfaces with a scoped cursor-following glow, `data-surface="spotlight-card"`, and `data-spotlight="task-card"`; reduced motion must keep the card readable without requiring movement. Runs task hover stays subtle: one-pixel lift, restrained `0 10px 24px` shadow, and a small local glow.
-- `DetailSurface`: shadcn Dialog-backed detail card for task, operation, notification, and other focused object details. Runs task details use `data-surface="task-detail"`, `data-depth="modal-3d"`, and `data-layout="task-detail-simple"`. DialogContent remains the accessible centered positioning layer; 3D transform belongs to an internal `data-depth-plane` visual layer. Close controls must live inside that plane so the whole visible card, including close affordance, moves as one surface.
+- `DetailSurface`: shadcn Dialog-backed detail card for task, operation, notification, and other focused object details. Runs task details use `data-surface="task-detail"`, `data-depth="modal-3d"`, and `data-layout="task-detail-simple"`. DialogContent remains the accessible centered positioning layer; 3D transform belongs to an internal `data-depth-plane` visual layer. Close controls must live inside that plane so the whole visible card, including close affordance, moves as one surface. Detail overlays may use a very light `2px` backdrop blur plus dimming to separate the focused card without obscuring the underlying board.
 - Console Workbar: the sticky top strip for page title/summary on the left and utility icons/refresh on the right.
 
 ## Buttons
@@ -70,7 +70,7 @@ App-owned wrappers:
 - Detail panels are document-like, with a clear title, summary, status badges, and ordered metadata.
 - Detail text uses Sans; technical values and timestamps can use Mono.
 - Do not repeat data already obvious in the surrounding list unless it helps orientation.
-- Object details that are opened from a card/list use `DetailSurface` dialogs. Dialog overlays must not blur the page; background dimming is enough.
+- Object details that are opened from a card/list use `DetailSurface` dialogs. Dialog overlays use only light dimming plus a restrained `2px` backdrop blur; stronger blur or frosted panels are not allowed.
 - Runs task details are not raw field stacks. The header title is only truncated `userMessage`; the body has exactly three designed blocks: task information (`发起人`、`承接 Agent`、`更新时间`、`渠道`), user message, and Agent reply. Do not repeat status, channel, or Agent in the header, and do not show execution association, source summary, adapter evidence, or raw IDs.
 
 ## Utility Drawers

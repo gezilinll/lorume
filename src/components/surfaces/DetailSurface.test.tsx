@@ -22,7 +22,8 @@ describe("DetailSurface", () => {
     expect(dialog).toHaveAttribute("data-surface", "detail");
     expect(dialog).toHaveAttribute("data-intensity", "focus");
     expect(dialog).toHaveClass("motion-reduce:transform-none");
-    expect(document.querySelector("[data-slot='dialog-overlay']")).not.toHaveClass("supports-backdrop-filter:backdrop-blur-xs");
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toHaveClass("backdrop-blur-[2px]");
+    expect(screen.getByText("任务详情").closest("[data-slot='dialog-title']")).toHaveClass("leading-6");
     expect(screen.getByText("进行中 · DingTalk")).toBeInTheDocument();
     expect(screen.getByText("任务上下文")).toBeInTheDocument();
     expect(screen.getByText("承接 Agent: main")).toBeInTheDocument();

@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { AuthLayout } from "./AuthLayout";
 import { PixelBadge } from "./PixelBadge";
 import { PixelButton } from "./PixelButton";
 import { PixelField } from "./PixelField";
 import { PixelLogo } from "./PixelLogo";
 import { PixelPanel } from "./PixelPanel";
 import { AuthOperationsPreview } from "../auth/auth-preview";
+import { AuthPageShell } from "../auth/AuthPageShell";
 
 describe("Glacier Premium Precision UI primitives", () => {
   it("renders the pixel logo with an accessible brand label", () => {
@@ -79,27 +79,32 @@ describe("Glacier Premium Precision UI primitives", () => {
     expect(screen.getByText("在线")).toHaveClass("pixel-badge--success");
   });
 
-  it("renders operational preview icons from the shared pixel icon system", () => {
-    render(<AuthOperationsPreview />);
+  it("renders operational preview without legacy pixel icons", () => {
+    const { container } = render(<AuthOperationsPreview />);
 
-    expect(screen.getByLabelText("运营概览").querySelector('[data-pixel-icon="server"]')).toBeInTheDocument();
-    expect(screen.getByLabelText("运营概览").querySelector('[data-pixel-icon="chart"]')).toBeInTheDocument();
-    expect(screen.getByLabelText("运营概览").querySelector('[data-pixel-icon="shield"]')).toBeInTheDocument();
+    expect(screen.getByLabelText("运营概览")).toBeInTheDocument();
+    expect(screen.getByText("在线")).toBeInTheDocument();
+    expect(screen.getByText("工作中")).toBeInTheDocument();
+    expect(screen.getByText("健康")).toBeInTheDocument();
+    expect(container.querySelectorAll(".auth-preview__status")).toHaveLength(3);
+    expect(container.querySelector("[data-pixel-icon]")).not.toBeInTheDocument();
   });
 
   it("composes an auth layout with brand, content, preview, and notice regions", () => {
-    render(
-      <AuthLayout
+    const { container } = render(
+      <AuthPageShell
         title="登录 Lorume"
         subtitle="使用团队邮箱接收验证码"
         preview={<div>Runtime Fleet</div>}
         notice="登录后可统一管理组织内 Device、Runtime、Agent 与会话任务。"
       >
         <PixelButton>继续</PixelButton>
-      </AuthLayout>,
+      </AuthPageShell>,
     );
 
     expect(screen.getByRole("banner")).toContainElement(screen.getByLabelText("Lorume"));
+    expect(container.querySelector(".auth-page-shell__card")).toBeInTheDocument();
+    expect(container.querySelector(".auth-page-shell__card-content")).toBeInTheDocument();
     expect(screen.queryByTestId("auth-pixel-decorations")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.getByText("Runtime Fleet")).toBeInTheDocument();

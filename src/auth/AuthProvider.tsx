@@ -5,7 +5,7 @@ import { CreateOrganizationPage } from "./CreateOrganizationPage";
 import { InviteJoinPage } from "./InviteJoinPage";
 import { LoginPage } from "./LoginPage";
 import { VerifyCodePage } from "./VerifyCodePage";
-import { AuthLayout } from "../ui/AuthLayout";
+import { AuthPageShell } from "./AuthPageShell";
 
 export interface AuthContextValue {
   logout: () => Promise<void>;
@@ -66,9 +66,9 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
 
   if (isLoading) {
     return (
-      <AuthLayout title="连接 Lorume" subtitle="正在确认当前会话，请稍等片刻。">
+      <AuthPageShell title="连接 Lorume" subtitle="正在确认当前会话，请稍等片刻。">
         <p className="auth-copy">加载中...</p>
-      </AuthLayout>
+      </AuthPageShell>
     );
   }
 

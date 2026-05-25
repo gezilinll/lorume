@@ -334,7 +334,7 @@
   max-width: 1440px;
 }
 
-.auth-layout__card .pixel-panel__inner {
+.auth-page-shell__card {
   min-height: 470px;
 }
 
@@ -431,6 +431,10 @@
   min-width: 0;
 }
 
+.auth-preview__status {
+  justify-self: end;
+}
+
 .auth-preview__row h2 {
   font-size: 20px;
   margin: 0 0 var(--lorume-space-1);
@@ -478,18 +482,6 @@
   color: var(--lorume-color-blue-dark);
   height: 28px;
   width: 28px;
-}
-
-.auth-preview__icon--server .auth-preview__iconSvg {
-  color: var(--lorume-color-blue-dark);
-}
-
-.auth-preview__icon--chart .auth-preview__iconSvg {
-  color: var(--lorume-color-blue-dark);
-}
-
-.auth-preview__icon--shield .auth-preview__iconSvg {
-  color: var(--lorume-color-green);
 }
 
 .auth-layout__notice {
@@ -755,7 +747,7 @@
     margin-top: 32px;
   }
 
-  .auth-layout__card .pixel-panel__inner {
+  .auth-page-shell__card {
     min-height: auto;
   }
 
@@ -763,7 +755,7 @@
     grid-template-columns: 72px minmax(0, 1fr);
   }
 
-  .auth-preview__row .pixel-badge {
+  .auth-preview__status {
     grid-column: 2;
     justify-self: start;
   }

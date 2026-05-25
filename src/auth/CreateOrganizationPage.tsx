@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { AuthLayout } from "../ui/AuthLayout";
-import { PixelButton } from "../ui/PixelButton";
-import { PixelField } from "../ui/PixelField";
+import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { AuthPageShell } from "./AuthPageShell";
 import { AuthOperationsPreview } from "./auth-preview";
 
 interface CreateOrganizationPageProps {
@@ -17,44 +18,48 @@ export function CreateOrganizationPage({ error, onSubmit }: CreateOrganizationPa
   const effectiveSlug = slug || suggestedSlug;
 
   return (
-    <AuthLayout
+    <AuthPageShell
       title="创建组织"
       subtitle="先创建一个组织空间，再注册设备、分配成员并管理 Agent 运行资产。"
       preview={<AuthOperationsPreview />}
       notice="组织是 Lorume 权限、邀请、设备 token 与运行资产的管理边界。"
     >
       <form
-        className="auth-form"
+        className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
           setIsSubmitting(true);
           void onSubmit({ name, slug: effectiveSlug }).finally(() => setIsSubmitting(false));
         }}
       >
-        <PixelField
-          icon="blocks"
-          label="组织名称"
-          name="organization-name"
-          placeholder="例如：增长工程组"
-          value={name}
-          onChange={(event) => setName(event.currentTarget.value)}
-          required
-        />
-        <PixelField
-          icon="terminal"
-          label="组织标识"
-          name="organization-slug"
-          placeholder="growth-eng"
-          value={effectiveSlug}
-          onChange={(event) => setSlug(event.currentTarget.value)}
-          required
-        />
-        <PixelButton type="submit" disabled={isSubmitting}>
+        <Field>
+          <FieldLabel htmlFor="organization-name">组织名称</FieldLabel>
+          <Input
+            id="organization-name"
+            name="organization-name"
+            placeholder="例如：增长工程组"
+            value={name}
+            onChange={(event) => setName(event.currentTarget.value)}
+            required
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="organization-slug">组织标识</FieldLabel>
+          <Input
+            id="organization-slug"
+            name="organization-slug"
+            placeholder="growth-eng"
+            value={effectiveSlug}
+            onChange={(event) => setSlug(event.currentTarget.value)}
+            required
+          />
+        </Field>
+        <Button className="w-full" type="submit" disabled={isSubmitting}>
           创建并进入
-        </PixelButton>
+        </Button>
       </form>
       {error ? <p className="auth-error" role="alert">{error}</p> : null}
-    </AuthLayout>
+    </AuthPageShell>
   );
 }
 

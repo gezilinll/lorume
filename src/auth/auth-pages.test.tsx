@@ -25,13 +25,11 @@ describe("auth pages", () => {
       return jsonResponse({ error: "unexpected request" }, 500);
     }) as unknown as typeof fetch;
 
-    const { container } = render(<App runtimeMode="production" />);
+    render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送验证码" })).toBeEnabled();
-    expect(screen.queryByTestId("auth-pixel-decorations")).not.toBeInTheDocument();
-    expect(container.querySelector("[data-pixel-icon]")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "运行资产" })).not.toBeInTheDocument();
     expect(requests).toEqual(["/api/me"]);
   });

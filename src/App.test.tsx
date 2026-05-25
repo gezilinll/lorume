@@ -176,7 +176,6 @@ describe("Console shell", () => {
 
     expect(screen.getByRole("heading", { name: /Lorume/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "进入控制台" })).toHaveAttribute("href", "/login");
-    expect(screen.queryByTestId("home-pixel-decorations")).not.toBeInTheDocument();
     const capabilities = screen.getByRole("region", { name: "当前已实现能力" });
     expect(capabilities).toBeInTheDocument();
     expect(within(capabilities).getByText("Runtime Fleet")).toBeInTheDocument();
@@ -480,7 +479,7 @@ describe("Console shell", () => {
 
     expect(await screen.findByRole("button", { name: /First backend task/ })).toBeInTheDocument();
     expect(screen.getByText("已显示 1 / 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "加载更多" }).closest(".workLaneItems")).not.toBeNull();
+    expect(within(screen.getByRole("region", { name: "进行中泳道" })).getByRole("button", { name: "加载更多" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "加载更多" }));
 
     expect(await screen.findByRole("button", { name: /Second backend task/ })).toBeInTheDocument();

@@ -15,7 +15,7 @@ Lorume should feel like a calm control plane for an Agent Network:
 
 ## Core Ingredients
 
-- Cool white and glacier-gray backgrounds.
+- Cool white and pale gray backgrounds.
 - Low-contrast grid texture that never competes with text.
 - Hairline borders and subtle elevation instead of hard black outlines.
 - Cobalt action blue for primary operations.

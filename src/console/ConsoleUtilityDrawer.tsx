@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { PixelIcon } from "../ui/PixelIcon";
+import { Activity, Mail } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export type ConsoleUtilityView = "operations" | "notifications";
 
@@ -133,29 +134,40 @@ export function ConsoleUtilityBar({ activeView, organizationId, utilityDataEnabl
     };
   }, [organizationId, utilityDataEnabled]);
 
+  const utilityButtonClass =
+    "inline-flex h-9 items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-foreground transition-colors hover:border-primary/25 hover:bg-card hover:shadow-sm";
+  const utilityButtonActiveClass = "border-primary/25 bg-card shadow-sm";
+
   return (
-    <div className="consoleUtilityBar" aria-label="控制台工具">
+    <div
+      className="fixed right-4 top-4 z-40 flex items-center gap-2 rounded-full border border-border bg-background/80 p-1.5 shadow-sm backdrop-blur sm:right-6 sm:top-5"
+      aria-label="控制台工具"
+    >
       <button
         aria-label={`任务 ${operationCount}`}
         aria-expanded={activeView === "operations"}
-        className={activeView === "operations" ? "consoleUtilityButton consoleUtilityButtonActive" : "consoleUtilityButton"}
+        className={cn(utilityButtonClass, activeView === "operations" && utilityButtonActiveClass)}
         type="button"
         onClick={() => onOpen("operations")}
       >
-        <PixelIcon name="activity" size={14} />
+        <Activity aria-hidden="true" size={14} />
         <span>任务</span>
-        <strong className="consoleUtilityCount">{operationCount}</strong>
+        <strong className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-primary/20 bg-primary/10 px-1.5 font-mono text-[11px] font-bold text-primary">
+          {operationCount}
+        </strong>
       </button>
       <button
         aria-label={`通知 ${notificationCount}`}
         aria-expanded={activeView === "notifications"}
-        className={activeView === "notifications" ? "consoleUtilityButton consoleUtilityButtonActive" : "consoleUtilityButton"}
+        className={cn(utilityButtonClass, activeView === "notifications" && utilityButtonActiveClass)}
         type="button"
         onClick={() => onOpen("notifications")}
       >
-        <PixelIcon name="mail" size={14} />
+        <Mail aria-hidden="true" size={14} />
         <span>通知</span>
-        <strong className="consoleUtilityCount">{notificationCount}</strong>
+        <strong className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-primary/20 bg-primary/10 px-1.5 font-mono text-[11px] font-bold text-primary">
+          {notificationCount}
+        </strong>
       </button>
     </div>
   );

@@ -1,8 +1,5 @@
 @import "tailwindcss";
 @import "shadcn/tailwind.css";
-/* Transitional legacy layers for existing pages until migrations remove these sheets. */
-@import "./ui/tokens.css";
-@import "./styles.css";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
 

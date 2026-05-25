@@ -18,7 +18,7 @@ export function InviteJoinPage({ error, onSkip, onSubmit, session }: InviteJoinP
       preview={<AuthOperationsPreview />}
       notice="邀请链接只决定加入哪个组织，真正的身份仍以邮箱验证码登录结果为准。"
     >
-      <div className="auth-form">
+      <div className="grid gap-4">
         <Button type="button" onClick={() => void onSubmit()}>
           加入并进入
         </Button>
@@ -26,7 +26,11 @@ export function InviteJoinPage({ error, onSkip, onSubmit, session }: InviteJoinP
           暂不加入
         </Button>
       </div>
-      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      {error ? (
+        <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
     </AuthPageShell>
   );
 }

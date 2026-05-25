@@ -23,7 +23,3 @@ Lorume uses shadcn/ui as the frontend design-system foundation. shadcn-generated
 ## Theming
 
 `src/index.css` owns shadcn semantic tokens such as `background`, `foreground`, `card`, `primary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, `chart-*`, and `sidebar-*`. Product components should consume these through Tailwind utilities such as `bg-background`, `text-foreground`, `border-border`, and `text-muted-foreground`.
-
-## Migration Rule
-
-The legacy `src/ui/Pixel*` primitives and `src/ui/tokens.css` are retired. New work must not import them. Existing imports may remain only until their scheduled migration task removes them.

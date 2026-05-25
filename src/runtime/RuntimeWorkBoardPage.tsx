@@ -371,7 +371,7 @@ export function RuntimeWorkBoardPage() {
                   <span className="text-xs text-muted-foreground">{lane.items.length} / {laneStates[lane.status].total}</span>
                 </div>
                 <ScrollArea className="h-[32rem]">
-                  <div className="workLaneItems space-y-3 p-3">
+                  <div className="grid min-w-0 content-start gap-3 p-3">
                     {lane.items.length ? (
                       lane.items.map((item) => (
                         <TaskCard

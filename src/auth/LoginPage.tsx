@@ -48,7 +48,7 @@ export function LoginPage({ error, onSubmit }: LoginPageProps) {
         </Button>
       </form>
       <AuthError error={error} />
-      <CardDescription className="auth-copy">
+      <CardDescription className="text-sm leading-6 text-muted-foreground">
         未加入组织？请联系管理员发送邀请链接。
       </CardDescription>
     </AuthPageShell>
@@ -56,5 +56,9 @@ export function LoginPage({ error, onSubmit }: LoginPageProps) {
 }
 
 function AuthError({ error }: { error?: string | null }) {
-  return error ? <p className="auth-error" role="alert">{error}</p> : null;
+  return error ? (
+    <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+      {error}
+    </p>
+  ) : null;
 }

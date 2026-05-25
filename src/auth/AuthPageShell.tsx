@@ -13,35 +13,37 @@ interface AuthPageShellProps {
 
 export function AuthPageShell({ children, notice, preview, subtitle, title }: AuthPageShellProps) {
   return (
-    <div className="auth-layout">
-      <header className="auth-layout__header">
-        <LorumeLogo />
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="mx-auto flex h-20 w-full max-w-6xl items-center px-4 sm:px-6">
+        <LorumeLogo className="text-lg" />
       </header>
-      <main className="auth-layout__main">
-        <Card className="auth-page-shell__card auth-layout__card auth-layout__login-card mx-auto w-full max-w-md">
+      <main className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] lg:items-start">
+        <Card className="mx-auto min-h-0 w-full max-w-md lg:min-h-[29rem]">
           <CardHeader>
             <CardTitle>
-              <h1 className="auth-layout__title">{title}</h1>
+              <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">{title}</h1>
             </CardTitle>
-            <p className="auth-layout__subtitle">{subtitle}</p>
+            <p className="border-b border-border pb-5 text-sm leading-6 text-muted-foreground">{subtitle}</p>
           </CardHeader>
-          <CardContent className="auth-page-shell__card-content auth-layout__content">{children}</CardContent>
+          <CardContent className="grid gap-5">{children}</CardContent>
         </Card>
         {preview ? (
-          <Card className="auth-page-shell__card auth-layout__card auth-layout__preview">
-            <CardContent className="auth-page-shell__card-content">{preview}</CardContent>
+          <Card className="min-h-0 lg:min-h-[29rem]">
+            <CardContent>{preview}</CardContent>
           </Card>
         ) : null}
       </main>
       {notice ? (
-        <div className="auth-layout__notice">
-          <span className="auth-layout__noticeIcon" aria-hidden="true">
+        <div className="mx-auto mt-4 flex w-[calc(100%-2rem)] max-w-3xl items-center gap-3 rounded-full border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm sm:w-full">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary" aria-hidden="true">
             <Info className="size-5" />
           </span>
           <span>{notice}</span>
         </div>
       ) : null}
-      <footer className="auth-layout__footer">© 2026 Lorume. All rights reserved.</footer>
+      <footer className="flex min-h-16 items-center justify-center px-4 text-xs text-muted-foreground">
+        © 2026 Lorume. All rights reserved.
+      </footer>
     </div>
   );
 }

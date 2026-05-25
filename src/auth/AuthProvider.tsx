@@ -67,7 +67,7 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
   if (isLoading) {
     return (
       <AuthPageShell title="连接 Lorume" subtitle="正在确认当前会话，请稍等片刻。">
-        <p className="auth-copy">加载中...</p>
+        <p className="text-sm leading-6 text-muted-foreground">加载中...</p>
       </AuthPageShell>
     );
   }

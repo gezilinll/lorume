@@ -44,7 +44,7 @@ export function VerifyCodePage({ email, error, onBack, onSubmit }: VerifyCodePag
             required
           />
         </Field>
-        <div className="auth-actions">
+        <div className="flex flex-wrap gap-3">
           <Button type="submit" disabled={isSubmitting}>
             进入控制台
           </Button>
@@ -53,7 +53,11 @@ export function VerifyCodePage({ email, error, onBack, onSubmit }: VerifyCodePag
           </Button>
         </div>
       </form>
-      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      {error ? (
+        <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
     </AuthPageShell>
   );
 }

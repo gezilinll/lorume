@@ -6,7 +6,7 @@ Lorume icons, logo, and decorative assets must use a unified modern visual weigh
 
 - Product icons use `lucide-react`. Do not add ad hoc SVG icons in page components when a lucide icon exists.
 - Do not mix icon libraries, text symbols, ad hoc SVGs, and different stroke weights on one page.
-- Icons should feel simple, modern, and operational; they should not rely on retro pixel-grid styling.
+- Icons should feel simple, modern, and operational; they should avoid retro grid styling.
 
 ## Brand Mark
 

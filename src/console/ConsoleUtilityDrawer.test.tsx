@@ -42,7 +42,7 @@ describe("ConsoleUtilityDrawer", () => {
     expect(screen.getByRole("button", { name: "通知 0" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("shows operations as a right-side drawer with selectable details", async () => {
+  it("shows operations in a narrow list drawer and opens item details in a dialog", async () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = input.toString();
       if (url.includes("/api/operations")) {
@@ -74,20 +74,23 @@ describe("ConsoleUtilityDrawer", () => {
     );
 
     const drawer = screen.getByRole("dialog", { name: "Operations" });
+    expect(drawer).toHaveClass("sm:!max-w-md");
+    expect(document.querySelector("[data-slot='sheet-overlay']")).not.toHaveClass("supports-backdrop-filter:backdrop-blur-xs");
     expect(screen.queryByRole("tablist", { name: "工具切换" })).not.toBeInTheDocument();
     expect(within(drawer).getByRole("button", { name: /关闭|Close/i })).toBeInTheDocument();
     expect(within(drawer).getByRole("heading", { name: "Operations" })).toBeInTheDocument();
     const operation = await within(drawer).findByRole("button", { name: /发送通知/ });
-    expect(operation).toHaveAttribute("aria-current", "true");
+    expect(operation).toHaveAttribute("aria-haspopup", "dialog");
+    expect(within(drawer).queryByRole("heading", { name: "发送通知" })).not.toBeInTheDocument();
 
     await userEvent.click(operation);
 
-    expect(operation).toHaveAttribute("aria-current", "true");
-    expect(within(drawer).getByRole("heading", { name: "发送通知" })).toBeInTheDocument();
-    expect(within(drawer).getByText("目标: notification_thread · thread_1")).toBeInTheDocument();
+    const detailDialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(within(detailDialog).getByRole("heading", { name: "发送通知" })).toBeInTheDocument();
+    expect(within(detailDialog).getByText("目标: notification_thread · thread_1")).toBeInTheDocument();
   });
 
-  it("marks notification threads as read when selected from the drawer", async () => {
+  it("marks notification threads as read and opens details in a dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input, init) => {
       const url = input.toString();
@@ -113,19 +116,23 @@ describe("ConsoleUtilityDrawer", () => {
     );
 
     const drawer = screen.getByRole("dialog", { name: "Notifications" });
+    expect(drawer).toHaveClass("sm:!max-w-md");
+    expect(document.querySelector("[data-slot='sheet-overlay']")).not.toHaveClass("supports-backdrop-filter:backdrop-blur-xs");
     expect(within(drawer).getByRole("button", { name: /关闭|Close/i })).toBeInTheDocument();
     const notification = await within(drawer).findByRole("button", { name: /通知已排队/ });
     expect(within(notification).getByText("未读")).toBeInTheDocument();
+    expect(notification).toHaveAttribute("aria-haspopup", "dialog");
+    expect(within(drawer).queryByRole("heading", { name: "通知已排队" })).not.toBeInTheDocument();
 
     await user.click(notification);
 
-    expect(notification).toHaveAttribute("aria-current", "true");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/notifications/thread_1/read",
       expect.objectContaining({ method: "POST" }),
     ));
     expect(within(notification).getByText("已读")).toBeInTheDocument();
-    expect(within(drawer).getByRole("heading", { name: "通知已排队" })).toBeInTheDocument();
+    const detailDialog = await screen.findByRole("dialog", { name: "通知详情" });
+    expect(within(detailDialog).getByRole("heading", { name: "通知已排队" })).toBeInTheDocument();
   });
 });
 

@@ -26,6 +26,9 @@
 - 优先动画 opacity 和 transform。
 - 不随意动画 width、height、top、left、margin 等布局属性。
 - 动效不能导致列表、看板或详情面板重排抖动。
+- Runs 任务卡使用 card-16-like spotlight hover，强度必须低于品牌展示页，且只能帮助识别可点击对象。任务卡 hover 参数以 `translateY(-1px)`、`0 10px 24px rgba(15, 23, 42, 0.075)` 和局部 `76px` primary glow 为上限；channel pill 不得被 hover 容器裁切。
+- DetailSurface 可使用 pointer-driven 3D 浮层，但 3D 应作用在内部可视卡片层，不作用在 Radix DialogContent 定位层。详情卡旋转上限为 `6deg`，缩放上限为 `1.015`，使用 `perspective(1000px)`，不做夸张旋转或从右下角进入的位移动画。
+- Utility drawer、Dialog、Popover 的进入退出保持短促，不使用背景 blur 或大幅位移。
 
 ## Reduced Motion
 

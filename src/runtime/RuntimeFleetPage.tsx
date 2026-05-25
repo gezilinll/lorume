@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Copy, Cpu, Monitor, RefreshCw, Server } from "lucide-react";
+import { Bot, Copy, Cpu, Monitor, Server } from "lucide-react";
 import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { Pill } from "@/components/data/Pill";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,10 +14,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { MetricCard } from "@/components/data/MetricCard";
 import { StatusBadge as AppStatusBadge } from "@/components/data/StatusBadge";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { cn } from "@/lib/utils";
+import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
+import { toast } from "sonner";
 import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
@@ -29,7 +28,6 @@ import {
   runtimeFleetSnapshotFromQueryResponse,
   runtimeFleetStatusFromDeviceHealth,
   runtimeKindLabels,
-  summarizeRuntimeFleet,
   type RuntimeFleetDetail,
   type RuntimeFleetObjectStatus,
   type RuntimeFleetSnapshot,
@@ -85,6 +83,7 @@ export function RuntimeFleetPage() {
     snapshot: null,
     status: "idle",
   });
+  const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   async function fetchLatestSnapshot(): Promise<RuntimeFleetSnapshot | null> {
     const queryResponse = await fetch(new URL("/api/runtime-fleet", window.location.origin));
@@ -199,7 +198,6 @@ export function RuntimeFleetPage() {
     () => new Map(deviceDiagnostics.map((diagnostic) => [diagnostic.deviceId, diagnostic])),
     [deviceDiagnostics],
   );
-  const summary = useMemo(() => summarizeRuntimeFleet(snapshot), [snapshot]);
   const detail = selection
     ? getRuntimeFleetDetail(
       snapshot,
@@ -209,6 +207,32 @@ export function RuntimeFleetPage() {
       deviceDiagnosticsByDeviceId,
     )
     : null;
+
+  useConsoleWorkbar({
+    meta: (
+      <>
+        <span>{snapshot.summary.deviceCount} 设备</span>
+        <span>{snapshot.summary.runtimeCount} Runtime</span>
+        <span>{snapshot.summary.agentCount} Agent</span>
+        {lastLoadedAt ? <span>更新 {formatRuntimeTimestamp(lastLoadedAt)}</span> : null}
+      </>
+    ),
+    refresh: {
+      disabled: isLoading,
+      isLoading,
+      label: "刷新",
+      onClick: () => {
+        void loadLatestRuntimeFleet();
+      },
+    },
+    title: "运行资产",
+  }, [
+    isLoading,
+    lastLoadedAt,
+    snapshot.summary.agentCount,
+    snapshot.summary.deviceCount,
+    snapshot.summary.runtimeCount,
+  ]);
 
   async function fetchAgentSkillProbe(agentId: string): Promise<AgentSkillProbeSnapshot> {
     const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/skill-probe`);
@@ -245,42 +269,28 @@ export function RuntimeFleetPage() {
   }
 
   return (
-    <section className="space-y-6">
-      <PageHeader
-        eyebrow="Runtime / Device / Agent"
-        title="运行资产"
-        description={(
-          <div className="space-y-1">
-            <p>查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。</p>
-            {lastLoadedAt ? <p>上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p> : null}
-          </div>
-        )}
-        actions={(
+    <section className="min-w-0">
+      {hasConsoleWorkbar ? null : (
+        <>
+          <h1 className="sr-only">运行资产</h1>
           <Button
-            type="button"
-            variant="outline"
+            className="sr-only"
             disabled={isLoading}
+            type="button"
+            variant="ghost"
             onClick={() => {
               void loadLatestRuntimeFleet();
             }}
           >
-            <RefreshCw aria-hidden="true" className={cn("size-4", isLoading && "animate-spin")} />
             刷新
           </Button>
-        )}
-      />
-
+        </>
+      )}
       {loadError ? (
         <Alert variant="destructive">
           <AlertDescription>{loadError}</AlertDescription>
         </Alert>
       ) : null}
-
-      <section className="grid gap-3 sm:grid-cols-3" aria-label="运行资产概览">
-        <MetricCard icon={<Server aria-hidden="true" className="size-5" />} label="设备" value={summary.devices} />
-        <MetricCard icon={<Cpu aria-hidden="true" className="size-5" />} label="Runtime" value={summary.runtimes} />
-        <MetricCard icon={<Bot aria-hidden="true" className="size-5" />} label="Agent" value={summary.agents} />
-      </section>
 
       {isLoading && !allowFixtureFallback && snapshot.devices.length === 0 ? (
         <RuntimeFleetSkeleton />
@@ -459,7 +469,6 @@ function DevicePanel({
       <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
           <CardTitle>设备</CardTitle>
-          <p className="text-sm text-muted-foreground">{devices.length} 台已注册设备</p>
         </div>
         <Server aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -525,7 +534,6 @@ function RuntimeTable({
       <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
           <CardTitle>Runtime</CardTitle>
-          <p className="text-sm text-muted-foreground">{runtimes.length} 个已采集 Runtime</p>
         </div>
         <Cpu aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -562,7 +570,7 @@ function RuntimeTable({
                   >
                     <TableCell className="min-w-44 font-medium">{runtime.name}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{runtimeKindLabels[runtime.kind]}</Badge>
+                      <Pill kind="runtime" tone="muted">{runtimeKindLabels[runtime.kind]}</Pill>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {deviceById.get(runtime.deviceId)?.id ?? runtime.deviceId}
@@ -608,7 +616,6 @@ function AgentTable({
       <CardHeader className="grid-cols-[1fr_auto] items-start">
         <div>
           <CardTitle>Agent</CardTitle>
-          <p className="text-sm text-muted-foreground">{agents.length} 个已采集 Agent</p>
         </div>
         <Bot aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -623,7 +630,7 @@ function AgentTable({
                 <TableHead>归属 Runtime</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>最近同步</TableHead>
-                <TableHead className="text-right">Skill</TableHead>
+                <TableHead className="w-24 text-right">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -654,7 +661,7 @@ function AgentTable({
                     <TableCell className="text-muted-foreground">
                       {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="w-24 text-right">
                       <Button
                         aria-label={`${agent.name} Skill 探测`}
                         size="sm"
@@ -688,12 +695,6 @@ function RuntimeDetail({
   skillProbeState: AgentSkillProbeViewState;
   onRefreshSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
-  const [copiedObjectId, setCopiedObjectId] = useState("");
-
-  useEffect(() => {
-    setCopiedObjectId("");
-  }, [detail?.id]);
-
   if (!detail) {
     return (
       <aside aria-label="运行资产详情" className="self-start xl:sticky xl:top-4">
@@ -728,7 +729,7 @@ function RuntimeDetail({
                 variant="outline"
                 onClick={() => {
                   void copyTextToClipboard(detail.id).then((copied) => {
-                    if (copied) setCopiedObjectId(detail.id);
+                    if (copied) toast.success("已复制");
                   });
                 }}
               >
@@ -737,7 +738,6 @@ function RuntimeDetail({
               </Button>
             </div>
           </div>
-          {copiedObjectId === detail.id ? <p className="text-xs text-muted-foreground">已复制</p> : null}
         </CardHeader>
         <CardContent className="space-y-4">
           <DetailBlock title="概览">{detail.subtitle}</DetailBlock>

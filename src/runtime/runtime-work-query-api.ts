@@ -67,9 +67,12 @@ export interface RuntimeTaskBoardItem extends Task {
   requestExcerpt: string;
 }
 
+export type RuntimeTaskBoardLaneKey = "todo" | "in_progress" | "review" | "done" | "attention" | "cancelled";
+
 export interface RuntimeTaskBoardLane {
-  status: TaskStatus;
+  key: RuntimeTaskBoardLaneKey;
   label: string;
+  statuses: TaskStatus[];
   items: RuntimeTaskBoardItem[];
 }
 
@@ -95,6 +98,19 @@ export const taskStatusLabels: Record<TaskStatus, string> = {
   cancelled: "已取消",
   unknown: "未知",
 };
+
+export const runtimeTaskBoardLaneDefinitions: Array<{
+  key: RuntimeTaskBoardLaneKey;
+  label: string;
+  statuses: TaskStatus[];
+}> = [
+  { key: "todo", label: "待处理", statuses: ["todo"] },
+  { key: "in_progress", label: "进行中", statuses: ["in_progress"] },
+  { key: "review", label: "待验收", statuses: ["review"] },
+  { key: "done", label: "已完成", statuses: ["done"] },
+  { key: "attention", label: "需关注", statuses: ["failed", "unknown"] },
+  { key: "cancelled", label: "已取消", statuses: ["cancelled"] },
+];
 
 /** Create the formal backend query URL for Runtime Tasks. */
 export function createTasksQueryUrl(
@@ -151,10 +167,9 @@ export function createRuntimeTaskBoard(
     matchesTimeRange(task, filters.timeRange)
   );
   const visibleItems = visibleTasks.map(taskBoardItem);
-  const lanes = TASK_STATUSES.map((status) => ({
-    items: visibleItems.filter((item) => item.status === status),
-    label: taskStatusLabels[status],
-    status,
+  const lanes = runtimeTaskBoardLaneDefinitions.map((lane) => ({
+    ...lane,
+    items: visibleItems.filter((item) => lane.statuses.includes(item.status)),
   }));
   const summary = backendSummary ?? countTasksByStatus(tasks);
   return {

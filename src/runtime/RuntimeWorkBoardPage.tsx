@@ -1,29 +1,27 @@
-import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Filter, Search, X } from "lucide-react";
 import fleetFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
-import { EmptyState } from "@/components/data/EmptyState";
-import { MetricCard } from "@/components/data/MetricCard";
-import { StatusBadge } from "@/components/data/StatusBadge";
-import { PageHeader } from "@/components/layout/PageHeader";
+import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { RuntimeTaskCard } from "./RuntimeTaskCard";
+import { RuntimeTaskDetailDialog } from "./RuntimeTaskDetailDialog";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import {
   createRuntimeTaskBoard,
   createTasksQueryUrl,
+  runtimeTaskBoardLaneDefinitions,
   runtimeTasksQueryPageFromResponse,
-  taskStatusLabels,
   type RuntimeTaskBoardFilters,
   type RuntimeTaskBoardItem,
+  type RuntimeTaskBoardLane,
   type RuntimeTaskChannelKind,
   type RuntimeTaskChannelOption,
   type RuntimeTaskTimeRangeFilter,
@@ -32,12 +30,6 @@ import {
 import { createEmptyTaskStatusCounts, TASK_STATUSES, type Task, type TaskStatus, type TaskStatusCounts } from "./runtime-model";
 
 const autoRefreshIntervalMs = 30_000;
-const unlinkedExecutionLabel = "未关联执行";
-const statusOptions: Array<TaskStatus | "all"> = ["all", ...TASK_STATUSES];
-const statusLabels: Record<TaskStatus | "all", string> = {
-  all: "全部",
-  ...taskStatusLabels,
-};
 
 const fixtureTasks = runtimeTasksQueryPageFromResponse({
   items: (fleetFixture as { tasks?: unknown[] }).tasks ?? [],
@@ -76,20 +68,20 @@ export function RuntimeWorkBoardPage() {
   }>({ status: "idle", message: "" });
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<TaskStatus | "all">("all");
   const [channelKind, setChannelKind] = useState<RuntimeTaskChannelKind | "all">("all");
   const [timeStart, setTimeStart] = useState("");
   const [timeEnd, setTimeEnd] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailItem, setDetailItem] = useState<RuntimeTaskBoardItem | null>(null);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   const filters: RuntimeTaskBoardFilters = useMemo(
     () => ({
       channelKind,
       search,
-      status,
       timeRange: createTimeRangeFilter(timeStart, timeEnd),
     }),
-    [channelKind, search, status, timeEnd, timeStart],
+    [channelKind, search, timeEnd, timeStart],
   );
   const filtersKey = useMemo(() => createRuntimeTaskFiltersKey(filters), [filters]);
 
@@ -109,6 +101,7 @@ export function RuntimeWorkBoardPage() {
   }
 
   async function loadLatestTasks(options: { silent?: boolean } = {}) {
+    if (!options.silent) setRefreshState({ status: "running", message: "正在读取会话任务" });
     try {
       await loadTaskDashboard();
       if (!options.silent) setRefreshState({ status: "success", message: "已读取最新会话任务" });
@@ -124,7 +117,7 @@ export function RuntimeWorkBoardPage() {
 
   async function loadTaskDashboard(): Promise<void> {
     const overview = await fetchLatestTasks(filters, undefined, { limit: 1 });
-    const statusesToLoad = statusesForFilters(overview.summary, status);
+    const statusesToLoad = statusesForFilters(overview.summary);
     const lanePages = await Promise.all(
       statusesToLoad.map(async (laneStatus) => ({
         page: await fetchLatestTasks({ ...filters, status: laneStatus }, undefined, { limit: 50 }),
@@ -145,7 +138,7 @@ export function RuntimeWorkBoardPage() {
     async function loadTasksForFilters() {
       try {
         const overview = await fetchLatestTasks(filters, undefined, { limit: 1 });
-        const statusesToLoad = statusesForFilters(overview.summary, status);
+        const statusesToLoad = statusesForFilters(overview.summary);
         const lanePages = await Promise.all(
           statusesToLoad.map(async (laneStatus) => ({
             page: await fetchLatestTasks({ ...filters, status: laneStatus }, undefined, { limit: 50 }),
@@ -184,38 +177,78 @@ export function RuntimeWorkBoardPage() {
     }
   }, [channelKind, channelOptions]);
 
-  const visibleTasks = useMemo(() => flattenLaneTasks(laneStates, status), [laneStates, status]);
+  const visibleTasks = useMemo(() => flattenLaneTasks(laneStates), [laneStates]);
   const board = useMemo(() => createRuntimeTaskBoard(visibleTasks, filters, summary), [filters, summary, visibleTasks]);
-  const selectedItem = selectedId ? board.visibleItems.find((item) => item.id === selectedId) ?? null : board.visibleItems[0] ?? null;
   const displayedItems = board.visibleItems.length;
   const paginationMatchesFilters = loadedFiltersKey === filtersKey;
-  const displayedTotal = paginationMatchesFilters ? visibleTotal(laneStates, summary, status) : displayedItems;
+  const displayedTotal = paginationMatchesFilters ? visibleTotal(laneStates) : displayedItems;
+  const attentionCount = summary.failed + summary.unknown;
 
-  async function loadMoreTasks(laneStatus: TaskStatus) {
-    const lane = laneStates[laneStatus];
-    if (!lane.nextCursor || lane.loading || !paginationMatchesFilters) return;
+  useConsoleWorkbar({
+    meta: (
+      <>
+        <span>{displayedTotal} 任务</span>
+        <span>{summary.in_progress} 进行中</span>
+        <span>{attentionCount} 需关注</span>
+      </>
+    ),
+    refresh: {
+      isLoading: refreshState.status === "running",
+      label: "刷新",
+      onClick: () => {
+        void loadLatestTasks();
+      },
+    },
+    title: "Runs",
+  }, [attentionCount, displayedTotal, filtersKey, refreshState.status, summary.in_progress]);
+
+  async function loadMoreTasks(lane: RuntimeTaskBoardLane) {
+    const statusesToLoad = lane.statuses.filter((laneStatus) =>
+      laneStates[laneStatus].nextCursor && !laneStates[laneStatus].loading
+    );
+    if (!statusesToLoad.length || !paginationMatchesFilters) return;
     setLaneStates((current) => ({
       ...current,
-      [laneStatus]: { ...current[laneStatus], loading: true, error: undefined },
+      ...Object.fromEntries(
+        statusesToLoad.map((laneStatus) => [
+          laneStatus,
+          { ...current[laneStatus], loading: true, error: undefined },
+        ]),
+      ),
     }));
     try {
-      const page = await fetchLatestTasks({ ...filters, status: laneStatus }, lane.nextCursor, { limit: 50 });
+      const pages = await Promise.all(
+        statusesToLoad.map(async (laneStatus) => ({
+          page: await fetchLatestTasks({ ...filters, status: laneStatus }, laneStates[laneStatus].nextCursor, { limit: 50 }),
+          status: laneStatus,
+        })),
+      );
       setLaneStates((current) => ({
         ...current,
-        [laneStatus]: {
-          error: undefined,
-          loading: false,
-          nextCursor: page.nextCursor,
-          tasks: mergeTasks(current[laneStatus].tasks, page.tasks.filter((task) => task.status === laneStatus)),
-          total: page.total,
-        },
+        ...Object.fromEntries(
+          pages.map(({ page, status: laneStatus }) => [
+            laneStatus,
+            {
+              error: undefined,
+              loading: false,
+              nextCursor: page.nextCursor,
+              tasks: mergeTasks(current[laneStatus].tasks, page.tasks.filter((task) => task.status === laneStatus)),
+              total: page.total,
+            },
+          ]),
+        ),
       }));
       setRefreshState({ status: "success", message: "已加载更多会话任务" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载更多失败";
       setLaneStates((current) => ({
         ...current,
-        [laneStatus]: { ...current[laneStatus], error: message, loading: false },
+        ...Object.fromEntries(
+          statusesToLoad.map((laneStatus) => [
+            laneStatus,
+            { ...current[laneStatus], error: message, loading: false },
+          ]),
+        ),
       }));
       setRefreshState({
         status: "error",
@@ -225,46 +258,8 @@ export function RuntimeWorkBoardPage() {
   }
 
   return (
-    <section className="flex min-w-0 flex-col gap-6 overflow-x-hidden">
-      <PageHeader
-        eyebrow="Agent / Tasks"
-        title="Runs"
-        description={
-          <div className="space-y-1">
-            <p>会话任务</p>
-            <p>查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。</p>
-            {lastLoadedAt ? <p>上次刷新 {formatRuntimeTimestamp(lastLoadedAt)}</p> : null}
-          </div>
-        }
-        actions={
-          <div className="flex flex-col items-end gap-2">
-            <Button
-              className="gap-2"
-              type="button"
-              disabled={refreshState.status === "running"}
-              onClick={() => {
-                setRefreshState({ status: "running", message: "正在读取会话任务" });
-                void loadLatestTasks();
-              }}
-            >
-              <RefreshCw className={cn("size-4", refreshState.status === "running" && "animate-spin")} />
-              {refreshState.status === "running" ? "刷新中" : "刷新任务"}
-            </Button>
-            {refreshState.message ? (
-              <p
-                className={cn(
-                  "max-w-64 text-right text-xs",
-                  refreshState.status === "error" ? "text-destructive" : "text-muted-foreground",
-                )}
-                role="status"
-              >
-                {refreshState.message}
-              </p>
-            ) : null}
-          </div>
-        }
-      />
-
+    <section className="flex h-full min-w-0 flex-col gap-4 overflow-hidden" data-layout="runs-workspace">
+      {hasConsoleWorkbar ? null : <h1 className="sr-only">Runs</h1>}
       {refreshState.status === "error" ? (
         <Alert variant="destructive">
           <AlertTitle>读取会话任务失败</AlertTitle>
@@ -272,284 +267,195 @@ export function RuntimeWorkBoardPage() {
         </Alert>
       ) : null}
 
-      <section
-        className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-border bg-card p-3 md:grid-cols-[minmax(240px,1fr)_repeat(4,minmax(120px,auto))] md:items-end"
-        aria-label="会话任务筛选"
-      >
-        <div className="space-y-2">
-          <Label htmlFor="runs-search">搜索</Label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="runs-search"
-              className="pl-8"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索任务、消息、发起人、Agent 或会话/群组"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="runs-channel-filter">渠道</Label>
-          <Select
-            value={channelKind}
-            onValueChange={(value) => setChannelKind(value as RuntimeTaskChannelKind | "all")}
-          >
-            <SelectTrigger id="runs-channel-filter" className="w-full md:w-40" aria-label="渠道">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部</SelectItem>
-              {channelOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}（{option.count}）
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2 md:col-span-3">
-          <Label id="runs-status-filter-label">状态</Label>
-          <Tabs value={status} onValueChange={(value) => setStatus(value as TaskStatus | "all")}>
-            <TabsList
-              aria-labelledby="runs-status-filter-label"
-              className="grid h-auto w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-9"
-            >
-              {statusOptions.map((option) => (
-                <TabsTrigger key={option} value={option} className="h-7 text-xs" onClick={() => setStatus(option)}>
-                  {statusLabels[option]}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="runs-time-start">开始时间</Label>
+      <section className="flex min-w-0 items-center gap-2 rounded-[var(--radius)] border border-border bg-card p-2" aria-label="会话任务筛选">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            id="runs-time-start"
-            aria-label="开始时间"
-            type="datetime-local"
-            step={1}
-            value={timeStart}
-            onChange={(event) => setTimeStart(event.target.value)}
+            id="runs-search"
+            aria-label="搜索"
+            className="h-10 rounded-full border-border bg-background pl-9"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索任务、消息、发起人、Agent 或会话/群组"
           />
         </div>
+        <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+          <PopoverTrigger asChild>
+            <Button aria-label="筛选" variant="outline" size="icon-sm" type="button">
+              <Filter className="size-4" aria-hidden="true" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-4 p-3">
+            <div className="space-y-2">
+              <Label htmlFor="runs-channel-filter">渠道</Label>
+              <Select
+                value={channelKind}
+                onValueChange={(value) => setChannelKind(value as RuntimeTaskChannelKind | "all")}
+              >
+                <SelectTrigger id="runs-channel-filter" className="w-full" aria-label="渠道">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  {channelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}（{option.count}）
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>时间范围</Label>
+                {timeStart || timeEnd ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => {
+                      setTimeStart("");
+                      setTimeEnd("");
+                    }}
+                  >
+                    <X aria-hidden="true" className="size-3" />
+                    清除
+                  </Button>
+                ) : null}
+              </div>
+              <div className="grid gap-2">
+                <Input
+                  id="runs-time-start"
+                  aria-label="开始时间"
+                  type="datetime-local"
+                  step={1}
+                  value={timeStart}
+                  onChange={(event) => setTimeStart(event.target.value)}
+                />
+                <Input
+                  id="runs-time-end"
+                  aria-label="结束时间"
+                  type="datetime-local"
+                  step={1}
+                  value={timeEnd}
+                  onChange={(event) => setTimeEnd(event.target.value)}
+                />
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </section>
 
-        <div className="space-y-2">
-          <Label htmlFor="runs-time-end">结束时间</Label>
-          <Input
-            id="runs-time-end"
-            aria-label="结束时间"
-            type="datetime-local"
-            step={1}
-            value={timeEnd}
-            onChange={(event) => setTimeEnd(event.target.value)}
-          />
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+          <span>已显示 {displayedItems} / {displayedTotal}</span>
+          {lastLoadedAt ? <span className="hidden md:inline">更新 {formatRuntimeTimestamp(lastLoadedAt)}</span> : null}
         </div>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="任务概览">
-        <MetricCard label="任务" value={board.summary.total} />
-        <MetricCard label="待处理" value={board.summary.todo} />
-        <MetricCard label="进行中" value={board.summary.in_progress} />
-        <MetricCard label="失败" value={board.summary.failed} />
-      </section>
-
-      <section className="grid min-w-0 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-3">
-          <div className="text-sm text-muted-foreground">
-            已显示 {displayedItems} / {displayedTotal}
-          </div>
-          <div className="grid min-w-0 gap-3 lg:grid-cols-2 2xl:grid-cols-4" aria-label="任务泳道">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden pb-2" aria-label="任务泳道">
+          <div className="grid h-full min-w-max grid-flow-col auto-cols-[17.5rem] gap-3">
             {board.lanes.map((lane) => (
-              <section className="min-w-0 rounded-lg border border-border bg-muted/20" key={lane.status} aria-label={`${lane.label}泳道`}>
-                <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-                  <h2 className="text-sm font-semibold">{lane.label}</h2>
-                  <span className="text-xs text-muted-foreground">{lane.items.length} / {laneStates[lane.status].total}</span>
-                </div>
-                <ScrollArea className="h-[32rem]">
-                  <div className="grid min-w-0 content-start gap-3 p-3">
-                    {lane.items.length ? (
-                      lane.items.map((item) => (
-                        <TaskCard
-                          active={item.id === selectedItem?.id}
-                          item={item}
-                          key={item.id}
-                          onSelect={() => setSelectedId(item.id)}
-                        />
-                      ))
-                    ) : (
-                      <EmptyState title="无匹配项" description="当前筛选条件下没有会话任务。" />
-                    )}
-                    {laneStates[lane.status].nextCursor && paginationMatchesFilters ? (
-                      <Button
-                        className="w-full"
-                        type="button"
-                        variant="outline"
-                        disabled={laneStates[lane.status].loading}
-                        onClick={() => void loadMoreTasks(lane.status)}
-                      >
-                        {laneStates[lane.status].loading ? "加载中" : "加载更多"}
-                      </Button>
-                    ) : null}
-                    {laneStates[lane.status].error ? (
-                      <Alert variant="destructive">
-                        <AlertDescription>{laneStates[lane.status].error}</AlertDescription>
-                      </Alert>
-                    ) : null}
-                  </div>
-                </ScrollArea>
-              </section>
+              <RuntimeTaskLaneView
+                key={lane.key}
+                lane={lane}
+                laneTotal={laneTotal(lane, laneStates)}
+                loading={laneIsLoading(lane, laneStates)}
+                error={laneError(lane, laneStates)}
+                hasNextCursor={laneHasNextCursor(lane, laneStates) && paginationMatchesFilters}
+                onLoadMore={() => void loadMoreTasks(lane)}
+                onSelect={(item) => {
+                  setDetailItem(item);
+                }}
+              />
             ))}
           </div>
         </div>
-        <TaskDetail item={selectedItem} />
       </section>
+
+      <RuntimeTaskDetailDialog
+        item={detailItem}
+        open={Boolean(detailItem)}
+        onOpenChange={(open) => {
+          if (!open) setDetailItem(null);
+        }}
+      />
     </section>
   );
 }
 
-function TaskCard({
-  active,
-  item,
+function RuntimeTaskLaneView({
+  error,
+  hasNextCursor,
+  lane,
+  laneTotal,
+  loading,
+  onLoadMore,
   onSelect,
 }: {
-  active: boolean;
-  item: RuntimeTaskBoardItem;
-  onSelect: () => void;
+  error: string;
+  hasNextCursor: boolean;
+  lane: RuntimeTaskBoardLane;
+  laneTotal: number;
+  loading: boolean;
+  onLoadMore: () => void;
+  onSelect: (item: RuntimeTaskBoardItem) => void;
 }) {
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onSelect();
-  }
-
   return (
-    <Card
-      aria-pressed={active}
+    <section
       className={cn(
-        "min-w-0 cursor-pointer gap-3 overflow-hidden text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active && "ring-2 ring-ring",
+        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-border",
+        laneSurfaceClass(lane.key),
       )}
-      onClick={onSelect}
-      onKeyDown={handleKeyDown}
-      role="button"
-      size="sm"
-      tabIndex={0}
+      aria-label={`${lane.label}泳道`}
+      data-lane-key={lane.key}
     >
-      <CardHeader className="space-y-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusBadge tone={statusTone(item.status)}>{item.statusLabel}</StatusBadge>
-          {item.channelKindLabel ? <Badge variant="outline">{item.channelKindLabel}</Badge> : null}
-          <StatusBadge tone="neutral">{unlinkedExecutionLabel}</StatusBadge>
+      <div className="flex items-center justify-between gap-3 border-b border-border/80 px-3 py-2">
+        <h2 className="text-sm font-semibold">{lane.label}</h2>
+        <span className="text-xs text-muted-foreground">{lane.items.length} / {laneTotal}</span>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="grid min-h-full min-w-0 content-start gap-2.5 p-3">
+          {lane.items.length ? (
+            lane.items.map((item) => (
+              <RuntimeTaskCard
+                item={item}
+                key={item.id}
+                onSelect={() => onSelect(item)}
+              />
+            ))
+          ) : (
+            <p className="self-center px-4 py-28 text-center text-sm text-muted-foreground">
+              当前筛选条件下没有会话任务
+            </p>
+          )}
+          {hasNextCursor ? (
+            <Button
+              className="w-full"
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={onLoadMore}
+            >
+              {loading ? "加载中" : "加载更多"}
+            </Button>
+          ) : null}
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
         </div>
-        <CardTitle className="break-words text-sm" title={item.userMessage ?? item.displayTitle}>
-          {item.displayTitle}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <p className="break-words text-sm text-muted-foreground">{item.requestExcerpt}</p>
-        <div className="space-y-1 text-xs text-muted-foreground">
-          <p>发起人 {item.creatorLabel}</p>
-          <p>承接 Agent {item.assigneeLabel}</p>
-          <p className="break-words">
-            会话/群组 {item.channelLabel ?? "未上报"}
-            {item.updatedAt ?? item.createdAt ? ` · ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}` : ""}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TaskDetail({ item }: { item: RuntimeTaskBoardItem | null }) {
-  if (!item) {
-    return (
-      <aside aria-label="任务详情">
-        <EmptyState title="任务详情" description="选择一个任务查看详情。" />
-      </aside>
-    );
-  }
-
-  return (
-    <aside aria-label="任务详情">
-      <Card className="sticky top-4 min-w-0">
-        <CardHeader className="space-y-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <StatusBadge tone={statusTone(item.status)}>{item.statusLabel}</StatusBadge>
-            <StatusBadge tone="neutral">{unlinkedExecutionLabel}</StatusBadge>
-            {item.channelKindLabel ? <Badge variant="outline">{item.channelKindLabel}</Badge> : null}
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Task</p>
-            <h2 className="break-words text-lg font-semibold" title={item.userMessage ?? item.displayTitle}>
-              {item.displayTitle}
-            </h2>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <DetailBlock title="概览">{`${item.statusLabel} · ${item.agentId}`}</DetailBlock>
-          <DetailList
-            title="任务上下文"
-            items={[
-              `Channel: ${item.channelKindLabel ?? "默认渠道"}`,
-              `发起人: ${item.creatorLabel}`,
-              `承接 Agent: ${item.assigneeLabel}`,
-              `会话/群组: ${item.channelLabel ?? "未上报"}`,
-            ]}
-          />
-          <DetailList
-            title="最近状态"
-            items={[
-              `最近更新: ${formatRuntimeTimestamp(item.updatedAt ?? item.createdAt)}`,
-              `任务状态: ${item.statusLabel}`,
-              `执行关联: ${unlinkedExecutionLabel}`,
-              ...(item.error ? [`最近错误: ${item.error}`] : []),
-            ]}
-          />
-          <DetailBlock title="用户消息">{item.userMessage ?? "未上报用户消息"}</DetailBlock>
-          {item.agentReply ? <DetailBlock title="Agent 回复">{item.agentReply}</DetailBlock> : null}
-        </CardContent>
-      </Card>
-    </aside>
-  );
-}
-
-function DetailBlock({ title, children }: { title: string; children: string }) {
-  return (
-    <section className="space-y-1">
-      <h3 className="text-sm font-medium">{title}</h3>
-      <p className="break-words text-sm text-muted-foreground">{children}</p>
+      </ScrollArea>
     </section>
   );
 }
 
-function DetailList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="space-y-1">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {items.length ? (
-        <ul className="space-y-1 text-sm text-muted-foreground">
-          {items.map((item) => (
-            <li className="break-words" key={item}>{item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">暂无</p>
-      )}
-    </section>
-  );
-}
-
-function statusTone(status: TaskStatus): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (status === "done") return "success";
-  if (status === "failed" || status === "blocked") return "danger";
-  if (status === "in_progress" || status === "review") return "info";
-  if (status === "todo") return "warning";
-  return "neutral";
+function laneSurfaceClass(laneKey: RuntimeTaskBoardLane["key"]): string {
+  if (laneKey === "in_progress") return "bg-sky-50/45";
+  if (laneKey === "review") return "bg-amber-50/45";
+  if (laneKey === "done") return "bg-emerald-50/45";
+  if (laneKey === "attention") return "bg-rose-50/45";
+  if (laneKey === "cancelled") return "bg-muted/40";
+  return "bg-card";
 }
 
 function createTimeRangeFilter(start: string, end: string): RuntimeTaskTimeRangeFilter | undefined {
@@ -566,7 +472,6 @@ function createRuntimeTaskFiltersKey(filters?: RuntimeTaskBoardFilters): string 
   return JSON.stringify({
     channelKind: filters?.channelKind ?? "all",
     search: filters?.search?.trim() ?? "",
-    status: filters?.status ?? "all",
     timeEnd: filters?.timeRange?.end ?? "",
     timeStart: filters?.timeRange?.start ?? "",
   });
@@ -612,24 +517,37 @@ function createLaneStatesFromPages(
   return lanes;
 }
 
-function statusesForFilters(summary: TaskStatusCounts, status: TaskStatus | "all"): TaskStatus[] {
-  if (status !== "all") return [status];
-  const statusesWithTasks = TASK_STATUSES.filter((laneStatus) => summary[laneStatus] > 0);
+function statusesForFilters(summary: TaskStatusCounts): TaskStatus[] {
+  const statusesWithTasks = boardTaskStatuses().filter((laneStatus) => summary[laneStatus] > 0);
   return statusesWithTasks.length ? statusesWithTasks : [];
 }
 
-function flattenLaneTasks(laneStates: RuntimeTaskLaneStateByStatus, status: TaskStatus | "all"): Task[] {
-  const statuses = status === "all" ? TASK_STATUSES : [status];
-  return statuses.flatMap((laneStatus) => laneStates[laneStatus].tasks);
+function flattenLaneTasks(laneStates: RuntimeTaskLaneStateByStatus): Task[] {
+  return boardTaskStatuses().flatMap((laneStatus) => laneStates[laneStatus].tasks);
 }
 
-function visibleTotal(
-  laneStates: RuntimeTaskLaneStateByStatus,
-  summary: TaskStatusCounts,
-  status: TaskStatus | "all",
-): number {
-  if (status === "all") return summary.total;
-  return laneStates[status].total;
+function visibleTotal(laneStates: RuntimeTaskLaneStateByStatus): number {
+  return boardTaskStatuses().reduce((total, laneStatus) => total + laneStates[laneStatus].total, 0);
+}
+
+function boardTaskStatuses(): TaskStatus[] {
+  return runtimeTaskBoardLaneDefinitions.flatMap((lane) => lane.statuses);
+}
+
+function laneTotal(lane: RuntimeTaskBoardLane, laneStates: RuntimeTaskLaneStateByStatus): number {
+  return lane.statuses.reduce((total, laneStatus) => total + laneStates[laneStatus].total, 0);
+}
+
+function laneHasNextCursor(lane: RuntimeTaskBoardLane, laneStates: RuntimeTaskLaneStateByStatus): boolean {
+  return lane.statuses.some((laneStatus) => Boolean(laneStates[laneStatus].nextCursor));
+}
+
+function laneIsLoading(lane: RuntimeTaskBoardLane, laneStates: RuntimeTaskLaneStateByStatus): boolean {
+  return lane.statuses.some((laneStatus) => laneStates[laneStatus].loading);
+}
+
+function laneError(lane: RuntimeTaskBoardLane, laneStates: RuntimeTaskLaneStateByStatus): string {
+  return lane.statuses.map((laneStatus) => laneStates[laneStatus].error).find(Boolean) ?? "";
 }
 
 function mergeTasks(current: Task[], next: Task[]): Task[] {

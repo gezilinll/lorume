@@ -13,7 +13,7 @@ const capabilityCards = [
     title: "Runtime Fleet",
   },
   {
-    description: "以会话 Task 为中心查看工作项状态、Channel、执行关联和用户可读上下文。",
+    description: "以会话 Task 为中心查看工作项状态、Channel、用户消息和 Agent 回复。",
     href: "/runs",
     icon: MessageSquareText,
     title: "Runs",

@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { AuthMemberRole, AuthSessionContext } from "../auth/auth-store";
 import { StatusBadge } from "@/components/data/StatusBadge";
-import { PageHeader } from "@/components/layout/PageHeader";
+import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,8 +35,19 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
   const [deviceErrorMessage, setDeviceErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCreatingDeviceToken, setIsCreatingDeviceToken] = useState(false);
+  const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   const canManage = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
+
+  useConsoleWorkbar({
+    meta: organization ? (
+      <>
+        <span>{organization.name}</span>
+        <span>{roleLabels[organization.role]}</span>
+      </>
+    ) : "请选择组织",
+    title: "组织设置",
+  }, [organization?.name, organization?.role]);
 
   async function createInvitation() {
     if (!organization) return;
@@ -119,15 +130,19 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
   if (!organization) {
     return (
       <div className="space-y-6">
-        <PageHeader eyebrow="Organization" title="组织设置" description="请选择组织后管理成员与权限。" />
+        {hasConsoleWorkbar ? null : (
+          <>
+            <h1 className="sr-only">组织设置</h1>
+            <p className="sr-only">请选择组织后管理成员与权限。</p>
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Organization" title="组织设置" description="管理当前组织的成员身份、邀请链接和设备接入入口。" />
-
+      {hasConsoleWorkbar ? null : <h1 className="sr-only">组织设置</h1>}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
         <Card>
           <CardHeader>

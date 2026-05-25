@@ -3,6 +3,7 @@ import {
   createRuntimeTaskBoard,
   createTasksQueryUrl,
   listRuntimeTaskChannelOptions,
+  runtimeTaskBoardLaneDefinitions,
   runtimeTasksQueryPageFromResponse,
 } from "./runtime-work-query-api";
 
@@ -93,8 +94,44 @@ describe("Runtime task query API helpers", () => {
       total: 3,
     });
     expect(board.visibleItems).toEqual([expect.objectContaining({ id: "task-3", status: "failed" })]);
-    expect(board.lanes.find((lane) => lane.status === "failed")?.items).toEqual([
+    expect(board.lanes.find((lane) => lane.key === "attention")?.items).toEqual([
       expect.objectContaining({ displayTitle: "Failed", id: "task-3", requestExcerpt: "Failed" }),
+    ]);
+  });
+
+  it("groups Runs board lanes into the six product states", () => {
+    const page = runtimeTasksQueryPageFromResponse({
+      items: [
+        { id: "task-1", agentId: "agent-1", userMessage: "Queued", status: "todo", adapter: { kind: "openclaw" } },
+        { id: "task-2", agentId: "agent-1", userMessage: "Running", status: "in_progress", adapter: { kind: "openclaw" } },
+        { id: "task-3", agentId: "agent-1", userMessage: "Review", status: "review", adapter: { kind: "openclaw" } },
+        { id: "task-4", agentId: "agent-1", userMessage: "Done", status: "done", adapter: { kind: "openclaw" } },
+        { id: "task-5", agentId: "agent-1", userMessage: "Failed", status: "failed", adapter: { kind: "openclaw" } },
+        { id: "task-6", agentId: "agent-1", userMessage: "Unknown", status: "unknown", adapter: { kind: "openclaw" } },
+        { id: "task-7", agentId: "agent-1", userMessage: "Cancelled", status: "cancelled", adapter: { kind: "openclaw" } },
+      ],
+      summary: { byStatus: { cancelled: 1, done: 1, failed: 1, in_progress: 1, review: 1, todo: 1, unknown: 1, total: 7 }, total: 7 },
+      total: 7,
+    });
+
+    if (!page) throw new Error("query page should be parsed");
+    const board = createRuntimeTaskBoard(page.tasks, {}, page.summary);
+
+    expect(runtimeTaskBoardLaneDefinitions.map((lane) => lane.label)).toEqual([
+      "待处理",
+      "进行中",
+      "待验收",
+      "已完成",
+      "需关注",
+      "已取消",
+    ]);
+    expect(board.lanes.map((lane) => [lane.key, lane.statuses, lane.items.map((item) => item.id)])).toEqual([
+      ["todo", ["todo"], ["task-1"]],
+      ["in_progress", ["in_progress"], ["task-2"]],
+      ["review", ["review"], ["task-3"]],
+      ["done", ["done"], ["task-4"]],
+      ["attention", ["failed", "unknown"], ["task-5", "task-6"]],
+      ["cancelled", ["cancelled"], ["task-7"]],
     ]);
   });
 

@@ -64,11 +64,13 @@ Rules:
 - Runtime and Channel are separate concepts.
 - Runtime Fleet does not provide Channel filtering.
 - Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `同步中`、`在线`、`离线`、`异常`.
-- The layout should expose compact summary, Runtime/Agent lists, and a sticky detail inspector without feeling like stacked cards.
+- The layout exposes counts in the top workbar, then Device, Runtime, and Agent lists plus a sticky detail inspector. It does not repeat body-level metric cards, page explanations, or secondary title blocks.
+- The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
 - The left navigation stays fixed and keeps the identity entry at the bottom of the viewport.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
 - Agent Skill probing appears as a compact row-level action with read-only metadata; it does not become a standalone page, editor, import flow, or migration wizard.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
+- Copying an object ID uses toast feedback; the detail panel should not grow a temporary copied row.
 - Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
 
 ## Runs
@@ -82,9 +84,13 @@ Rules:
 - Runtime and Channel filters are separate.
 - Channel options come from backend facets, not from currently loaded rows.
 - Time range uses explicit start/end controls.
+- Status filtering tabs are not shown. Status is represented by six board lanes: `待处理`、`进行中`、`待验收`、`已完成`、`需关注`、`已取消`; `需关注` groups `failed` and `unknown`.
+- Lanes use a compact project-board width and fill the available viewport height. The current desktop target is approximately `17.5rem` per lane. The Runs page itself must avoid body-level vertical scrolling in the primary desktop view; the board owns horizontal scrolling at its bottom edge, and each lane owns its own vertical scrolling. Empty lanes show inline muted text on the lane background rather than a nested empty card.
+- Task cards follow the Mail preview pattern with a fixed four-row hierarchy: assignee Agent, `userMessage` truncated to 16 characters, `agentReply` or `暂无 Agent 答复`, then last updated time and the channel pill. Card pills show channel kind only; they do not repeat lane status or conversation/group labels and they never invent an execution-link state. Click opens a detail dialog and immediately returns the card to idle visual state.
+- The detail dialog shows only the task fields that currently exist in the Task query model. The header title is a short truncated `userMessage`; the body uses three sections: task information (`发起人`、`承接 Agent`、`更新时间`、`渠道`), user message, and Agent reply. It opens centered, keeps Radix DialogContent responsible for positioning, and applies any 3D treatment only to an inner visual card layer. It must stay compact and must not degrade into a raw field list or show execution association, source summary, adapter evidence, or raw IDs.
 - Long text wraps or clamps without body-level horizontal scroll.
 - Raw IDs, `cid...`, phone numbers, and opaque conversation IDs are not used as conversation names.
-- Wide screens keep the selected detail inspector visible.
+- Wide screens use the board as the main surface; there is no persistent selected inspector on the right.
 
 ## Operations Utility Drawer
 
@@ -94,7 +100,8 @@ Rules:
 
 - Opens from the top-right `任务` button; `/operations` is a deep-link drawer route.
 - It is not a primary nav page and has no internal task/notification tab switcher.
-- Drawer width is narrow by default and uses vertical list + selected detail.
+- Drawer width is narrow by default and uses a vertical list. Selecting an operation opens a detail dialog.
+- The overlay dims without background blur.
 - Reads organization-scoped data; no organization means no API request.
 - Does not show backend raw payload, tokens, device secrets, or debug fields.
 - Closing returns to the previous Console context.
@@ -107,7 +114,8 @@ Rules:
 
 - Opens from the top-right `通知` button; `/notifications` is a deep-link drawer route.
 - It is not a primary nav page and has no internal task/notification tab switcher.
-- Drawer width is narrow by default and uses vertical thread list + selected detail.
+- Drawer width is narrow by default and uses a vertical thread list. Selecting a notification opens a detail dialog.
+- The overlay dims without background blur.
 - Reads organization-scoped data; no organization means no API request.
 - Selecting an unread thread marks it as read.
 - The drawer is a triage/recovery entry, not a replacement for full logs.
@@ -121,3 +129,4 @@ Rules:
 - No-organization state points users to create or accept invitation flows.
 - Owner/admin can create invitation links; other roles see read-only identity.
 - Invitation links display only to the current operator and must not be logged or copied into committed screenshots.
+- The top workbar owns page identity; the page body starts with organization controls rather than a separate explanatory header.

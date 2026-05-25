@@ -6,8 +6,9 @@ Lorume uses shadcn/ui as the frontend design-system foundation. shadcn-generated
 
 - Framework: Vite.
 - Styling: Tailwind CSS v4 through `@tailwindcss/vite`.
-- Theme: CSS variables in `src/index.css`.
-- Preset: `b1FS9kEKH` from `https://ui.shadcn.com/create?preset=b1FS9kEKH`.
+- Theme: CSS variables in `src/index.css`, currently applied from `https://tweakcn.com/r/themes/twitter.json`.
+- Base preset: `b1FS9kEKH` from `https://ui.shadcn.com/create?preset=b1FS9kEKH`.
+- Theme command: `pnpm dlx shadcn@latest add https://tweakcn.com/r/themes/twitter.json`.
 - Import alias: `@/*` maps to `./src/*`.
 - Utilities: `cn` lives in `src/lib/utils.ts`.
 
@@ -22,4 +23,6 @@ Lorume uses shadcn/ui as the frontend design-system foundation. shadcn-generated
 
 ## Theming
 
-`src/index.css` owns shadcn semantic tokens such as `background`, `foreground`, `card`, `primary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, `chart-*`, and `sidebar-*`. Product components should consume these through Tailwind utilities such as `bg-background`, `text-foreground`, `border-border`, and `text-muted-foreground`.
+`src/index.css` owns shadcn semantic tokens such as `background`, `foreground`, `card`, `primary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, `chart-*`, `sidebar-*`, and Twitter theme radius/shadow/font variables. Product components should consume these through Tailwind utilities such as `bg-background`, `text-foreground`, `border-border`, and `text-muted-foreground`.
+
+Do not override Twitter theme fundamentals such as `--radius: 1.3rem` in page code. If the theme changes again, re-run the official shadcn CLI theme command and update this spec in the same change.

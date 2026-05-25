@@ -18,7 +18,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - 展示设备的 device id、hostname、OS、架构、最近同步、本地 / 出口 IP 和 collector 元信息。
 - 展示设备上的 Runtime；Runtime kind 候选项来自后端真实返回的数据。
 - 展示 Runtime 下的 Agent、归属 Runtime、采集状态、最近同步和派生 Task 数量。
-- Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面先作为轻量聚合视图展示全量 Device、Runtime 和 Agent。
+- Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面顶部工作栏展示全局数量，页面主体展示全量 Device、Runtime 和 Agent。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
 - 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
 - Agent 行级 Skill 探测仍是只读能力；它展示已存储 metadata，不请求设备执行远端探测。
@@ -57,22 +57,22 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
 
-Runs 会话任务页对 Task 展示 `Task.status`：
+Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳道：
 
-| 状态 | 中文标签 |
+| 泳道 | 包含状态 |
 |---|---|
-| `todo` | 待处理 |
-| `in_progress` | 进行中 |
-| `review` | 待验收 |
-| `done` | 已完成 |
-| `blocked` | 阻塞 |
-| `failed` | 失败 |
-| `cancelled` | 已取消 |
-| `unknown` | 未知 |
+| `待处理` | `todo` |
+| `进行中` | `in_progress` |
+| `待验收` | `review` |
+| `已完成` | `done` |
+| `需关注` | `failed`, `unknown` |
+| `已取消` | `cancelled` |
+
+`blocked` 暂不作为 Runs 页面独立泳道展示；进入页面泳道前必须先有后端上报、产品命名和 harness 覆盖。
 
 ## 页面字段策略
 
-详情面板默认展示用户可读的名称、归属、采集状态和诊断字段，不把完整 Lorume 内部对象 ID 渲染成正文。Device、Runtime 和 Agent 详情都必须提供 `复制 ID` 操作；点击后复制当前对象的完整内部 ID，并给出轻量成功反馈。
+详情面板默认展示用户可读的名称、归属、采集状态和诊断字段，不把完整 Lorume 内部对象 ID 渲染成正文。Device、Runtime 和 Agent 详情都必须提供 `复制 ID` 操作；点击后复制当前对象的完整内部 ID，并通过 toast 给出轻量成功反馈。
 
 ### Device
 
@@ -123,7 +123,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 ## 验收标准
 
 - 主导航可以进入 Runtime Fleet 页面。
-- 顶部统计显示设备、Runtime、Agent 数量；不显示独立异常统计卡。
+- 顶部工作栏显示设备、Runtime、Agent 数量；页面主体不再重复展示独立指标卡，也不显示独立异常统计卡。
+- 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
 - Device、Runtime、Agent 状态只显示 `同步中 / 在线 / 离线 / 异常`。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
@@ -133,8 +134,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 设备即使暂时没有 Runtime，也必须在 Device 列表里可见。
 - 页面不展示 Runtime `capabilities/endpoint/sourceRefs`。
 - 页面不展示 Agent `origin/sourceRefs/load`。
-- 详情面板不展示 `Lorume ID: ...` 长文本，Device、Runtime 和 Agent 均可通过 `复制 ID` 按钮复制内部 ID。
+- 详情面板不展示 `Lorume ID: ...` 长文本，Device、Runtime 和 Agent 均可通过 `复制 ID` 按钮复制内部 ID；复制成功反馈不占用详情面板布局。
 - Production 查询失败时展示错误状态，不回退 fixture。
-- 页面自动读取后端查询结果，并展示上次刷新时间。
+- 页面自动读取后端查询结果，并在顶部工作栏展示更新时间。
 - 页面不展示请求设备刷新按钮，不暴露远端命令轮询状态。
 - 桌面和移动宽度下不横向溢出。

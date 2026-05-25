@@ -292,40 +292,59 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
-    for (const lane of ["待处理", "进行中", "待验收", "已完成", "阻塞", "失败", "已取消", "未知"]) {
+    for (const lane of ["待处理", "进行中", "待验收", "已完成", "需关注", "已取消"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
-    expect(await screen.findByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
+    for (const removedLane of ["阻塞", "失败", "未知"]) {
+      expect(screen.queryByRole("heading", { name: removedLane })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("任务概览")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "状态" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "筛选" }));
     expect(screen.getByRole("combobox", { name: "渠道" })).toHaveTextContent("全部");
-    expect(screen.getByRole("tab", { name: "全部" })).toHaveAttribute("data-state", "active");
+    await user.keyboard("{Escape}");
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
 
     const taskCard = screen.getByRole("button", { name: /PMO asked OpenClaw/ });
-    expect(within(taskCard).getByText("待处理")).toBeInTheDocument();
-    expect(screen.getAllByText(/PMO/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/main/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/DingTalk 群聊/).length).toBeGreaterThan(0);
+    expect(within(taskCard).queryByText("待处理")).not.toBeInTheDocument();
+    expect(within(taskCard).getByText("DingTalk").closest("[data-pill-kind]")).toHaveAttribute("data-pill-kind", "channel");
+    expect(within(taskCard).queryByText("DingTalk 群聊")).not.toBeInTheDocument();
+    expect(within(taskCard).getByTestId("runtime-task-card-assignee")).toHaveTextContent("main");
+    expect(within(taskCard).getByTestId("runtime-task-card-title")).toHaveTextContent("PMO asked OpenCl...");
+    expect(within(taskCard).getByTestId("runtime-task-card-reply")).toHaveTextContent("The handoff is ready for review.");
+    expect(within(taskCard).getByTestId("runtime-task-card-footer")).toHaveTextContent("2026/05/21 17:59:00");
+    expect(within(taskCard).queryByText("未关联执行")).not.toBeInTheDocument();
     expect(screen.queryByText(/OpenClaw execution/)).not.toBeInTheDocument();
     expect(screen.queryByText("直接证据")).not.toBeInTheDocument();
     expect(screen.queryByText("能力缺口")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("来源 Runtime")).not.toBeInTheDocument();
 
     await user.click(taskCard);
+    expect(taskCard).toHaveAttribute("data-state", "idle");
+    expect(taskCard).toHaveAttribute("aria-pressed", "false");
 
-    const detail = screen.getByRole("complementary", { name: "任务详情" });
-    expect(within(detail).getByRole("heading", { name: /PMO asked OpenClaw/ })).toBeInTheDocument();
-    expect(within(detail).getByText("Channel: DingTalk")).toBeInTheDocument();
-    expect(within(detail).getByText("发起人: PMO")).toBeInTheDocument();
-    expect(within(detail).getByText("承接 Agent: main")).toBeInTheDocument();
-    expect(within(detail).getByText("会话/群组: DingTalk 群聊")).toBeInTheDocument();
-    expect(within(detail).getByText("任务状态: 待处理")).toBeInTheDocument();
-    expect(within(detail).getByText("执行关联: 未关联执行")).toBeInTheDocument();
-    expect(within(detail).queryByText(/来源 Runtime:/)).not.toBeInTheDocument();
-    expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
+    const detail = screen.getByRole("dialog", { name: "PMO asked OpenClaw to in..." });
+    expect(within(detail).getByRole("heading", { name: "PMO asked OpenClaw to in..." })).toBeInTheDocument();
+    expect(within(detail).getByText("任务信息")).toBeInTheDocument();
+    expect(within(detail).getByText("发起人")).toBeInTheDocument();
+    expect(within(detail).getByText("PMO")).toBeInTheDocument();
+    expect(within(detail).getByText("承接 Agent")).toBeInTheDocument();
+    expect(within(detail).getByText("main")).toBeInTheDocument();
+    expect(within(detail).getByText("更新时间")).toBeInTheDocument();
+    expect(within(detail).getByText("渠道")).toBeInTheDocument();
+    expect(within(detail).getByText("DingTalk")).toBeInTheDocument();
+    expect(within(detail).getByText("用户消息")).toBeInTheDocument();
+    expect(within(detail).getByText("Agent 回复")).toBeInTheDocument();
+    expect(within(detail).queryByText("会话/群组")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("任务状态")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("执行关联")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("未关联执行")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("采集来源")).not.toBeInTheDocument();
   });
 
-  it("keeps task details readable when no execution record exists", async () => {
+  it("keeps task details readable when Agent reply is missing", async () => {
     const user = userEvent.setup();
     const tasks = [
       task({
@@ -349,11 +368,11 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: /Task without execution record/ }));
 
-    const detail = screen.getByRole("complementary", { name: "任务详情" });
-    expect(within(detail).getByText("任务状态: 进行中")).toBeInTheDocument();
-    expect(within(detail).getByText("执行关联: 未关联执行")).toBeInTheDocument();
+    const detail = screen.getByRole("dialog");
+    expect(within(detail).getByTestId("runtime-task-detail-agent-reply")).toHaveTextContent("暂无 Agent 答复");
+    expect(within(detail).queryByText("执行关联")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("未关联执行")).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(rawDingTalkCid);
-    expect(within(detail).queryByText(/执行状态:/)).not.toBeInTheDocument();
   });
 
   it("selects Runs task cards with keyboard activation", async () => {
@@ -387,7 +406,7 @@ describe("Console shell", () => {
     secondCard.focus();
     await user.keyboard("{Enter}");
 
-    const detail = screen.getByRole("complementary", { name: "任务详情" });
+    const detail = screen.getByRole("dialog", { name: "Keyboard second task" });
     expect(within(detail).getByRole("heading", { name: "Keyboard second task" })).toBeInTheDocument();
   });
 
@@ -415,9 +434,10 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
     await user.click(await screen.findByRole("button", { name: new RegExp(longTitle.slice(0, 12)) }));
 
-    const detail = screen.getByRole("complementary", { name: "任务详情" });
+    const detail = screen.getByRole("dialog");
     const title = within(detail).getByRole("heading", { name: new RegExp(longTitle.slice(0, 12)) });
-    expect(title).toHaveAttribute("title", longTitle);
+    expect(title).toBeInTheDocument();
+    expect(within(detail).getByTestId("runtime-task-detail-title")).toHaveAttribute("title", longTitle);
   });
 
   it("does not turn adapter diagnostics into Runs cards", async () => {
@@ -430,7 +450,7 @@ describe("Console shell", () => {
     render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "待处理" })).toBeInTheDocument();
 
     expect(screen.queryByText("Slock 监听未就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenClaw 执行监听已接入")).not.toBeInTheDocument();
@@ -505,7 +525,7 @@ describe("Console shell", () => {
     ];
     globalThis.fetch = vi.fn(async (input) => {
       const url = requestUrl(input);
-      if (url.includes("/api/runtime-tasks") && url.includes("status=in_progress")) {
+      if (url.includes("/api/runtime-tasks") && url.includes("search=Initial+running")) {
         return jsonResponse(taskQueryResponse([initialTasks[1]], undefined, 1));
       }
       if (url.includes("/api/runtime-tasks")) {
@@ -516,9 +536,9 @@ describe("Console shell", () => {
     render(<App runtimeMode="agent" />);
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByRole("button", { name: "加载更多" })).toBeInTheDocument();
+    await screen.findAllByRole("button", { name: "加载更多" });
 
-    await chooseRunsStatus("进行中");
+    await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "Initial running");
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
@@ -551,7 +571,7 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByRole("button", { name: /AGTD-001 Fix queue handoff/ })).toBeInTheDocument();
-    expect(screen.getAllByText(/PMO asked OpenClaw/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeInTheDocument();
   });
 
   it("keeps current Runs filters when automatic refresh reloads backend query data", async () => {
@@ -574,7 +594,7 @@ describe("Console shell", () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = requestUrl(input);
       requests.push(url);
-      if (url.includes("/api/runtime-tasks") && url.includes("status=in_progress")) {
+      if (url.includes("/api/runtime-tasks") && url.includes("search=Filtered+running")) {
         return jsonResponse(taskQueryResponse([allTasks[1]]));
       }
       if (url.includes("/api/runtime-tasks")) return jsonResponse(taskQueryResponse(allTasks));
@@ -590,8 +610,8 @@ describe("Console shell", () => {
     });
     expect(screen.getByRole("button", { name: /Unfiltered todo task/ })).toBeInTheDocument();
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("tab", { name: "进行中" }));
+    fireEvent.change(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), {
+      target: { value: "Filtered running" },
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
@@ -606,7 +626,7 @@ describe("Console shell", () => {
       await Promise.resolve();
     });
 
-    expect(requests.at(-1)).toContain("status=in_progress");
+    expect(requests.at(-1)).toContain("search=Filtered+running");
   });
 
   it("filters Runs cards by manual time range without quick-range state", async () => {
@@ -637,6 +657,7 @@ describe("Console shell", () => {
     const lanes = screen.getByLabelText("任务泳道");
     expect(within(lanes).getAllByText("Old task").length).toBeGreaterThan(0);
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "筛选" }));
     expect(screen.getByLabelText("开始时间")).toBeInTheDocument();
     expect(screen.getByLabelText("结束时间")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /选择时间范围/ })).not.toBeInTheDocument();
@@ -672,6 +693,26 @@ describe("Console shell", () => {
     expect(screen.queryByLabelText("可用性")).not.toBeInTheDocument();
   });
 
+  it("keeps Runtime Fleet body compact after counts move into the workbar", async () => {
+    const user = userEvent.setup();
+    render(<App runtimeMode="agent" />);
+
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+
+    expect(screen.queryByLabelText("运行资产概览")).not.toBeInTheDocument();
+    expect(screen.queryByText(/台已注册设备/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/个已采集 Runtime/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/个已采集 Agent/)).not.toBeInTheDocument();
+
+    const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
+    expect(within(runtimeTable).getAllByText("OpenClaw")[0].closest("[data-pill-kind]")).toHaveAttribute("data-pill-kind", "runtime");
+
+    const skillHeader = screen.getByRole("columnheader", { name: "Skill" });
+    const skillCell = screen.getByRole("button", { name: "main Skill 探测" }).closest("td");
+    expect(skillHeader).toHaveClass("w-24", "text-right");
+    expect(skillCell).toHaveClass("w-24", "text-right");
+  });
+
   it("loads Runtime Fleet from the backend query API when available", async () => {
     const user = userEvent.setup();
     installRuntimeFleetFetch();
@@ -680,9 +721,10 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
 
     expect((await screen.findAllByText("fixture-mac")).length).toBeGreaterThan(0);
-    expect(screen.getByText("查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。")).toBeInTheDocument();
+    expect(screen.queryByText("查看设备、Runtime、Agent 的采集状态、归属关系和最近活动。")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("采集健康")).not.toBeInTheDocument();
-    expect(within(screen.getByLabelText("运行资产概览")).queryByText("异常")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("运行资产概览")).not.toBeInTheDocument();
+    expect(screen.queryByText("异常")).not.toBeInTheDocument();
     expect(screen.queryByText("未知")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "请求设备刷新" })).not.toBeInTheDocument();
   });
@@ -777,7 +819,8 @@ describe("Console shell", () => {
 
     await user.click(within(detail).getByRole("button", { name: "复制 ID" }));
 
-    expect(await within(detail).findByText("已复制")).toBeInTheDocument();
+    expect(within(detail).queryByText("已复制")).not.toBeInTheDocument();
+    expect(await screen.findByText("已复制")).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith("fixture-mac:runtime:openclaw:agent:main");
   });
 
@@ -818,6 +861,6 @@ describe("Console shell", () => {
 
     expect(screen.getAllByText("fixture-mac").length).toBeGreaterThan(0);
     expect(latestRequests).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/上次刷新/)).toBeInTheDocument();
+    expect(screen.getByText(/更新/)).toBeInTheDocument();
   });
 });

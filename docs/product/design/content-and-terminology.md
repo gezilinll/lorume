@@ -52,7 +52,6 @@ Runtime 是 OpenClaw、Codex 等执行运行环境。Channel 是 DingTalk、Web 
 - Runtime Fleet 的 Device / Runtime / Agent 状态不使用 `未知`；采集失败、adapter 异常或关键结构不可用时统一展示 `异常`。
 - `未知`: 只可用于非资产状态字段，例如某个可选业务字段确实尚未取得且不会影响安全或状态判定。
 - `不支持采集`: 当前平台或 adapter 不能提供该字段。
-- `未关联执行`: 工作项真实存在，但没有可关联的执行记录。
 - `名称待补全`: 只用于确实知道对象类型但无法取得名称的情况。
 
 ## Language

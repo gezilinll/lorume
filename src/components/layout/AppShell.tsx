@@ -17,6 +17,7 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -75,24 +76,7 @@ export function AppShell({
           <SidebarContent>
             <SidebarGroup>
               <SidebarGroupContent>
-                <nav aria-label="主导航">
-                  <SidebarMenu>
-                    {navItems.map((item) => (
-                      <SidebarMenuItem key={item.page}>
-                        <SidebarMenuButton
-                          aria-current={activePage === item.page ? "page" : undefined}
-                          isActive={activePage === item.page}
-                          tooltip={item.label}
-                          type="button"
-                          onClick={() => onNavigate(item.page)}
-                        >
-                          <item.icon aria-hidden="true" />
-                          <span>{item.label}</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </nav>
+                <ConsoleNavigation activePage={activePage} onNavigate={onNavigate} />
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
@@ -165,6 +149,44 @@ export function AppShell({
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
+  );
+}
+
+function ConsoleNavigation({
+  activePage,
+  onNavigate,
+}: {
+  activePage: ConsolePageKey;
+  onNavigate: (page: ConsolePageKey) => void;
+}) {
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  const handleNavigate = (page: ConsolePageKey) => {
+    onNavigate(page);
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  };
+
+  return (
+    <nav aria-label="主导航">
+      <SidebarMenu>
+        {navItems.map((item) => (
+          <SidebarMenuItem key={item.page}>
+            <SidebarMenuButton
+              aria-current={activePage === item.page ? "page" : undefined}
+              isActive={activePage === item.page}
+              tooltip={item.label}
+              type="button"
+              onClick={() => handleNavigate(item.page)}
+            >
+              <item.icon aria-hidden="true" />
+              <span>{item.label}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
+      </SidebarMenu>
+    </nav>
   );
 }
 

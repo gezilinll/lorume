@@ -162,6 +162,22 @@ test.describe("Runs conversation tasks", () => {
     }
   });
 
+  test("closes the mobile sidebar after selecting a route", async ({ page, request }) => {
+    await seedWorkBoardData(request, backendDeviceState);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await page.getByRole("button", { name: "打开主导航" }).click();
+    const mobileSidebar = page.getByRole("dialog", { name: "Sidebar" });
+    await expect(mobileSidebar).toBeVisible();
+
+    await mobileSidebar.getByRole("button", { name: "Runs" }).click();
+
+    await expect(page).toHaveURL(/\/runs$/);
+    await expect(mobileSidebar).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
+  });
+
   test("keeps adapter diagnostic gaps out of task cards when no tasks are available", async ({ page, request }) => {
     await seedWorkBoardData(request, { ...backendDeviceState, tasks: [] });
 

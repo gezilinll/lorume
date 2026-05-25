@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PixelIcon } from "../ui/PixelIcon";
 
 export type ConsoleUtilityView = "operations" | "notifications";
@@ -158,28 +163,26 @@ export function ConsoleUtilityBar({ activeView, organizationId, utilityDataEnabl
 
 /** Right-side utility drawer for operation and notification status without expanding primary navigation. */
 export function ConsoleUtilityDrawer({ organizationId, utilityDataEnabled = true, view, onClose }: ConsoleUtilityDrawerProps) {
-  if (!view) return null;
-  const title = view === "operations" ? "任务" : "通知";
+  const title = view === "operations" ? "Operations" : "Notifications";
 
   return (
-    <div className="utilityDrawerOverlay" role="presentation">
-      <aside className="utilityDrawer" role="dialog" aria-modal="false" aria-label={title}>
-        <header className="utilityDrawerHeader">
-          <div>
-            <p className="eyebrow">{view === "operations" ? "Operations" : "Notifications"}</p>
-            <h2>{title}</h2>
-          </div>
-          <button className="iconButton" type="button" aria-label={`关闭${title}`} onClick={onClose}>
-            ×
-          </button>
-        </header>
-        {view === "operations" ? (
-          <OperationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
-        ) : (
-          <NotificationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
-        )}
-      </aside>
-    </div>
+    <Sheet open={view !== null} onOpenChange={(open) => !open && onClose()}>
+      {view ? (
+        <SheetContent side="right" className="w-full overflow-hidden p-0 sm:!max-w-2xl lg:!max-w-4xl">
+          <SheetHeader className="border-b px-4 py-3 text-left">
+            <SheetTitle>{title}</SheetTitle>
+            <SheetDescription>查看当前组织的异步任务和通知。</SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="h-[calc(100svh-5rem)]">
+            {view === "operations" ? (
+              <OperationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
+            ) : (
+              <NotificationsDrawer organizationId={organizationId} utilityDataEnabled={utilityDataEnabled} />
+            )}
+          </ScrollArea>
+        </SheetContent>
+      ) : null}
+    </Sheet>
   );
 }
 
@@ -226,45 +229,50 @@ function OperationsDrawer({ organizationId, utilityDataEnabled }: { organization
   }), [operations]);
 
   if (!organizationId) {
-    return <p className="utilityDrawerEmpty">请选择组织后查看任务。</p>;
+    return <p className="px-4 py-6 text-sm text-muted-foreground">请选择组织后查看任务。</p>;
   }
   if (!utilityDataEnabled) {
-    return <p className="utilityDrawerEmpty">本地调试模式不读取远端任务。</p>;
+    return <p className="px-4 py-6 text-sm text-muted-foreground">本地调试模式不读取远端任务。</p>;
   }
 
   return (
-    <div className="utilityDrawerBody">
-      <section className="utilitySummaryGrid" aria-label="任务概览">
+    <div className="space-y-4 p-4">
+      <section className="grid grid-cols-3 gap-2" aria-label="任务概览">
         <UtilityMetric label="任务总数" value={summary.total} tone="blue" />
         <UtilityMetric label="进行中" value={summary.active} tone="green" />
         <UtilityMetric label="失败" value={summary.failed} tone="orange" />
       </section>
-      {errorMessage ? <p className="skillErrorMessage">{errorMessage}</p> : null}
-      <section className="utilitySplit">
-        <div className="utilityListPanel" aria-label="任务列表">
-          <div className="utilityPanelTitle">
-            <strong>任务列表</strong>
-            <span>{isLoading ? "读取中" : `${operations.length} 个任务`}</span>
-          </div>
+      {errorMessage ? <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorMessage}</p> : null}
+      <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.15fr)]">
+        <Card size="sm" aria-label="任务列表">
+          <CardHeader className="grid-cols-[1fr_auto] items-center">
+            <CardTitle>任务列表</CardTitle>
+            <span className="text-xs text-muted-foreground">{isLoading ? "读取中" : `${operations.length} 个任务`}</span>
+          </CardHeader>
+          <CardContent>
           {operations.length === 0 ? (
-            <p className="emptyAsset">暂无任务。</p>
+            <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">暂无任务。</p>
           ) : (
-            <div className="utilityList">
+            <div className="space-y-2">
               {operations.map((operation) => (
-                <button
-                  className={operation.id === selectedOperation?.id ? "utilityListItem utilityListItemActive" : "utilityListItem"}
+                <Button
+                  className="h-auto w-full flex-col items-start gap-1 border-border/80 px-3 py-2 text-left whitespace-normal data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                  data-active={operation.id === selectedOperation?.id}
+                  aria-current={operation.id === selectedOperation?.id ? "true" : undefined}
                   key={operation.id}
+                  variant="outline"
                   type="button"
                   onClick={() => setSelectedId(operation.id)}
                 >
-                  <strong>{operation.summary}</strong>
-                  <span>{operation.type} · {operationStatusLabels[operation.status] ?? operation.status}</span>
-                  <small>{formatDateTime(operation.updatedAt)}</small>
-                </button>
+                  <strong className="font-medium text-foreground">{operation.summary}</strong>
+                  <span className="text-xs text-muted-foreground">{operation.type} · {operationStatusLabels[operation.status] ?? operation.status}</span>
+                  <small className="text-xs text-muted-foreground">{formatDateTime(operation.updatedAt)}</small>
+                </Button>
               ))}
             </div>
           )}
-        </div>
+          </CardContent>
+        </Card>
         <OperationDrawerDetail operation={selectedOperation} />
       </section>
     </div>
@@ -328,53 +336,58 @@ function NotificationsDrawer({ organizationId, utilityDataEnabled }: { organizat
   }
 
   if (!organizationId) {
-    return <p className="utilityDrawerEmpty">请选择组织后查看通知。</p>;
+    return <p className="px-4 py-6 text-sm text-muted-foreground">请选择组织后查看通知。</p>;
   }
   if (!utilityDataEnabled) {
-    return <p className="utilityDrawerEmpty">本地调试模式不读取远端通知。</p>;
+    return <p className="px-4 py-6 text-sm text-muted-foreground">本地调试模式不读取远端通知。</p>;
   }
 
   return (
-    <div className="utilityDrawerBody">
-      <section className="utilitySummaryGrid" aria-label="通知概览">
+    <div className="space-y-4 p-4">
+      <section className="grid grid-cols-3 gap-2" aria-label="通知概览">
         <UtilityMetric label="通知总数" value={summary.total} tone="blue" />
         <UtilityMetric label="未读" value={summary.unread} tone="orange" />
         <UtilityMetric label="高风险" value={summary.critical} tone="purple" />
       </section>
-      {errorMessage ? <p className="skillErrorMessage">{errorMessage}</p> : null}
-      <section className="utilitySplit">
-        <div className="utilityListPanel" aria-label="通知列表">
-          <div className="utilityPanelTitle">
-            <strong>通知列表</strong>
-            <span>{isLoading ? "读取中" : `${notifications.length} 条通知`}</span>
-          </div>
+      {errorMessage ? <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorMessage}</p> : null}
+      <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.15fr)]">
+        <Card size="sm" aria-label="通知列表">
+          <CardHeader className="grid-cols-[1fr_auto] items-center">
+            <CardTitle>通知列表</CardTitle>
+            <span className="text-xs text-muted-foreground">{isLoading ? "读取中" : `${notifications.length} 条通知`}</span>
+          </CardHeader>
+          <CardContent>
           {notifications.length === 0 ? (
-            <p className="emptyAsset">暂无通知。</p>
+            <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">暂无通知。</p>
           ) : (
-            <div className="utilityList">
+            <div className="space-y-2">
               {notifications.map((notification) => (
-                <button
-                  className={notification.id === selectedNotification?.id ? "utilityListItem utilityListItemActive" : "utilityListItem"}
+                <Button
+                  className="h-auto w-full flex-col items-start gap-1 border-border/80 px-3 py-2 text-left whitespace-normal data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                  data-active={notification.id === selectedNotification?.id}
+                  aria-current={notification.id === selectedNotification?.id ? "true" : undefined}
                   key={notification.id}
+                  variant="outline"
                   type="button"
                   onClick={() => void selectNotification(notification)}
                 >
-                  <span className="utilityItemHeader">
-                    <strong>{notification.title}</strong>
-                    <span className={notification.isRead ? "utilityReadBadge" : "utilityUnreadBadge"}>
+                  <span className="flex w-full items-start justify-between gap-2">
+                    <strong className="font-medium text-foreground">{notification.title}</strong>
+                    <Badge variant={notification.isRead ? "outline" : "secondary"}>
                       {notification.isRead ? "已读" : "未读"}
-                    </span>
+                    </Badge>
                   </span>
-                  <span>
+                  <span className="text-xs text-muted-foreground">
                     {notificationSeverityLabels[notification.severity] ?? notification.severity} ·{" "}
                     {notificationStatusLabels[notification.status] ?? notification.status}
                   </span>
-                  <small>{formatDateTime(notification.lastOccurredAt)}</small>
-                </button>
+                  <small className="text-xs text-muted-foreground">{formatDateTime(notification.lastOccurredAt)}</small>
+                </Button>
               ))}
             </div>
           )}
-        </div>
+          </CardContent>
+        </Card>
         <NotificationDrawerDetail notification={selectedNotification} />
       </section>
     </div>
@@ -384,103 +397,124 @@ function NotificationsDrawer({ organizationId, utilityDataEnabled }: { organizat
 function OperationDrawerDetail({ operation }: { operation: OperationListItem | null }) {
   if (!operation) {
     return (
-      <aside className="utilityDetailPanel" aria-label="任务详情">
-        <h3>任务详情</h3>
-        <p>选择一个任务查看目标、状态和失败原因。</p>
-      </aside>
+      <Card size="sm" aria-label="任务详情">
+        <CardHeader>
+          <h3 className="font-heading text-sm font-medium">任务详情</h3>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">选择一个任务查看目标、状态和失败原因。</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <aside className="utilityDetailPanel" aria-label="任务详情">
-      <div className="detailHeader">
+    <Card size="sm" aria-label="任务详情">
+      <CardHeader className="grid-cols-[1fr_auto]">
         <div>
-          <p className="eyebrow">Operation</p>
-          <h3>{operation.summary}</h3>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Operation</p>
+          <h3 className="font-heading text-base font-medium">{operation.summary}</h3>
         </div>
-        <span className={`statusBadge status-${operation.status}`}>
+        <Badge variant={operation.status === "failed" ? "destructive" : "secondary"}>
           {operationStatusLabels[operation.status] ?? operation.status}
-        </span>
-      </div>
-      <UtilityDetailList
-        title="任务上下文"
-        items={[
-          `类型: ${operation.type}`,
-          `资源: ${formatOptionalPair(operation.resourceType, operation.resourceId)}`,
-          `目标: ${formatOptionalPair(operation.targetType, operation.targetId)}`,
-        ]}
-      />
-      <UtilityDetailList
-        title="最近状态"
-        items={[
-          `创建时间: ${formatDateTime(operation.createdAt)}`,
-          `更新时间: ${formatDateTime(operation.updatedAt)}`,
-          operation.errorSummary ? `错误: ${operation.errorSummary}` : "错误: 无",
-        ]}
-      />
-    </aside>
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <UtilityDetailList
+          title="任务上下文"
+          items={[
+            `类型: ${operation.type}`,
+            `资源: ${formatOptionalPair(operation.resourceType, operation.resourceId)}`,
+            `目标: ${formatOptionalPair(operation.targetType, operation.targetId)}`,
+          ]}
+        />
+        <UtilityDetailList
+          title="最近状态"
+          items={[
+            `创建时间: ${formatDateTime(operation.createdAt)}`,
+            `更新时间: ${formatDateTime(operation.updatedAt)}`,
+            operation.errorSummary ? `错误: ${operation.errorSummary}` : "错误: 无",
+          ]}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
 function NotificationDrawerDetail({ notification }: { notification: NotificationThread | null }) {
   if (!notification) {
     return (
-      <aside className="utilityDetailPanel" aria-label="通知详情">
-        <h3>通知详情</h3>
-        <p>选择一条通知查看范围、状态和最近摘要。</p>
-      </aside>
+      <Card size="sm" aria-label="通知详情">
+        <CardHeader>
+          <h3 className="font-heading text-sm font-medium">通知详情</h3>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">选择一条通知查看范围、状态和最近摘要。</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <aside className="utilityDetailPanel" aria-label="通知详情">
-      <div className="detailHeader">
+    <Card size="sm" aria-label="通知详情">
+      <CardHeader className="grid-cols-[1fr_auto]">
         <div>
-          <p className="eyebrow">Notification</p>
-          <h3>{notification.title}</h3>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Notification</p>
+          <h3 className="font-heading text-base font-medium">{notification.title}</h3>
         </div>
-        <span className={`statusBadge status-${notification.status}`}>
+        <Badge variant={notification.status === "open" ? "secondary" : "outline"}>
           {notificationStatusLabels[notification.status] ?? notification.status}
-        </span>
-      </div>
-      <UtilityDetailList
-        title="通知范围"
-        items={[
-          `级别: ${notificationSeverityLabels[notification.severity] ?? notification.severity}`,
-          `资源: ${formatOptionalPair(notification.resourceType, notification.resourceId)}`,
-          `读取状态: ${notification.isRead ? "已读" : "未读"}`,
-        ]}
-      />
-      <UtilityDetailList
-        title="最近状态"
-        items={[
-          `首次出现: ${formatDateTime(notification.firstOccurredAt)}`,
-          `最近出现: ${formatDateTime(notification.lastOccurredAt)}`,
-          `状态: ${notificationStatusLabels[notification.status] ?? notification.status}`,
-        ]}
-      />
-      <section className="detailBlock">
-        <h4>摘要</h4>
-        <p>{notification.latestSummary}</p>
-      </section>
-    </aside>
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <UtilityDetailList
+          title="通知范围"
+          items={[
+            `级别: ${notificationSeverityLabels[notification.severity] ?? notification.severity}`,
+            `资源: ${formatOptionalPair(notification.resourceType, notification.resourceId)}`,
+            `读取状态: ${notification.isRead ? "已读" : "未读"}`,
+          ]}
+        />
+        <UtilityDetailList
+          title="最近状态"
+          items={[
+            `首次出现: ${formatDateTime(notification.firstOccurredAt)}`,
+            `最近出现: ${formatDateTime(notification.lastOccurredAt)}`,
+            `状态: ${notificationStatusLabels[notification.status] ?? notification.status}`,
+          ]}
+        />
+        <section className="space-y-1">
+          <h4 className="text-sm font-medium">摘要</h4>
+          <p className="text-sm text-muted-foreground">{notification.latestSummary}</p>
+        </section>
+      </CardContent>
+    </Card>
   );
 }
 
 function UtilityMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  const toneClass = {
+    blue: "border-primary/20 bg-primary/5",
+    green: "border-emerald-500/20 bg-emerald-500/5",
+    orange: "border-amber-500/20 bg-amber-500/5",
+    purple: "border-violet-500/20 bg-violet-500/5",
+  }[tone] ?? "border-border";
+
   return (
-    <div className={`metricCard metric${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <Card size="sm" className={toneClass}>
+      <CardContent className="space-y-1">
+        <span className="block text-xs text-muted-foreground">{label}</span>
+        <strong className="block text-xl font-semibold text-foreground">{value}</strong>
+      </CardContent>
+    </Card>
   );
 }
 
 function UtilityDetailList({ title, items }: { title: string; items: string[] }) {
   return (
-    <section className="detailBlock">
-      <h4>{title}</h4>
-      <ul>
+    <section className="space-y-2">
+      <h4 className="text-sm font-medium">{title}</h4>
+      <ul className="space-y-1 text-sm text-muted-foreground">
         {items.map((item) => (
           <li key={item}>{item}</li>
         ))}

@@ -234,9 +234,9 @@ describe("Console shell", () => {
     expect(window.location.pathname).toBe("/operations");
     expect(operationsButton).toHaveAttribute("aria-expanded", "true");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
-    const operationsDrawer = screen.getByRole("dialog", { name: "任务" });
+    const operationsDrawer = screen.getByRole("dialog", { name: "Operations" });
     expect(within(operationsDrawer).getByText("本地调试模式不读取远端任务。")).toBeInTheDocument();
-    await user.click(within(operationsDrawer).getByRole("button", { name: "关闭任务" }));
+    await user.click(within(operationsDrawer).getByRole("button", { name: /关闭|Close/i }));
     expect(window.location.pathname).toBe("/runs");
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
 
@@ -244,9 +244,9 @@ describe("Console shell", () => {
     expect(window.location.pathname).toBe("/notifications");
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "true");
-    const notificationsDrawer = screen.getByRole("dialog", { name: "通知" });
+    const notificationsDrawer = screen.getByRole("dialog", { name: "Notifications" });
     expect(within(notificationsDrawer).getByText("本地调试模式不读取远端通知。")).toBeInTheDocument();
-    await user.click(within(notificationsDrawer).getByRole("button", { name: "关闭通知" }));
+    await user.click(within(notificationsDrawer).getByRole("button", { name: /关闭|Close/i }));
     expect(window.location.pathname).toBe("/runs");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
 

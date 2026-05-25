@@ -73,12 +73,16 @@ describe("ConsoleUtilityDrawer", () => {
       />,
     );
 
-    const drawer = screen.getByRole("dialog", { name: "任务" });
+    const drawer = screen.getByRole("dialog", { name: "Operations" });
     expect(screen.queryByRole("tablist", { name: "工具切换" })).not.toBeInTheDocument();
-    expect(drawer).toHaveClass("utilityDrawer");
-    expect(within(drawer).getByRole("heading", { name: "任务" })).toBeInTheDocument();
-    await userEvent.click(await within(drawer).findByRole("button", { name: /发送通知/ }));
+    expect(within(drawer).getByRole("button", { name: /关闭|Close/i })).toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "Operations" })).toBeInTheDocument();
+    const operation = await within(drawer).findByRole("button", { name: /发送通知/ });
+    expect(operation).toHaveAttribute("aria-current", "true");
 
+    await userEvent.click(operation);
+
+    expect(operation).toHaveAttribute("aria-current", "true");
     expect(within(drawer).getByRole("heading", { name: "发送通知" })).toBeInTheDocument();
     expect(within(drawer).getByText("目标: notification_thread · thread_1")).toBeInTheDocument();
   });
@@ -108,12 +112,14 @@ describe("ConsoleUtilityDrawer", () => {
       />,
     );
 
-    const drawer = screen.getByRole("dialog", { name: "通知" });
+    const drawer = screen.getByRole("dialog", { name: "Notifications" });
+    expect(within(drawer).getByRole("button", { name: /关闭|Close/i })).toBeInTheDocument();
     const notification = await within(drawer).findByRole("button", { name: /通知已排队/ });
     expect(within(notification).getByText("未读")).toBeInTheDocument();
 
     await user.click(notification);
 
+    expect(notification).toHaveAttribute("aria-current", "true");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/notifications/thread_1/read",
       expect.objectContaining({ method: "POST" }),

@@ -127,58 +127,63 @@ export function AppShell({
         </Sidebar>
         <ConsoleWorkbarContext.Provider value={setWorkbar}>
           <SidebarInset className={activePage === "runs" ? "overflow-hidden md:max-h-[calc(100svh-1rem)]" : undefined}>
-            <header className="sticky top-0 z-20 flex h-12 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
-              <SidebarTrigger aria-label="打开主导航" className="md:hidden" />
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <h1 className="truncate text-sm font-semibold text-foreground">{currentWorkbar.title}</h1>
-                {currentWorkbar.meta ? (
-                  <div className="hidden min-w-0 items-center gap-2 truncate text-xs text-muted-foreground sm:flex">
-                    {currentWorkbar.meta}
-                  </div>
-                ) : null}
-              </div>
-              <div className="ml-auto flex shrink-0 items-center gap-1">
-                {utilityBar ?? (
-                  <>
-                    <Button
-                      aria-expanded={activeUtility === "operations"}
-                      aria-label="任务 0"
-                      variant={activeUtility === "operations" ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      type="button"
-                      onClick={() => onOpenUtility("operations")}
-                    >
-                      <ListChecks className="size-4" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      aria-expanded={activeUtility === "notifications"}
-                      aria-label="通知 0"
-                      variant={activeUtility === "notifications" ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      type="button"
-                      onClick={() => onOpenUtility("notifications")}
-                    >
-                      <Bell className="size-4" aria-hidden="true" />
-                    </Button>
-                  </>
-                )}
-                {currentWorkbar.refresh ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+            <header className="sticky top-0 z-20 bg-muted/30 px-3 py-1 md:px-4" data-console-workbar="true">
+              <div
+                className="flex h-10 items-center gap-2 rounded-[var(--radius)] border border-border bg-card/95 px-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/90"
+                data-console-workbar-surface="true"
+              >
+                <SidebarTrigger aria-label="打开主导航" className="md:hidden" />
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <h1 className="truncate text-sm font-semibold text-foreground">{currentWorkbar.title}</h1>
+                  {currentWorkbar.meta ? (
+                    <div className="hidden min-w-0 items-center gap-2 truncate text-xs text-muted-foreground sm:flex">
+                      {currentWorkbar.meta}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  {utilityBar ?? (
+                    <>
                       <Button
-                        aria-label={currentWorkbar.refresh.label ?? "刷新"}
-                        disabled={currentWorkbar.refresh.disabled}
+                        aria-expanded={activeUtility === "operations"}
+                        aria-label="任务 0"
+                        variant={activeUtility === "operations" ? "secondary" : "ghost"}
                         size="icon-sm"
                         type="button"
-                        variant="ghost"
-                        onClick={currentWorkbar.refresh.onClick}
+                        onClick={() => onOpenUtility("operations")}
                       >
-                        <RefreshCw aria-hidden="true" className={cn("size-4", currentWorkbar.refresh.isLoading && "animate-spin")} />
+                        <ListChecks className="size-4" aria-hidden="true" />
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{currentWorkbar.refresh.label ?? "刷新"}</TooltipContent>
-                  </Tooltip>
-                ) : null}
+                      <Button
+                        aria-expanded={activeUtility === "notifications"}
+                        aria-label="通知 0"
+                        variant={activeUtility === "notifications" ? "secondary" : "ghost"}
+                        size="icon-sm"
+                        type="button"
+                        onClick={() => onOpenUtility("notifications")}
+                      >
+                        <Bell className="size-4" aria-hidden="true" />
+                      </Button>
+                    </>
+                  )}
+                  {currentWorkbar.refresh ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          aria-label={currentWorkbar.refresh.label ?? "刷新"}
+                          disabled={currentWorkbar.refresh.disabled}
+                          size="icon-sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={currentWorkbar.refresh.onClick}
+                        >
+                          <RefreshCw aria-hidden="true" className={cn("size-4", currentWorkbar.refresh.isLoading && "animate-spin")} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{currentWorkbar.refresh.label ?? "刷新"}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </div>
               </div>
             </header>
             <div

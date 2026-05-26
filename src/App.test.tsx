@@ -230,6 +230,10 @@ describe("Console shell", () => {
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开主导航" })).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
+    const workbar = screen.getByRole("banner");
+    expect(workbar).toHaveAttribute("data-console-workbar", "true");
+    const workbarSurface = workbar.querySelector("[data-console-workbar-surface='true']");
+    expect(workbarSurface).toHaveClass("rounded-[var(--radius)]", "border", "bg-card/95");
     const operationsButton = screen.getByRole("button", { name: "任务 0" });
     const notificationsButton = screen.getByRole("button", { name: "通知 0" });
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
@@ -303,6 +307,8 @@ describe("Console shell", () => {
     expect(screen.queryByRole("tablist", { name: "状态" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "筛选" }));
     expect(screen.getByRole("combobox", { name: "渠道" })).toHaveTextContent("全部");
+    await user.click(screen.getByRole("combobox", { name: "渠道" }));
+    expect(screen.getByRole("listbox")).toHaveClass("bg-card", "text-card-foreground");
     await user.keyboard("{Escape}");
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
@@ -712,8 +718,8 @@ describe("Console shell", () => {
 
     const skillHeader = screen.getByRole("columnheader", { name: "Skill" });
     const skillCell = screen.getByRole("button", { name: "main Skill 探测" }).closest("td");
-    expect(skillHeader).toHaveClass("w-20", "text-center");
-    expect(skillCell).toHaveClass("w-20", "text-center");
+    expect(skillHeader).toHaveClass("w-20", "text-right");
+    expect(skillCell).toHaveClass("w-20", "text-right");
   });
 
   it("loads Runtime Fleet from the backend query API when available", async () => {

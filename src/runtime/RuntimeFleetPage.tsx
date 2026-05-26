@@ -632,7 +632,7 @@ function AgentTable({
                 <TableHead>归属 Runtime</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>最近同步</TableHead>
-                <TableHead className="w-20 text-center">Skill</TableHead>
+                <TableHead className="w-20 text-right">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -664,26 +664,35 @@ function AgentTable({
                     <TableCell className="text-muted-foreground">
                       {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
                     </TableCell>
-                    <TableCell className="w-20 text-center">
-                      <span
-                        className="inline-flex justify-center"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <Button
-                          aria-label={`${agent.name} Skill 探测`}
-                          disabled={skillProbeDisabled}
-                          size="sm"
-                          title={skillProbeDisabled ? "不可见 Agent 暂不能探测 Skill" : undefined}
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            if (skillProbeDisabled) return;
-                            onShowSkillProbe(agent);
-                          }}
-                      >
-                          查看
-                        </Button>
-                      </span>
+                    <TableCell className="w-20 text-right">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="inline-flex justify-end"
+                            data-skill-probe-disabled={skillProbeDisabled ? "true" : undefined}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Button
+                              aria-label={`${agent.name} Skill 探测`}
+                              disabled={skillProbeDisabled}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                if (skillProbeDisabled) return;
+                                onShowSkillProbe(agent);
+                              }}
+                            >
+                              查看
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        {skillProbeDisabled ? (
+                          <TooltipContent className="max-w-72 text-left leading-5" side="top">
+                            {invisibleAgentDescription}
+                          </TooltipContent>
+                        ) : null}
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 );

@@ -287,7 +287,7 @@ export function RuntimeWorkBoardPage() {
               <Filter className="size-4" aria-hidden="true" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-4 p-3">
+          <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-4 border-border bg-card/95 p-3 text-card-foreground shadow-lg">
             <Field>
               <FieldLabel htmlFor="runs-channel-filter">渠道</FieldLabel>
               <Select
@@ -297,10 +297,14 @@ export function RuntimeWorkBoardPage() {
                 <SelectTrigger id="runs-channel-filter" className="w-full bg-background" aria-label="渠道">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
+                <SelectContent className="border-border bg-card text-card-foreground shadow-lg">
+                  <SelectItem className="data-[state=checked]:bg-accent data-[state=checked]:text-foreground" value="all">全部</SelectItem>
                   {channelOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                    <SelectItem
+                      className="data-[state=checked]:bg-accent data-[state=checked]:text-foreground"
+                      key={option.value}
+                      value={option.value}
+                    >
                       {option.label}（{option.count}）
                     </SelectItem>
                   ))}

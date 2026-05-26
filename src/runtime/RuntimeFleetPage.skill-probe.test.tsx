@@ -1,9 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { RuntimeFleetPage } from "./RuntimeFleetPage";
 
 const originalFetch = globalThis.fetch;
+const invisibleAgentDescription = "该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。";
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -23,7 +26,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
       return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
     }) as unknown as typeof fetch;
 
-    render(<RuntimeFleetPage />);
+    renderRuntimeFleetPage();
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "main Skill 探测" }));
@@ -53,7 +56,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
       return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
     }) as unknown as typeof fetch;
 
-    render(<RuntimeFleetPage />);
+    renderRuntimeFleetPage();
     await user.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
@@ -80,7 +83,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
       return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
     }) as unknown as typeof fetch;
 
-    render(<RuntimeFleetPage />);
+    renderRuntimeFleetPage();
     screen.getByRole("button", { name: "main Skill 探测" }).focus();
     await user.keyboard("{Enter}");
 
@@ -107,7 +110,7 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
       return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
     }) as unknown as typeof fetch;
 
-    render(<RuntimeFleetPage />);
+    renderRuntimeFleetPage();
     fireEvent.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
@@ -128,14 +131,74 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
       return new Response(JSON.stringify({ error: "backend unavailable" }), { status: 503 });
     }) as unknown as typeof fetch;
 
-    render(<RuntimeFleetPage />);
+    renderRuntimeFleetPage();
     fireEvent.click(screen.getByRole("button", { name: "main Skill 探测" }));
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("本地后端暂不可用，请稍后重试。")).toBeInTheDocument();
     expect(within(panel).queryByText(/HTTP 502/)).not.toBeInTheDocument();
   });
+
+  it("explains why Skill probing is disabled for invisible Agents", async () => {
+    const user = userEvent.setup();
+    const snapshot = {
+      ...fixtureSnapshot,
+      agents: fixtureSnapshot.agents.map((agent) => ({
+        ...agent,
+        collectionStatus: "invisible",
+      })),
+    };
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/runtime-fleet")) {
+        return new Response(JSON.stringify(snapshot), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/api/devices/") && url.includes("/collection-health")) {
+        return new Response(JSON.stringify({
+          checks: [],
+          deviceId: "fixture-mac",
+          lastCollectedAt: fixtureSnapshot.collectedAt,
+          lastReceivedAt: fixtureSnapshot.collectedAt,
+          status: "healthy",
+          summary: "采集正常",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/api/devices/") && url.includes("/diagnostics")) {
+        return new Response(JSON.stringify({
+          deviceId: "fixture-mac",
+          label: "在线",
+          lastDeviceStateSuccessAt: fixtureSnapshot.collectedAt,
+          lastHeartbeatAt: fixtureSnapshot.collectedAt,
+          message: "设备最近完成成功同步",
+          reason: "device_state_fresh",
+          status: "online",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+    }) as unknown as typeof fetch;
+
+    renderRuntimeFleetPage();
+
+    const skillButton = await screen.findByRole("button", { name: "main Skill 探测" });
+    await waitFor(() => expect(skillButton).toBeDisabled());
+    const tooltipTarget = skillButton.closest("[data-skill-probe-disabled='true']");
+    expect(tooltipTarget).toBeTruthy();
+    await user.hover(tooltipTarget as HTMLElement);
+
+    expect(await screen.findAllByText(invisibleAgentDescription)).not.toHaveLength(0);
+  });
 });
+
+function renderRuntimeFleetPage() {
+  return render(
+    <TooltipProvider delayDuration={0}>
+      <RuntimeFleetPage />
+    </TooltipProvider>,
+  );
+}
 
 function createProbeSnapshot(status: string, errorSummary?: string) {
   return {

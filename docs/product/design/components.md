@@ -13,7 +13,7 @@ Shared UI primitives are generated shadcn files in `src/components/ui/`. App-own
 - `Sheet`: utility drawers.
 - `Field` and `Input`: forms.
 - `Table`: dense object rows.
-- `Select`, `DropdownMenu`, and `Tabs`: filtering and view controls.
+- `Select`, `DropdownMenu`, and `Tabs`: filtering and view controls. Select dropdown content uses the card surface token (`bg-card` / `text-card-foreground`) so compact filter popovers stay visually aligned with the light Console surfaces instead of becoming a high-contrast black menu.
 - `Skeleton` and `Alert`: loading and error states.
 - `Sonner`: ephemeral feedback such as copy success.
 
@@ -83,6 +83,7 @@ App-owned wrappers:
 ## Workbar
 
 - Console pages use one sticky top workbar instead of page-level hero/title blocks.
+- The workbar is a shared rounded card-like surface (`bg-card/95`, border, restrained shadow) inside the Console shell, not a page-owned loose header. Runtime Fleet, Runs, and Settings must render the same workbar treatment.
 - The left side shows page identity and compact page-specific facts. The right side holds utility icons and, only on refreshable pages, a refresh icon as the last action.
 - Page bodies do not repeat the workbar title, explanatory paragraph, or summary metrics unless the data is part of the primary workflow.
 - Utility icons are icon-only with tooltips; counts appear as compact badges.

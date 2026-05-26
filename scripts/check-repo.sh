@@ -36,6 +36,8 @@ required_paths=(
   "docs/product/auth-and-access-spec.md"
   "docs/product/operation-job-runner-spec.md"
   "docs/product/notification-spec.md"
+  "docs/operations/ssh-deployment.md"
+  "docs/operations/self-review.md"
   "playwright.config.ts"
   "e2e/db.ts"
   "e2e/runtime-fleet.spec.ts"
@@ -118,6 +120,8 @@ markdown_files = [
     Path("docs/product/auth-and-access-spec.md"),
     Path("docs/product/operation-job-runner-spec.md"),
     Path("docs/product/notification-spec.md"),
+    Path("docs/operations/ssh-deployment.md"),
+    Path("docs/operations/self-review.md"),
 ]
 
 problems = []
@@ -151,9 +155,16 @@ if Path("docs/product/runtime-task-probe.md").exists():
     problems.append("docs/product/runtime-task-probe.md: stale filename; use docs/product/runtime-openclaw-adapter-spec.md")
 
 plan_docs = sorted(path.as_posix() for path in Path("docs/superpowers/plans").glob("*.md"))
+plan_docs.extend(
+    sorted(
+        path.as_posix()
+        for path in Path("docs/product").glob("*plan*.md")
+        if path.name != "ui-design.md"
+    )
+)
 if plan_docs:
     problems.append(
-        "docs/superpowers/plans: process plans must not be committed as durable docs: "
+        "process plans must not be committed as durable docs: "
         + ", ".join(plan_docs)
     )
 

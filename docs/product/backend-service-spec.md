@@ -2,7 +2,7 @@
 
 版本：TinySpec v0.6
 
-Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及 ECS 部署形态。
+Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及通过 SSH 运维的生产部署形态。
 
 ## 目标
 
@@ -168,6 +168,7 @@ Production-like 本地验收形态：
 生产部署形态：
 
 - 生产域名、ICP备案、DNS、TLS 证书和公网可达性属于部署/运维验证，不作为项目 harness 的必需条件。
+- 当前生产发布流程是 SSH 到生产主机更新 `main`、运行 deploy config check、重建 Docker Compose 服务；真实设备 collector 也通过 SSH 进入目标设备后运行组织设置生成的一行安装命令。完整操作边界、命令模板和回滚方式见 [../operations/ssh-deployment.md](../operations/ssh-deployment.md)。
 - 系统 Nginx 负责公网 `80/443`、HTTP 到 HTTPS 跳转、TLS 证书、静态前端反代、`/api`、`/healthz`、`/readyz` 和 WebSocket upgrade。
 - Docker Compose 运行 Postgres、backend 和 frontend 容器；frontend 绑定 `127.0.0.1:8080`，backend 绑定 `127.0.0.1:4173`，Postgres 不暴露宿主端口。
 - Nginx 必须配置足够的 `client_max_body_size`，当前为 `50m`，否则 collector 的 `device_state` 快照可能被 413 拒绝。

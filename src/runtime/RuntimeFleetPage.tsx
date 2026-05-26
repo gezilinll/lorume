@@ -6,6 +6,7 @@ import { Pill } from "@/components/data/Pill";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -64,6 +65,7 @@ const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
   unsupported: "不支持探测",
   failed: "探测失败",
 };
+const invisibleAgentDescription = "该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。";
 
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and collection state. */
 export function RuntimeFleetPage() {
@@ -630,12 +632,13 @@ function AgentTable({
                 <TableHead>归属 Runtime</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>最近同步</TableHead>
-                <TableHead className="w-24 text-right">Skill</TableHead>
+                <TableHead className="w-20 text-center">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {agents.map((agent) => {
                 const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
+                const skillProbeDisabled = status === "invisible";
                 return (
                   <TableRow
                     aria-selected={agent.id === selectedId}
@@ -661,19 +664,26 @@ function AgentTable({
                     <TableCell className="text-muted-foreground">
                       {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
                     </TableCell>
-                    <TableCell className="w-24 text-right">
-                      <Button
-                        aria-label={`${agent.name} Skill 探测`}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onShowSkillProbe(agent);
-                        }}
+                    <TableCell className="w-20 text-center">
+                      <span
+                        className="inline-flex justify-center"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        查看
-                      </Button>
+                        <Button
+                          aria-label={`${agent.name} Skill 探测`}
+                          disabled={skillProbeDisabled}
+                          size="sm"
+                          title={skillProbeDisabled ? "不可见 Agent 暂不能探测 Skill" : undefined}
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            if (skillProbeDisabled) return;
+                            onShowSkillProbe(agent);
+                          }}
+                      >
+                          查看
+                        </Button>
+                      </span>
                     </TableCell>
                   </TableRow>
                 );
@@ -928,7 +938,24 @@ function RuntimeFleetSkeleton() {
 }
 
 function FleetStatusBadge({ label, status }: { label: string; status: RuntimeFleetObjectStatus }) {
-  return <AppStatusBadge tone={fleetStatusTone(status)}>{label}</AppStatusBadge>;
+  const badge = <AppStatusBadge tone={fleetStatusTone(status)}>{label}</AppStatusBadge>;
+  if (status !== "invisible") return badge;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={`${label}：${invisibleAgentDescription}`}
+          className="inline-flex cursor-help"
+          tabIndex={0}
+        >
+          {badge}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72 text-left leading-5" side="top">
+        {invisibleAgentDescription}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function SkillStatusBadge({ label, status }: { label: string; status: AgentSkillProbeStatus }) {

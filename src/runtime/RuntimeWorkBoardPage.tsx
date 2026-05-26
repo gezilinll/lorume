@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Filter, Search, X } from "lucide-react";
+import { format, endOfDay, startOfDay } from "date-fns";
+import { CalendarIcon, Filter, Search, X } from "lucide-react";
+import { type DateRange } from "react-day-picker";
 import fleetFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -69,8 +72,7 @@ export function RuntimeWorkBoardPage() {
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [search, setSearch] = useState("");
   const [channelKind, setChannelKind] = useState<RuntimeTaskChannelKind | "all">("all");
-  const [timeStart, setTimeStart] = useState("");
-  const [timeEnd, setTimeEnd] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [detailItem, setDetailItem] = useState<RuntimeTaskBoardItem | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const hasConsoleWorkbar = useHasConsoleWorkbar();
@@ -79,9 +81,9 @@ export function RuntimeWorkBoardPage() {
     () => ({
       channelKind,
       search,
-      timeRange: createTimeRangeFilter(timeStart, timeEnd),
+      timeRange: createDateRangeFilter(dateRange),
     }),
-    [channelKind, search, timeEnd, timeStart],
+    [channelKind, dateRange, search],
   );
   const filtersKey = useMemo(() => createRuntimeTaskFiltersKey(filters), [filters]);
 
@@ -286,13 +288,13 @@ export function RuntimeWorkBoardPage() {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-4 p-3">
-            <div className="space-y-2">
-              <Label htmlFor="runs-channel-filter">渠道</Label>
+            <Field>
+              <FieldLabel htmlFor="runs-channel-filter">渠道</FieldLabel>
               <Select
                 value={channelKind}
                 onValueChange={(value) => setChannelKind(value as RuntimeTaskChannelKind | "all")}
               >
-                <SelectTrigger id="runs-channel-filter" className="w-full" aria-label="渠道">
+                <SelectTrigger id="runs-channel-filter" className="w-full bg-background" aria-label="渠道">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -304,44 +306,44 @@ export function RuntimeWorkBoardPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
+            </Field>
+            <Field>
               <div className="flex items-center justify-between gap-3">
-                <Label>时间范围</Label>
-                {timeStart || timeEnd ? (
+                <FieldLabel htmlFor="runs-date-range">日期范围</FieldLabel>
+                {dateRange?.from || dateRange?.to ? (
                   <Button
                     type="button"
                     variant="ghost"
                     size="xs"
-                    onClick={() => {
-                      setTimeStart("");
-                      setTimeEnd("");
-                    }}
+                    onClick={() => setDateRange(undefined)}
                   >
                     <X aria-hidden="true" className="size-3" />
                     清除
                   </Button>
                 ) : null}
               </div>
-              <div className="grid gap-2">
-                <Input
-                  id="runs-time-start"
-                  aria-label="开始时间"
-                  type="datetime-local"
-                  step={1}
-                  value={timeStart}
-                  onChange={(event) => setTimeStart(event.target.value)}
-                />
-                <Input
-                  id="runs-time-end"
-                  aria-label="结束时间"
-                  type="datetime-local"
-                  step={1}
-                  value={timeEnd}
-                  onChange={(event) => setTimeEnd(event.target.value)}
-                />
-              </div>
-            </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    id="runs-date-range"
+                    className="w-full justify-start bg-background px-2.5 font-normal"
+                  >
+                    <CalendarIcon aria-hidden="true" className="size-4" />
+                    <span className="min-w-0 truncate">{formatDateRangeLabel(dateRange)}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto max-w-[calc(100vw-2rem)] overflow-auto p-0" align="end">
+                  <Calendar
+                    mode="range"
+                    defaultMonth={dateRange?.from}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
+            </Field>
           </PopoverContent>
         </Popover>
       </section>
@@ -458,13 +460,23 @@ function laneSurfaceClass(laneKey: RuntimeTaskBoardLane["key"]): string {
   return "bg-[var(--runs-lane-todo)]";
 }
 
-function createTimeRangeFilter(start: string, end: string): RuntimeTaskTimeRangeFilter | undefined {
-  const normalizedStart = start.trim();
-  const normalizedEnd = end.trim();
-  if (!normalizedStart && !normalizedEnd) return undefined;
+function formatDateRangeLabel(dateRange: DateRange | undefined): string {
+  if (!dateRange?.from) return "选择日期范围";
+  if (!dateRange.to) return format(dateRange.from, "yyyy/MM/dd");
+  return `${format(dateRange.from, "yyyy/MM/dd")} - ${format(dateRange.to, "yyyy/MM/dd")}`;
+}
+
+function createDateRangeFilter(dateRange: DateRange | undefined): RuntimeTaskTimeRangeFilter | undefined {
+  if (!dateRange?.from && !dateRange?.to) return undefined;
+  const start = dateRange?.from ? startOfDay(dateRange.from).toISOString() : "";
+  const end = dateRange?.to
+    ? endOfDay(dateRange.to).toISOString()
+    : dateRange?.from
+      ? endOfDay(dateRange.from).toISOString()
+      : "";
   return {
-    start: normalizedStart || undefined,
-    end: normalizedEnd || undefined,
+    start: start || undefined,
+    end: end || undefined,
   };
 }
 

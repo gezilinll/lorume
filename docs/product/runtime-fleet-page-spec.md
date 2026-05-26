@@ -127,7 +127,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 顶部工作栏显示设备、Runtime、Agent 数量；页面主体不再重复展示独立指标卡，也不显示独立异常统计卡。
 - 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
-- Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。
+- Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。`不可见` badge hover/focus 时展示解释：`该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。`
+- `不可见` Agent 的行级 Skill 探测入口禁用，避免对最新清单中已缺失的 Agent 发起只读探测。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
 - Agent 任务数量由 `Task.agentId` 聚合。
 - Runtime 任务数量通过 `Task.agentId -> Agent.runtimeId` 聚合。

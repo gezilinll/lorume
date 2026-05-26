@@ -83,7 +83,7 @@ Rules:
 - Do not render listener status, raw execution records, adapter evidence, or debugging notes as task cards.
 - Runtime and Channel filters are separate.
 - Channel options come from backend facets, not from currently loaded rows.
-- Time range uses explicit start/end controls.
+- Time range uses one Date Picker Range control backed by shadcn Popover + Calendar; do not split it into two datetime inputs in the compact filter popover.
 - Status filtering tabs are not shown. Status is represented by six board lanes: `待处理`、`进行中`、`待验收`、`已完成`、`需关注`、`已取消`; `需关注` groups `failed` and `unknown`.
 - Lanes use a compact project-board width and fill the available viewport height. The current desktop target is approximately `17.5rem` per lane. The Runs page itself must avoid body-level vertical scrolling in the primary desktop view; the board owns horizontal scrolling at its bottom edge, and each lane owns its own vertical scrolling. Empty lanes show inline muted text on the lane background rather than a nested empty card. Lane backgrounds use the shared `--runs-lane-*` tokens with low saturation; no single normal workflow lane should visually dominate the board.
 - Task cards follow the Mail preview pattern with a fixed four-row hierarchy: assignee Agent, `userMessage` truncated to 16 characters, `agentReply` or `暂无 Agent 答复`, then last updated time and the channel pill. Card pills show channel kind only; they do not repeat lane status or conversation/group labels and they never invent an execution-link state. Click opens a detail dialog and immediately returns the card to idle visual state.

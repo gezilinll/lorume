@@ -45,7 +45,7 @@ App-owned wrappers:
 
 - Badge copy is short and semantic.
 - Status badges use semantic color.
-- Runtime Fleet Device/Runtime status badges use only `同步中`、`在线`、`离线`、`异常`; Agent status badges additionally allow `不可见` for historical Agents absent from the latest full Runtime snapshot. `未知` stays out of asset status UI.
+- Runtime Fleet Device/Runtime status badges use only `同步中`、`在线`、`离线`、`异常`; Agent status badges additionally allow `不可见` for historical Agents absent from the latest full Runtime snapshot. `不可见` must expose a Tooltip explaining that the Agent was previously collected but is absent from the latest full collection and may have been deleted, disabled, or moved out of scope. `未知` stays out of asset status UI.
 - Runtime/source/channel badges use neutral or info color unless expressing state.
 - A row should not accumulate badges that repeat the same fact.
 - Runs task cards use a consistent pill order: channel kind only. The lane already expresses status, so cards must not repeat status pills such as `待处理`; conversation/group labels such as `DingTalk 群聊` do not appear as card pills. Creator and assignee appear as text metadata, not extra pills. Missing optional facts are omitted rather than replaced with raw IDs or frontend-fabricated execution states. If the pill set exceeds the card limit, remaining pills collapse into a `+N` count pill.

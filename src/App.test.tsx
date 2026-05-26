@@ -629,7 +629,7 @@ describe("Console shell", () => {
     expect(requests.at(-1)).toContain("search=Filtered+running");
   });
 
-  it("filters Runs cards by manual time range without quick-range state", async () => {
+  it("filters Runs cards by date range without quick-range state", async () => {
     const user = userEvent.setup();
     const tasks = [
       task({
@@ -658,18 +658,21 @@ describe("Console shell", () => {
     expect(within(lanes).getAllByText("Old task").length).toBeGreaterThan(0);
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "筛选" }));
-    expect(screen.getByLabelText("开始时间")).toBeInTheDocument();
-    expect(screen.getByLabelText("结束时间")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /选择时间范围/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent("选择日期范围");
+    expect(screen.queryByLabelText("开始时间")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("结束时间")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "清除时间" })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-05-21T00:00:00" } });
-    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-05-21T23:59:59" } });
+    await user.click(screen.getByRole("button", { name: "日期范围" }));
+    const targetDay = document.querySelector<HTMLElement>('[role="gridcell"][data-day="2026-05-21"] button');
+    if (!targetDay) throw new Error("expected May 21 date range cell");
+    await user.click(targetDay);
 
     await waitFor(() => {
       expect(within(lanes).queryByText("Old task")).not.toBeInTheDocument();
     });
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent("2026/05/21");
   });
 
   it("opens Runtime Fleet and renders runtime fixture data", async () => {
@@ -709,8 +712,8 @@ describe("Console shell", () => {
 
     const skillHeader = screen.getByRole("columnheader", { name: "Skill" });
     const skillCell = screen.getByRole("button", { name: "main Skill 探测" }).closest("td");
-    expect(skillHeader).toHaveClass("w-24", "text-right");
-    expect(skillCell).toHaveClass("w-24", "text-right");
+    expect(skillHeader).toHaveClass("w-20", "text-center");
+    expect(skillCell).toHaveClass("w-20", "text-center");
   });
 
   it("loads Runtime Fleet from the backend query API when available", async () => {
@@ -790,6 +793,10 @@ describe("Console shell", () => {
     const agentRow = within(agentTable).getByRole("row", { name: /main/ });
     expect(within(agentRow).getByText("不可见")).toBeInTheDocument();
     expect(within(agentRow).queryByText("离线")).not.toBeInTheDocument();
+    expect(within(agentRow).getByRole("button", { name: "main Skill 探测" })).toBeDisabled();
+
+    await userEvent.hover(within(agentRow).getByLabelText(/不可见：/));
+    expect((await screen.findAllByText("该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。")).length).toBeGreaterThan(0);
   });
 
   it("opens Runtime Fleet agent details without a filter toolbar", async () => {

@@ -62,10 +62,10 @@ describe("DetailSurface", () => {
 
     fireEvent.pointerMove(dialog, { clientX: 1000, clientY: 500 });
 
-    expect(dialog.style.getPropertyValue("--detail-rotate-x")).toBe("-4deg");
-    expect(dialog.style.getPropertyValue("--detail-rotate-y")).toBe("4deg");
-    expect(dialog.style.getPropertyValue("--detail-scale")).toBe("1.01");
-    expect((plane as HTMLElement).style.transform).toContain("rotateX(-4deg)");
-    expect((plane as HTMLElement).style.transform).toContain("rotateY(4deg)");
+    expect(dialog.style.getPropertyValue("--detail-rotate-x")).toBe("-2.5deg");
+    expect(dialog.style.getPropertyValue("--detail-rotate-y")).toBe("2.5deg");
+    expect(dialog.style.getPropertyValue("--detail-scale")).toBe("1.008");
+    expect((plane as HTMLElement).style.transform).toContain("rotateX(-2.5deg)");
+    expect((plane as HTMLElement).style.transform).toContain("rotateY(2.5deg)");
   });
 });

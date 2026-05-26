@@ -82,9 +82,9 @@ test.describe("Runs conversation tasks", () => {
     await page.getByRole("combobox", { name: "渠道" }).click();
     await expect(page.getByRole("option", { name: "DingTalk（3）" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByLabel("开始时间")).toHaveCount(1);
-    await expect(page.getByLabel("结束时间")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: /选择时间范围/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "日期范围" })).toContainText("选择日期范围");
+    await expect(page.getByLabel("开始时间")).toHaveCount(0);
+    await expect(page.getByLabel("结束时间")).toHaveCount(0);
 
     const searchBox = await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").boundingBox();
     const filterButtonBox = await page.getByRole("button", { name: "筛选" }).boundingBox();
@@ -110,14 +110,11 @@ test.describe("Runs conversation tasks", () => {
     expect(todoLaneBox?.height ?? 0).toBeGreaterThanOrEqual((page.viewportSize()?.height ?? 900) - 210);
 
     await page.getByRole("button", { name: "筛选" }).click();
-    await page.getByLabel("开始时间").fill("2026-05-08T00:00");
-    await page.getByLabel("结束时间").fill("2026-05-10T23:59");
-    await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
-    await page.getByLabel("开始时间").fill("2026-05-10T00:00");
-    await page.getByLabel("结束时间").fill("2026-05-10T23:59");
+    await page.getByRole("button", { name: "日期范围" }).click();
+    await page.locator('[role="gridcell"][data-day="2026-05-10"] button').click();
     await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).not.toBeVisible();
-    await page.getByLabel("开始时间").fill("");
-    await page.getByLabel("结束时间").fill("");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "清除" }).click();
     await page.keyboard.press("Escape");
 
     await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("PMO");
@@ -187,7 +184,7 @@ test.describe("Runs conversation tasks", () => {
       };
     });
     await expect(detailPlane).toBeVisible();
-    expect(detailDepthStyle.scale.trim()).toBe("1.01");
+    expect(detailDepthStyle.scale.trim()).toBe("1.008");
     expect(detailDepthStyle.planeTransformStyle).toBe("preserve-3d");
     expect(detailDepthStyle.planeTransform).toContain("matrix3d");
     await expect(detail).toContainText("任务信息");

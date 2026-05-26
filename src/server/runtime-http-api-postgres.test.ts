@@ -373,8 +373,8 @@ describeDb("runtime HTTP API with Postgres store", () => {
         await expect(response.json()).resolves.toMatchObject({
           deviceId: "diagnostic-device",
           label: "在线",
-          message: "设备在线且采集正常",
-          reason: "heartbeat_and_device_state_fresh",
+          message: "设备最近完成成功同步",
+          reason: "device_state_fresh",
           status: "online",
         });
       } finally {

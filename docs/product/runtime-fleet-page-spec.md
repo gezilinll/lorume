@@ -56,6 +56,7 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 | `error` | 异常 | 最近采集、校验或入库失败。 |
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
+Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为离线并保留最近同步时间，避免旧 Agent 长期停留在在线状态。
 
 Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳道：
 

@@ -44,11 +44,31 @@ describe("deriveDeviceHealthStatus", () => {
     })).toMatchObject({
       status: "online",
       label: "在线",
-      reason: "heartbeat_and_device_state_fresh",
+      reason: "device_state_fresh",
     });
   });
 
-  it("keeps a device online after one missed heartbeat interval when device-state is fresh", () => {
+  it("keeps a device online when the control heartbeat is missing but device-state is fresh", () => {
+    expect(deriveDeviceHealthStatus({
+      deviceId: "device-a",
+      now,
+      connection: null,
+      deviceStateIngestions: [{
+        deviceId: "device-a",
+        snapshotType: "device_state",
+        status: "succeeded",
+        collectedAt: "2026-05-21T08:58:30.000Z",
+        receivedAt: "2026-05-21T08:59:00.000Z",
+        counts: { devices: 1 },
+        diagnostics: [],
+      }],
+    })).toMatchObject({
+      status: "online",
+      reason: "device_state_fresh",
+    });
+  });
+
+  it("keeps a device online after missed heartbeat intervals when device-state is fresh", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -69,11 +89,11 @@ describe("deriveDeviceHealthStatus", () => {
       }],
     })).toMatchObject({
       status: "online",
-      reason: "heartbeat_and_device_state_fresh",
+      reason: "device_state_fresh",
     });
   });
 
-  it("returns offline, not error, after multiple missed heartbeats when the last device-state succeeded", () => {
+  it("returns offline, not error, after device-state freshness expires", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -87,8 +107,8 @@ describe("deriveDeviceHealthStatus", () => {
         deviceId: "device-a",
         snapshotType: "device_state",
         status: "succeeded",
-        collectedAt: "2026-05-21T08:58:30.000Z",
-        receivedAt: "2026-05-21T08:59:00.000Z",
+        collectedAt: "2026-05-21T08:40:30.000Z",
+        receivedAt: "2026-05-21T08:41:00.000Z",
         counts: { devices: 1 },
         diagnostics: [],
       }],

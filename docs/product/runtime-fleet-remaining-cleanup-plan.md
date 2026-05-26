@@ -153,11 +153,11 @@
       }],
     })).toMatchObject({
       status: "online",
-      reason: "heartbeat_and_device_state_fresh",
+      reason: "device_state_fresh",
     });
   });
 
-  it("returns offline, not error, after multiple missed heartbeats when the last device-state succeeded", () => {
+  it("returns offline, not error, after device-state freshness expires", () => {
     expect(deriveDeviceHealthStatus({
       deviceId: "device-a",
       now,
@@ -171,8 +171,8 @@
         deviceId: "device-a",
         snapshotType: "device_state",
         status: "succeeded",
-        collectedAt: "2026-05-21T08:58:30.000Z",
-        receivedAt: "2026-05-21T08:59:00.000Z",
+        collectedAt: "2026-05-21T08:40:30.000Z",
+        receivedAt: "2026-05-21T08:41:00.000Z",
         counts: { devices: 1 },
         diagnostics: [],
       }],
@@ -193,7 +193,7 @@
   npm run test:run -- src/runtime/runtime-device-health.test.ts src/server/runtime-control-channel.test.ts
   ```
 
-  Expected: existing threshold may already satisfy the first two assertions because default `heartbeatFreshMs` is `90_000`; if it fails, fix only `src/runtime/runtime-device-health.ts` or control-channel stale/error handling.
+  Expected: Device health should now use fresh `device_state` as the primary online signal; if it fails, fix only `src/runtime/runtime-device-health.ts` or control-channel stale/error handling.
 
 - [ ] **Step 3: Fix only proven gaps**
 

@@ -217,6 +217,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         for (const agent of snapshot.agents) {
           await upsertDeviceStateAgent(client, agent);
         }
+        await markAgentsMissingFromPresentRuntimesOffline(client, snapshot);
 
         const counts = {
           agents: snapshot.agents.length,
@@ -531,6 +532,24 @@ async function upsertDeviceStateAgent(client: pg.PoolClient, agent: Agent): Prom
     toDate(agent.lastSeenAt),
     toJson(agent),
   ]);
+}
+
+async function markAgentsMissingFromPresentRuntimesOffline(
+  client: pg.PoolClient,
+  snapshot: DeviceStateSnapshot,
+): Promise<void> {
+  const runtimeIds = [...new Set(snapshot.runtimes.map((runtime) => runtime.id).filter(Boolean))];
+  if (runtimeIds.length === 0) return;
+  const agentIds = [...new Set(snapshot.agents.map((agent) => agent.id).filter(Boolean))];
+  await client.query(`
+    UPDATE agents
+    SET collection_status = 'offline',
+        raw = jsonb_set(raw, '{collectionStatus}', '"offline"'::jsonb, true),
+        updated_at = now()
+    WHERE runtime_id = ANY($1::text[])
+      AND NOT (id = ANY($2::text[]))
+      AND collection_status <> 'offline'
+  `, [runtimeIds, agentIds]);
 }
 
 async function upsertTask(client: pg.PoolClient, deviceId: string, task: Task, syncHash: string): Promise<void> {

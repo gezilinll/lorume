@@ -29,7 +29,7 @@ describe("DetailSurface", () => {
     expect(screen.getByText("承接 Agent: main")).toBeInTheDocument();
   });
 
-  it("keeps modal depth centered and uses a stronger pointer-driven 3D range", () => {
+  it("keeps modal depth centered and uses a restrained pointer-driven 3D range", () => {
     render(
       <DetailSurface
         depth="modal-3d"
@@ -62,10 +62,10 @@ describe("DetailSurface", () => {
 
     fireEvent.pointerMove(dialog, { clientX: 1000, clientY: 500 });
 
-    expect(dialog.style.getPropertyValue("--detail-rotate-x")).toBe("-6deg");
-    expect(dialog.style.getPropertyValue("--detail-rotate-y")).toBe("6deg");
-    expect(dialog.style.getPropertyValue("--detail-scale")).toBe("1.015");
-    expect((plane as HTMLElement).style.transform).toContain("rotateX(-6deg)");
-    expect((plane as HTMLElement).style.transform).toContain("rotateY(6deg)");
+    expect(dialog.style.getPropertyValue("--detail-rotate-x")).toBe("-4deg");
+    expect(dialog.style.getPropertyValue("--detail-rotate-y")).toBe("4deg");
+    expect(dialog.style.getPropertyValue("--detail-scale")).toBe("1.01");
+    expect((plane as HTMLElement).style.transform).toContain("rotateX(-4deg)");
+    expect((plane as HTMLElement).style.transform).toContain("rotateY(4deg)");
   });
 });

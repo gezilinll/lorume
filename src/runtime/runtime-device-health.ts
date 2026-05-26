@@ -6,7 +6,7 @@ export type DeviceHealthStatus = CollectionStatus;
 export type DeviceHealthReason =
   | "first_sync_pending"
   | "first_sync_timeout"
-  | "heartbeat_and_device_state_fresh"
+  | "device_state_fresh"
   | "device_state_or_heartbeat_stale"
   | "last_device_state_failed"
   | "control_error";
@@ -25,7 +25,6 @@ export interface DeviceHealthStatusInput {
   connection?: DeviceHealthConnection | null;
   deviceStateIngestions: CollectionHealthIngestion[];
   firstSyncWindowMs?: number;
-  heartbeatFreshMs?: number;
   deviceStateFreshMs?: number;
 }
 
@@ -41,8 +40,7 @@ export interface DeviceHealthStatusResult {
 }
 
 const defaultFirstSyncWindowMs = 120_000;
-const defaultHeartbeatFreshMs = 90_000;
-const defaultDeviceStateFreshMs = 300_000;
+const defaultDeviceStateFreshMs = 600_000;
 
 const labels: Record<DeviceHealthStatus, DeviceHealthStatusResult["label"]> = {
   syncing: "同步中",
@@ -54,7 +52,6 @@ const labels: Record<DeviceHealthStatus, DeviceHealthStatusResult["label"]> = {
 /** Derive the user-visible Device status from connection freshness and device-state ingestion only. */
 export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): DeviceHealthStatusResult {
   const firstSyncWindowMs = input.firstSyncWindowMs ?? defaultFirstSyncWindowMs;
-  const heartbeatFreshMs = input.heartbeatFreshMs ?? defaultHeartbeatFreshMs;
   const deviceStateFreshMs = input.deviceStateFreshMs ?? defaultDeviceStateFreshMs;
   const latestDeviceState = latestDeviceStateIngestion(input.deviceStateIngestions);
   const latestSuccess = latestSucceededDeviceState(input.deviceStateIngestions);
@@ -87,10 +84,9 @@ export function deriveDeviceHealthStatus(input: DeviceHealthStatusInput): Device
     });
   }
 
-  const heartbeatFresh = isFresh(lastHeartbeatAt, input.now, heartbeatFreshMs);
   const deviceStateFresh = isFresh(receivedAt(latestSuccess), input.now, deviceStateFreshMs);
-  if (heartbeatFresh && deviceStateFresh) {
-    return result(input, "online", "heartbeat_and_device_state_fresh", "设备在线且采集正常", {
+  if (deviceStateFresh) {
+    return result(input, "online", "device_state_fresh", "设备最近完成成功同步", {
       lastHeartbeatAt,
       lastDeviceStateSuccessAt: receivedAt(latestSuccess),
     });

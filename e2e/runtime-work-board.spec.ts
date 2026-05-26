@@ -187,7 +187,7 @@ test.describe("Runs conversation tasks", () => {
       };
     });
     await expect(detailPlane).toBeVisible();
-    expect(detailDepthStyle.scale.trim()).toBe("1.015");
+    expect(detailDepthStyle.scale.trim()).toBe("1.01");
     expect(detailDepthStyle.planeTransformStyle).toBe("preserve-3d");
     expect(detailDepthStyle.planeTransform).toContain("matrix3d");
     await expect(detail).toContainText("任务信息");

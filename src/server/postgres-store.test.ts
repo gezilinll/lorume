@@ -151,6 +151,50 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
+  it("marks agents omitted from a present runtime snapshot offline", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        const omittedAgent = {
+          ...snapshot.agents[0],
+          id: `${snapshot.runtimes[0].id}:agent:omitted`,
+          lastSeenAt: "2026-05-22T00:00:00.000Z",
+          name: "omitted-agent",
+        };
+
+        await store.upsertDeviceStateSnapshot({
+          ...snapshot,
+          agents: [snapshot.agents[0], omittedAgent],
+          tasks: [],
+        });
+        await store.upsertDeviceStateSnapshot({
+          ...snapshot,
+          agents: [snapshot.agents[0]],
+          collectedAt: "2026-05-22T00:05:00.000Z",
+          tasks: [],
+        });
+
+        const fleet = await store.readRuntimeFleet();
+        expect(fleet.summary).toMatchObject({ agentCount: 2 });
+        expect(fleet.agents.find((agent) => agent.id === omittedAgent.id)).toMatchObject({
+          collectionStatus: "offline",
+          lastSeenAt: "2026-05-22T00:00:00.000Z",
+          name: "omitted-agent",
+        });
+        expect(fleet.agents.find((agent) => agent.id === snapshot.agents[0].id)).toMatchObject({
+          collectionStatus: "online",
+        });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("keeps existing runtime metadata when a later snapshot covers a different adapter", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

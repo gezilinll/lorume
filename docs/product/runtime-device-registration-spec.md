@@ -218,6 +218,8 @@ export type CollectionStatus = "syncing" | "online" | "offline" | "error";
 | `error` | 最近一次采集、结构校验或入库失败。 |
 
 Runtime 和 Agent 的 `collectionStatus` 只表达采集可用性，不表达工作忙闲。工作中、空闲、任务数量等信息由 Task 聚合得到。
+后端以最近成功收到的 `device_state` 作为 Device 在线判断主证据；WebSocket heartbeat 用于补充连接诊断，不得让仍在稳定上报 metadata snapshot 的设备误判离线。由于真实采集存在耗时抖动，默认 Device metadata 新鲜窗口应覆盖约两轮 5 分钟采集周期。
+当新的 metadata snapshot 包含某个 Runtime 时，该 Runtime 下此前已入库但本轮未出现的 Agent 必须保留历史记录并标记为 `offline`，不得继续显示为 `online`。这只表达“本轮没有采集到该 Agent”，不删除历史 Task，也不把任务忙闲写进 Agent 状态。
 
 ### TaskStatus
 

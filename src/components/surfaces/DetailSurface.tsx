@@ -50,13 +50,13 @@ export function DetailSurface({
     const rect = event.currentTarget.getBoundingClientRect();
     const relativeX = event.clientX - (rect.left + rect.width / 2);
     const relativeY = event.clientY - (rect.top + rect.height / 2);
-    const rotateX = Math.max(-6, Math.min(6, -relativeY * 0.03));
-    const rotateY = Math.max(-6, Math.min(6, relativeX * 0.03));
+    const rotateX = Math.max(-4, Math.min(4, -relativeY * 0.02));
+    const rotateY = Math.max(-4, Math.min(4, relativeX * 0.02));
     event.currentTarget.style.setProperty("--detail-rotate-x", `${rotateX}deg`);
     event.currentTarget.style.setProperty("--detail-rotate-y", `${rotateY}deg`);
-    event.currentTarget.style.setProperty("--detail-scale", "1.015");
+    event.currentTarget.style.setProperty("--detail-scale", "1.01");
     plane.style.transform =
-      `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.015, 1.015, 1)`;
+      `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.01, 1.01, 1)`;
   }
 
   function handlePointerLeave(event: PointerEvent<HTMLDivElement>) {

@@ -218,7 +218,7 @@ describe("Console shell", () => {
     render(<App runtimeMode="agent" />);
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Lorume")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Lorume")).not.toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "主导航" });
     for (const label of ["对象目录", "总控台", "Agent Studio", "Workflow Studio", "Worker Fleet", "People", "Integrations", "Governance"]) {
       expect(within(nav).queryByRole("button", { name: label })).not.toBeInTheDocument();
@@ -230,14 +230,35 @@ describe("Console shell", () => {
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开主导航" })).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "切换组织" })).toHaveAttribute("data-sidebar", "menu-button");
+    expect(screen.getByText("精选AI")).toBeInTheDocument();
     const workbar = screen.getByRole("banner");
     expect(workbar).toHaveAttribute("data-console-workbar", "true");
+    expect(workbar).toHaveClass("border-b", "bg-background");
+    expect(workbar).not.toHaveClass("bg-muted/30", "px-3", "py-1");
     const workbarSurface = workbar.querySelector("[data-console-workbar-surface='true']");
-    expect(workbarSurface).toHaveClass("rounded-[var(--radius)]", "border", "bg-card/95");
+    expect(workbarSurface).toHaveClass("h-12");
+    expect(workbarSurface).not.toHaveClass("rounded-[var(--radius)]", "border", "bg-card/95");
     const operationsButton = screen.getByRole("button", { name: "任务 0" });
     const notificationsButton = screen.getByRole("button", { name: "通知 0" });
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(screen.getByRole("button", { name: "切换组织" }));
+    const organizationMenu = await screen.findByRole("menu");
+    expect(organizationMenu).toHaveClass("bg-card", "text-card-foreground");
+    expect(organizationMenu).not.toHaveClass("dark");
+    expect(within(organizationMenu).getByText("精选AI")).toBeInTheDocument();
+    expect(within(organizationMenu).getByText("owner")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "打开个人入口" }));
+    const profileMenu = await screen.findByRole("menu");
+    expect(profileMenu).toHaveClass("bg-card", "text-card-foreground");
+    expect(profileMenu).not.toHaveClass("dark");
+    expect(within(profileMenu).getByText("agent@local.lorume")).toBeInTheDocument();
+    expect(within(profileMenu).getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
     await user.click(within(nav).getByRole("button", { name: "Runs" }));
 

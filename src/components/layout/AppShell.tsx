@@ -1,15 +1,23 @@
 import { useState, type ReactNode } from "react";
-import { Bell, ChevronDown, ListChecks, LogOut, Play, RefreshCw, Server, Settings } from "lucide-react";
+import { Bell, ChevronsUpDown, ListChecks, LogOut, Play, RefreshCw, Server, Settings } from "lucide-react";
 import type { AuthOrganizationMembership } from "@/auth/auth-store";
-import { LorumeLogo } from "@/components/brand/LorumeLogo";
 import { ConsoleWorkbarContext, type ConsoleWorkbarState } from "@/components/layout/ConsoleWorkbar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -60,7 +68,6 @@ export function AppShell({
   utilityBar?: ReactNode;
   userEmail?: string;
 }) {
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [workbar, setWorkbar] = useState<ConsoleWorkbarState | null>(null);
   const currentWorkbar = workbar ?? { title: pageTitles[activePage] };
 
@@ -69,67 +76,41 @@ export function AppShell({
       <SidebarProvider>
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader>
-            <LorumeLogo />
-            {organization ? (
-              <Button variant="ghost" className="h-auto justify-start gap-2 px-2 py-2" type="button" aria-label="切换组织">
-                <span className="flex size-8 items-center justify-center rounded-md bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground">
-                  {initialFromText(organization.name)}
-                </span>
-                <span className="grid min-w-0 text-left text-xs">
-                  <span className="text-muted-foreground">当前组织</span>
-                  <span className="truncate font-medium">{organization.name}</span>
-                </span>
-                <ChevronDown className="ml-auto size-4" aria-hidden="true" />
-              </Button>
-            ) : null}
+            <SidebarMenu>
+              <SidebarMenuItem>
+                {organization ? (
+                  <OrganizationSwitcher organization={organization} />
+                ) : null}
+              </SidebarMenuItem>
+            </SidebarMenu>
           </SidebarHeader>
           <SidebarContent>
             <SidebarGroup>
+              <SidebarGroupLabel>Console</SidebarGroupLabel>
               <SidebarGroupContent>
                 <ConsoleNavigation activePage={activePage} onNavigate={onNavigate} />
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
           <SidebarFooter>
-            {userEmail ? (
-              <div className="rounded-lg border border-sidebar-border p-2 text-xs">
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  type="button"
-                  aria-label="打开个人入口"
-                  aria-expanded={isProfileOpen}
-                  aria-haspopup="menu"
-                  onClick={() => setIsProfileOpen((current) => !current)}
-                >
-                  <span className="flex size-8 items-center justify-center rounded-md bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground" aria-hidden="true">
-                    {initialFromText(userEmail)}
-                  </span>
-                  <span className="grid min-w-0">
-                    <strong className="truncate font-medium">个人入口</strong>
-                    <span className="truncate text-muted-foreground">账户与偏好</span>
-                  </span>
-                </button>
-                {isProfileOpen ? (
-                  <div className="mt-2 rounded-md border border-sidebar-border bg-sidebar p-2 shadow-sm" role="menu">
-                    <p className="truncate px-2 py-1 text-sidebar-foreground">{userEmail}</p>
-                    {onLogout ? (
-                      <Button variant="ghost" size="sm" className="mt-1 w-full justify-start" type="button" role="menuitem" onClick={onLogout}>
-                        <LogOut className="size-4" aria-hidden="true" />
-                        退出登录
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <SidebarMenu>
+              <SidebarMenuItem>
+                {userEmail ? <UserAccountMenu userEmail={userEmail} onLogout={onLogout} /> : null}
+              </SidebarMenuItem>
+            </SidebarMenu>
           </SidebarFooter>
           <SidebarRail />
         </Sidebar>
         <ConsoleWorkbarContext.Provider value={setWorkbar}>
-          <SidebarInset className={activePage === "runs" ? "overflow-hidden md:max-h-[calc(100svh-1rem)]" : undefined}>
-            <header className="sticky top-0 z-20 bg-muted/30 px-3 py-1 md:px-4" data-console-workbar="true">
+          <SidebarInset
+            className={cn(
+              "md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none",
+              activePage === "runs" && "overflow-hidden md:max-h-svh",
+            )}
+          >
+            <header className="sticky top-0 z-20 border-b border-border bg-background" data-console-workbar="true">
               <div
-                className="flex h-10 items-center gap-2 rounded-[var(--radius)] border border-border bg-card/95 px-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/90"
+                className="flex h-12 items-center gap-2 px-4"
                 data-console-workbar-surface="true"
               >
                 <SidebarTrigger aria-label="打开主导航" className="md:hidden" />
@@ -201,6 +182,82 @@ export function AppShell({
         </ConsoleWorkbarContext.Provider>
       </SidebarProvider>
     </TooltipProvider>
+  );
+}
+
+function OrganizationSwitcher({ organization }: { organization: AuthOrganizationMembership }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton
+          aria-label="切换组织"
+          className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+          size="lg"
+          type="button"
+        >
+          <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
+            {initialFromText(organization.name)}
+          </span>
+          <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+            <span className="truncate font-semibold">{organization.name}</span>
+            <span className="truncate text-xs text-muted-foreground">当前组织</span>
+          </span>
+          <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56 border-border bg-card text-card-foreground">
+        <DropdownMenuLabel>组织</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+          <span className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
+            {initialFromText(organization.name)}
+          </span>
+          <span className="grid min-w-0">
+            <span className="truncate font-medium">{organization.name}</span>
+            <span className="truncate text-xs text-muted-foreground">{organization.role}</span>
+          </span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function UserAccountMenu({
+  onLogout,
+  userEmail,
+}: {
+  onLogout?: () => void;
+  userEmail: string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton aria-label="打开个人入口" size="lg" type="button">
+          <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground" aria-hidden="true">
+            {initialFromText(userEmail)}
+          </span>
+          <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+            <span className="truncate font-semibold">个人入口</span>
+            <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
+          </span>
+          <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56 border-border bg-card text-card-foreground">
+        <DropdownMenuLabel className="grid gap-0.5">
+          <span>个人入口</span>
+          <span className="truncate text-xs font-normal text-muted-foreground">{userEmail}</span>
+        </DropdownMenuLabel>
+        {onLogout ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onLogout}>
+              <LogOut className="size-4" aria-hidden="true" />
+              退出登录
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

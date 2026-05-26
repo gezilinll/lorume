@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_COLLECTION_STATUSES,
   COLLECTION_STATUSES,
   RUNTIME_KINDS,
   TASK_ADAPTER_KINDS,
@@ -13,6 +14,7 @@ import {
 describe("runtime four-object model", () => {
   it("defines the compact status and runtime kind sets", () => {
     expect(COLLECTION_STATUSES).toEqual(["syncing", "online", "offline", "error"]);
+    expect(AGENT_COLLECTION_STATUSES).toEqual(["syncing", "online", "offline", "error", "invisible"]);
     expect(RUNTIME_KINDS).toEqual(["openclaw", "codex"]);
     expect(TASK_STATUSES).toEqual([
       "todo",

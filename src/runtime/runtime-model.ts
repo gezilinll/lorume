@@ -2,6 +2,10 @@ export const COLLECTION_STATUSES = ["syncing", "online", "offline", "error"] as 
 
 export type CollectionStatus = (typeof COLLECTION_STATUSES)[number];
 
+export const AGENT_COLLECTION_STATUSES = [...COLLECTION_STATUSES, "invisible"] as const;
+
+export type AgentCollectionStatus = (typeof AGENT_COLLECTION_STATUSES)[number];
+
 export const COLLECTION_DIAGNOSTIC_SEVERITIES = ["debug", "info", "warning", "error"] as const;
 
 export type CollectionDiagnosticSeverity = (typeof COLLECTION_DIAGNOSTIC_SEVERITIES)[number];
@@ -105,7 +109,7 @@ export interface Agent {
   id: string;
   runtimeId: string;
   name: string;
-  collectionStatus: CollectionStatus;
+  collectionStatus: AgentCollectionStatus;
   lastSeenAt?: string;
   diagnostics?: {
     paths?: Array<{ label: string; path: string }>;
@@ -296,7 +300,7 @@ function cleanAgent(value: LooseRecord): Agent {
     id: value.id,
     runtimeId: value.runtimeId,
     name: value.name,
-    collectionStatus: normalizeCollectionStatus(value.collectionStatus),
+    collectionStatus: normalizeAgentCollectionStatus(value.collectionStatus),
     ...(value.lastSeenAt ? { lastSeenAt: value.lastSeenAt } : {}),
     ...(value.diagnostics ? { diagnostics: value.diagnostics } : {}),
   };
@@ -432,6 +436,11 @@ function cleanTaskConversation(value: LooseRecord | undefined): Task["conversati
 function normalizeCollectionStatus(value: string | undefined): CollectionStatus {
   if (value === "syncing" || value === "online" || value === "offline" || value === "error") return value;
   return "syncing";
+}
+
+function normalizeAgentCollectionStatus(value: string | undefined): AgentCollectionStatus {
+  if (value === "invisible") return value;
+  return normalizeCollectionStatus(value);
 }
 
 function cleanCollectionDiagnostics(value: unknown): CollectionDiagnostics {

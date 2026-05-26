@@ -56,7 +56,7 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 | `error` | 异常 | 最近采集、校验或入库失败。 |
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
-Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为离线并保留最近同步时间，避免旧 Agent 长期停留在在线状态。
+Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为 `不可见` 并保留最近同步时间，避免旧 Agent 长期停留在在线状态。Agent 本轮仍在但没有任务时仍显示 `在线`。
 
 Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳道：
 
@@ -127,7 +127,7 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 顶部工作栏显示设备、Runtime、Agent 数量；页面主体不再重复展示独立指标卡，也不显示独立异常统计卡。
 - 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
-- Device、Runtime、Agent 状态只显示 `同步中 / 在线 / 离线 / 异常`。
+- Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
 - Agent 任务数量由 `Task.agentId` 聚合。
 - Runtime 任务数量通过 `Task.agentId -> Agent.runtimeId` 聚合。

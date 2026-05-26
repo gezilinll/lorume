@@ -75,6 +75,7 @@ describe("runtime fleet query", () => {
 
     expect(collectionStatusLabels).toEqual({
       error: "异常",
+      invisible: "不可见",
       offline: "离线",
       online: "在线",
       syncing: "同步中",
@@ -93,6 +94,7 @@ describe("runtime fleet query", () => {
       },
     }, runtime)).toBe("online");
     expect(deriveAgentFleetStatus(snapshot, agent)).toBe("online");
+    expect(deriveAgentFleetStatus(snapshot, { ...agent, collectionStatus: "invisible" })).toBe("invisible");
   });
 
   it("resolves device detail with only device facts, collector facts, and derived task counts", () => {

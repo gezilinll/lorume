@@ -937,7 +937,7 @@ function SkillStatusBadge({ label, status }: { label: string; status: AgentSkill
 
 function fleetStatusTone(status: RuntimeFleetObjectStatus): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "online") return "success";
-  if (status === "offline") return "neutral";
+  if (status === "offline" || status === "invisible") return "neutral";
   if (status === "error") return "danger";
   return "info";
 }

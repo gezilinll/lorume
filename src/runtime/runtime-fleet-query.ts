@@ -1,6 +1,7 @@
 import {
   createDeviceStateSnapshot,
   type Agent,
+  type AgentCollectionStatus,
   type CollectionStatus,
   type Device,
   type RuntimeFleetTaskSummary,
@@ -27,18 +28,19 @@ export const channelKindLabels: Record<TaskChannelKind, string> = {
 };
 
 /** Product collection status labels shown for Device, Runtime, and Agent rows. */
-export const collectionStatusLabels: Record<CollectionStatus, string> = {
+export const collectionStatusLabels: Record<RuntimeFleetObjectStatus, string> = {
   syncing: "同步中",
   online: "在线",
   offline: "离线",
   error: "异常",
+  invisible: "不可见",
 };
 
 /** Alias used by page components for Runtime Fleet object labels. */
 export const runtimeFleetObjectStatusLabels = collectionStatusLabels;
 
 /** Normalized Runtime Fleet object status. */
-export type RuntimeFleetObjectStatus = CollectionStatus;
+export type RuntimeFleetObjectStatus = CollectionStatus | AgentCollectionStatus;
 
 /** Backend/UI Runtime Fleet snapshot built from the four top-level product objects. */
 export interface RuntimeFleetSnapshot {
@@ -187,7 +189,7 @@ export function deriveAgentFleetStatus(
   agent: Agent,
   _collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
 ): RuntimeFleetObjectStatus {
-  return normalizeCollectionStatus(agent.collectionStatus);
+  return normalizeRuntimeFleetObjectStatus(agent.collectionStatus);
 }
 
 /** Resolve a detail panel object from the latest snapshot. */
@@ -401,6 +403,11 @@ function normalizeCollectionStatus(value: unknown): CollectionStatus {
   return value === "online" || value === "offline" || value === "error" || value === "syncing"
     ? value
     : "syncing";
+}
+
+function normalizeRuntimeFleetObjectStatus(value: unknown): RuntimeFleetObjectStatus {
+  if (value === "invisible") return value;
+  return normalizeCollectionStatus(value);
 }
 
 function deviceForRuntime(snapshot: RuntimeFleetSnapshot, runtime: Runtime): Device | undefined {

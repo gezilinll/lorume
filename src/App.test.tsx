@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fleetFixture from "../fixtures/runtime/runtime-fleet-query.sample.json";
 import { App } from "./App";
 import type { RuntimeFleetSnapshot } from "./runtime/runtime-fleet-query";
-import { TASK_CHANNEL_KIND_LABELS, TASK_STATUSES, type CollectionStatus, type Task, type TaskChannelKind } from "./runtime/runtime-model";
+import { TASK_CHANNEL_KIND_LABELS, TASK_STATUSES, type AgentCollectionStatus, type CollectionStatus, type Task, type TaskChannelKind } from "./runtime/runtime-model";
 
 const originalFetch = globalThis.fetch;
 const originalPath = window.location.pathname;
@@ -138,7 +138,7 @@ async function chooseRunsStatus(label: string) {
   await userEvent.click(screen.getByRole("tab", { name: label }));
 }
 
-function fleetWithStatus(runtimeStatus: CollectionStatus, agentStatus: CollectionStatus): RuntimeFleetSnapshot {
+function fleetWithStatus(runtimeStatus: CollectionStatus, agentStatus: AgentCollectionStatus): RuntimeFleetSnapshot {
   return {
     ...fleetSnapshot,
     agents: fleetSnapshot.agents.map((agent) => ({
@@ -777,6 +777,19 @@ describe("Console shell", () => {
     const agentRow = within(agentTable).getByRole("row", { name: /main/ });
     expect(within(agentRow).getByText("异常")).toBeInTheDocument();
     expect(within(agentRow).queryByText("工作中")).not.toBeInTheDocument();
+  });
+
+  it("shows omitted historical Agents as invisible instead of offline", async () => {
+    const snapshot = fleetWithStatus("online", "invisible");
+    installRuntimeFleetFetch(snapshot);
+
+    render(<App runtimeMode="agent" />);
+    await userEvent.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+
+    const agentTable = await screen.findByRole("table", { name: "Agent 列表" });
+    const agentRow = within(agentTable).getByRole("row", { name: /main/ });
+    expect(within(agentRow).getByText("不可见")).toBeInTheDocument();
+    expect(within(agentRow).queryByText("离线")).not.toBeInTheDocument();
   });
 
   it("opens Runtime Fleet agent details without a filter toolbar", async () => {

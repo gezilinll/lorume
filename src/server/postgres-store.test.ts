@@ -151,7 +151,7 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
-  it("marks agents omitted from a present runtime snapshot offline", async () => {
+  it("marks agents omitted from a present runtime snapshot invisible", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
       runDatabaseSchemaScript(database.url);
@@ -180,7 +180,7 @@ describeDb("Postgres runtime store", () => {
         const fleet = await store.readRuntimeFleet();
         expect(fleet.summary).toMatchObject({ agentCount: 2 });
         expect(fleet.agents.find((agent) => agent.id === omittedAgent.id)).toMatchObject({
-          collectionStatus: "offline",
+          collectionStatus: "invisible",
           lastSeenAt: "2026-05-22T00:00:00.000Z",
           name: "omitted-agent",
         });

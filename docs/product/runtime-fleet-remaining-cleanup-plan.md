@@ -15,7 +15,7 @@
 - 完整 Lorume 内部 ID 不再作为详情正文展示；详情通过 `复制 ID` 按钮复制内部 ID。不要切换 UUID，不做 ID 迁移。
 - Device、Runtime、Agent 的状态仍然独立计算。Device 离线不强制把 Runtime/Agent 改成异常。
 - Device 普通断连应显示 `离线`；只有 control-plane 真错误、最近 `device_state` 失败或首次同步超时才显示 `异常`。
-- Runtime/Agent 只展示 `collectionStatus`：`同步中 / 在线 / 离线 / 异常`。工作忙闲、任务失败数量只能作为 Task 派生信息。
+- Runtime/Agent 只展示 `collectionStatus`：Runtime 为 `同步中 / 在线 / 离线 / 异常`，Agent 额外允许 `不可见`。工作忙闲、任务失败数量只能作为 Task 派生信息。
 - 自动化测试不得写真实生产后端或生产数据库；真实设备验证只能作为观察者验收，发现缺口后回到项目代码/测试修复，再重新验证。
 - 长期规则进对应 product spec 和 harness；这份文件是执行方案，不替代 product spec。
 

@@ -192,7 +192,7 @@ test.describe("Runs conversation tasks", () => {
     expect(detailDepthStyle.planeTransform).toContain("matrix3d");
     await expect(detail).toContainText("任务信息");
     await expect(detail).toContainText("渠道");
-    await expect(detail).toContainText("DingTalk");
+    await expect(detail).toContainText("DingTalk 群聊");
     await expect(detail).toContainText("发起人");
     await expect(detail).toContainText("PMO");
     await expect(detail).toContainText("承接 Agent");

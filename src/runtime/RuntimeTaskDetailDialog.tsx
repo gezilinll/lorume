@@ -3,6 +3,7 @@ import { DetailSurface } from "@/components/surfaces/DetailSurface";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
 import {
   formatRuntimeTaskAgentReply,
+  formatRuntimeTaskChannelDetail,
   formatRuntimeTaskDetailTitle,
   getRuntimeTaskFullUserMessage,
 } from "./runtime-task-display";
@@ -45,7 +46,7 @@ export function RuntimeTaskDetailDialog({
           <DetailPair label="发起人" value={item.creatorLabel} />
           <DetailPair label="承接 Agent" value={item.assigneeLabel} />
           <DetailPair label="更新时间" value={formatRuntimeTimestamp(updatedAt)} />
-          <DetailPair label="渠道" value={item.channelKindLabel ?? "未上报"} />
+          <DetailPair label="渠道" value={formatRuntimeTaskChannelDetail(item)} />
         </div>
       </TaskSidePanel>
       <TaskMessageSection title="用户消息">

@@ -119,4 +119,4 @@ Codex adapter 只有在本机 Codex thread 能安全分类为 `codex-native-or-o
 - 如果验收发现测试金字塔漏掉真实行为，先把缺口归类为 unit、script、backend API、DB integration 或 Playwright E2E，再补最小 harness。
 - 后端 WebSocket 只验证连接健康，不作为采集触发器。
 - Runs 视觉验收必须覆盖：六泳道状态收敛、无状态筛选 tab、空泳道 inline 空态、Mail-list 卡片密度、任务卡 spotlight / 2.5D hover、点击卡片后详情 Dialog 打开且卡片回到 idle 状态。任务卡固定展示承接 Agent、`userMessage` 16 字截断、`agentReply` 或 `暂无 Agent 答复`、更新时间和渠道 pill；不重复泳道状态，不展示执行关联状态，也不把 `DingTalk 群聊` 等会话/群组名称当作卡片 pill。
-- Runs 任务详情必须是结构化卡片而不是字段堆叠：顶部只展示短截断的 `userMessage` 标题；正文只包含任务信息、用户消息、Agent 回复三块。任务信息只能展示发起人、承接 Agent、更新时间、渠道；不得展示 raw external id、adapter evidence、执行关联状态、采集来源或执行调试字段。
+- Runs 任务详情必须是结构化卡片而不是字段堆叠：顶部只展示短截断的 `userMessage` 标题；正文只包含任务信息、用户消息、Agent 回复三块。任务信息只能展示发起人、承接 Agent、更新时间、渠道；渠道应组合渠道类型和后端已归一化的可读会话/来源名，例如 `DingTalk 小卷和用户支持的同学们` 或 `Slock #AjisFarm`；不得展示 raw external id、adapter evidence、执行关联状态、采集来源或执行调试字段。

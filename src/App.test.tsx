@@ -334,7 +334,7 @@ describe("Console shell", () => {
     expect(within(detail).getByText("main")).toBeInTheDocument();
     expect(within(detail).getByText("更新时间")).toBeInTheDocument();
     expect(within(detail).getByText("渠道")).toBeInTheDocument();
-    expect(within(detail).getByText("DingTalk")).toBeInTheDocument();
+    expect(within(detail).getByText("DingTalk 群聊")).toBeInTheDocument();
     expect(within(detail).getByText("用户消息")).toBeInTheDocument();
     expect(within(detail).getByText("Agent 回复")).toBeInTheDocument();
     expect(within(detail).queryByText("会话/群组")).not.toBeInTheDocument();

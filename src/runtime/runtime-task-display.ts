@@ -56,6 +56,16 @@ export function formatRuntimeTaskAgentReply(item: RuntimeTaskBoardItem): string 
   return item.agentReply?.trim() || agentReplyFallback;
 }
 
+export function formatRuntimeTaskChannelDetail(item: RuntimeTaskBoardItem): string {
+  const channelKindLabel = item.channelKindLabel?.trim();
+  const conversationLabel = getReadableConversationLabel(item);
+  if (channelKindLabel && conversationLabel) {
+    if (labelsReferToSameChannel(channelKindLabel, conversationLabel)) return conversationLabel;
+    return `${channelKindLabel} ${conversationLabel}`;
+  }
+  return conversationLabel || channelKindLabel || "未上报";
+}
+
 export function getRuntimeTaskFullUserMessage(item: RuntimeTaskBoardItem): string {
   return item.userMessage?.trim() || item.displayTitle || "未命名任务";
 }
@@ -69,4 +79,21 @@ function truncateTaskText(value: string, maxLength: number): string {
   const chars = Array.from(text);
   if (chars.length <= maxLength) return text;
   return `${chars.slice(0, maxLength).join("").trimEnd()}...`;
+}
+
+function getReadableConversationLabel(item: RuntimeTaskBoardItem): string | undefined {
+  if (item.channel?.kind === "slock" && item.channel.externalId?.trim().startsWith("#")) {
+    return item.channel.externalId.trim();
+  }
+  const label = item.channelLabel?.trim();
+  if (!label || isOpaqueConversationId(label)) return undefined;
+  return label;
+}
+
+function labelsReferToSameChannel(channelKindLabel: string, conversationLabel: string): boolean {
+  return conversationLabel.toLowerCase().startsWith(channelKindLabel.toLowerCase());
+}
+
+function isOpaqueConversationId(value: string): boolean {
+  return value.toLowerCase().startsWith("cid");
 }

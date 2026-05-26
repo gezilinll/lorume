@@ -3,6 +3,7 @@ import {
   agentReplyFallback,
   formatRuntimeTaskAgentReply,
   formatRuntimeTaskCardTitle,
+  formatRuntimeTaskChannelDetail,
   formatRuntimeTaskDetailTitle,
   getRuntimeTaskCardPills,
 } from "./runtime-task-display";
@@ -41,6 +42,18 @@ describe("runtime task display helpers", () => {
     expect(getRuntimeTaskCardPills(taskItem).map((pill) => [pill.kind, pill.label])).toEqual([
       ["channel", "DingTalk"],
     ]);
+  });
+
+  it("combines channel kind and readable conversation metadata for task details", () => {
+    expect(formatRuntimeTaskChannelDetail(taskItem)).toBe("DingTalk 群聊");
+    expect(formatRuntimeTaskChannelDetail({
+      ...taskItem,
+      adapter: { kind: "slock" },
+      channel: { externalId: "#AjisFarm", kind: "slock" },
+      channelKindLabel: "Slock",
+      channelLabel: "AjisFarm",
+      conversation: { externalId: "#AjisFarm", title: "AjisFarm" },
+    })).toBe("Slock #AjisFarm");
   });
 
   it("omits card pills when no real channel metadata exists", () => {

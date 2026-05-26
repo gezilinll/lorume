@@ -48,7 +48,7 @@ describe("RuntimeTaskDetailDialog", () => {
     expect(screen.getByText("更新时间")).toBeInTheDocument();
     expect(screen.getByText("2026/05/22 01:59:00")).toBeInTheDocument();
     expect(screen.getByText("渠道")).toBeInTheDocument();
-    expect(screen.getByText("DingTalk")).toBeInTheDocument();
+    expect(screen.getByText("DingTalk 群聊")).toBeInTheDocument();
     expect(dialog).not.toHaveTextContent("cid-private-raw");
     expect(dialog).not.toHaveTextContent("未关联执行");
     expect(dialog).not.toHaveTextContent("任务状态");
@@ -61,5 +61,19 @@ describe("RuntimeTaskDetailDialog", () => {
     render(<RuntimeTaskDetailDialog item={{ ...item, agentReply: undefined }} onOpenChange={vi.fn()} open />);
 
     expect(screen.getByTestId("runtime-task-detail-agent-reply")).toHaveTextContent("暂无 Agent 答复");
+  });
+
+  it("shows Slock workspace/channel context in the channel field", () => {
+    render(<RuntimeTaskDetailDialog item={{
+      ...item,
+      adapter: { kind: "slock" },
+      channel: { externalId: "#AjisFarm", kind: "slock" },
+      channelKindLabel: "Slock",
+      channelLabel: "AjisFarm",
+      conversation: { externalId: "#AjisFarm", title: "AjisFarm" },
+    }} onOpenChange={vi.fn()} open />);
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Slock #AjisFarm");
   });
 });

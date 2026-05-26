@@ -71,7 +71,7 @@ App-owned wrappers:
 - Detail text uses Sans; technical values and timestamps can use Mono.
 - Do not repeat data already obvious in the surrounding list unless it helps orientation.
 - Object details that are opened from a card/list use `DetailSurface` dialogs. Dialog overlays use only light dimming plus a restrained `2px` backdrop blur; stronger blur or frosted panels are not allowed.
-- Runs task details are not raw field stacks. The header title is only truncated `userMessage`; the body has exactly three designed blocks: task information (`发起人`、`承接 Agent`、`更新时间`、`渠道`), user message, and Agent reply. Do not repeat status, channel, or Agent in the header, and do not show execution association, source summary, adapter evidence, or raw IDs.
+- Runs task details are not raw field stacks. The header title is only truncated `userMessage`; the body has exactly three designed blocks: task information (`发起人`、`承接 Agent`、`更新时间`、`渠道`), user message, and Agent reply. The channel field may include the backend-normalized readable conversation/source label after the channel kind, for example `DingTalk 小卷和用户支持的同学们` or `Slock #AjisFarm`; it must never fall back to opaque external IDs. Do not repeat status, channel, or Agent in the header, and do not show execution association, source summary, adapter evidence, or raw IDs.
 
 ## Utility Drawers
 

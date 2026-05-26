@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
@@ -336,17 +340,17 @@ function applyDeviceOverrides(snapshot, config) {
   return { ...snapshot, device: nextDevice, runtimes, agents };
 }
 
-function collectSnapshot(config, args) {
+async function collectSnapshot(config, args) {
   return collectSnapshotViaLorumeCli(config, args);
 }
 
-function collectSnapshotViaLorumeCli(config, args) {
+async function collectSnapshotViaLorumeCli(config, args) {
   const cliArgs = ["collect", "device-state", "--json"];
   if (args.configPath) cliArgs.push("--config", args.configPath);
   if (args.fixturePath) cliArgs.push("--snapshot", args.fixturePath);
   const identity = resolveCliDeviceIdentity(config, args);
   if (identity.deviceId) cliArgs.push("--device-id", identity.deviceId);
-  return stripCliCommand(runLorumeCliJson(config, cliArgs));
+  return stripCliCommand(await runLorumeCliJson(config, cliArgs));
 }
 
 function resolveDeviceToken(config, args) {
@@ -740,7 +744,7 @@ async function runOnce(config, args, mode = "once") {
   });
   try {
     const cliStartedAt = Date.now();
-    const snapshot = collectSnapshot(config, args);
+    const snapshot = await collectSnapshot(config, args);
     metrics.cliDurationMs = Date.now() - cliStartedAt;
     metrics.taskCount = Array.isArray(snapshot.tasks) ? snapshot.tasks.length : 0;
 
@@ -822,23 +826,73 @@ function resolveLorumeCliPath(config) {
 
 function runLorumeCliJson(config, cliArgs) {
   const cliPath = resolveLorumeCliPath(config);
-  const result = spawnSync(process.execPath, [cliPath, ...cliArgs], {
-    encoding: "utf8",
-    env: { ...process.env },
-    maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: resolveCollectionTimeoutMs(config),
+  const timeoutMs = resolveCollectionTimeoutMs(config);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...cliArgs], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let settled = false;
+    let killTimer;
+
+    const settle = (fn, value, options = {}) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (killTimer && !options.keepKillTimer) clearTimeout(killTimer);
+      fn(value);
+    };
+
+    const failAndKill = (error) => {
+      if (settled) return;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (child.exitCode === null) child.kill("SIGKILL");
+      }, 500);
+      settle(reject, error, { keepKillTimer: true });
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      failAndKill(new Error(`lorume CLI timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      outputBytes += Buffer.byteLength(chunk);
+      if (outputBytes > DEFAULT_PROBE_MAX_BUFFER_BYTES) {
+        failAndKill(new Error("lorume CLI output exceeded maximum buffer size"));
+        return;
+      }
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      outputBytes += Buffer.byteLength(chunk);
+      if (outputBytes > DEFAULT_PROBE_MAX_BUFFER_BYTES) {
+        failAndKill(new Error("lorume CLI output exceeded maximum buffer size"));
+        return;
+      }
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      settle(reject, error);
+    });
+    child.on("close", (status) => {
+      if (settled) return;
+      if (status !== 0) {
+        settle(reject, new Error(stderr.trim() || `lorume CLI failed with exit code ${status}`));
+        return;
+      }
+      try {
+        settle(resolve, JSON.parse(stdout));
+      } catch {
+        settle(reject, new Error("lorume CLI returned non-JSON output"));
+      }
+    });
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const stderr = result.stderr.trim();
-    throw new Error(stderr || `lorume CLI failed with exit code ${result.status}`);
-  }
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw new Error("lorume CLI returned non-JSON output");
-  }
 }
 
 function stripCliCommand(value) {
@@ -883,7 +937,7 @@ function resolveWsUrl(config, args) {
 }
 
 function sendControlMessage(socket, message) {
-  if (socket.readyState !== WebSocket.OPEN) return;
+  if (!isControlSocketOpen(socket)) return;
   socket.send(JSON.stringify({ sentAt: isoNow(), ...message }));
 }
 
@@ -916,9 +970,175 @@ function createControlDevice(config, args, observedAt) {
   return createDevice(mergedControlConfig(config, args), observedAt);
 }
 
+class MinimalWebSocketClient {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  constructor(wsUrl) {
+    this.url = new URL(wsUrl);
+    this.readyState = MinimalWebSocketClient.CONNECTING;
+    this.events = new EventEmitter();
+    this.socket = undefined;
+    queueMicrotask(() => this.connect());
+  }
+
+  addEventListener(type, listener) {
+    this.events.on(type, listener);
+  }
+
+  removeEventListener(type, listener) {
+    this.events.off(type, listener);
+  }
+
+  send(data) {
+    if (this.readyState !== MinimalWebSocketClient.OPEN || !this.socket) return;
+    this.socket.write(createWebSocketTextFrame(String(data)));
+  }
+
+  close() {
+    if (this.readyState === MinimalWebSocketClient.CLOSED) return;
+    this.readyState = MinimalWebSocketClient.CLOSING;
+    this.socket?.end();
+  }
+
+  connect() {
+    const secure = this.url.protocol === "wss:";
+    if (!secure && this.url.protocol !== "ws:") {
+      this.emitError(new Error(`unsupported WebSocket protocol: ${this.url.protocol}`));
+      this.markClosed();
+      return;
+    }
+
+    const port = Number(this.url.port || (secure ? 443 : 80));
+    const key = randomBytes(16).toString("base64");
+    const socket = secure
+      ? tls.connect({ host: this.url.hostname, port, servername: this.url.hostname })
+      : net.connect({ host: this.url.hostname, port });
+    this.socket = socket;
+    let handshakeBuffer = Buffer.alloc(0);
+    let handshakeSent = false;
+    let upgraded = false;
+    const sendHandshake = () => {
+      if (handshakeSent) return;
+      handshakeSent = true;
+      socket.write(createWebSocketHandshake(this.url, key));
+    };
+
+    socket.setNoDelay(true);
+    if (secure) socket.on("secureConnect", sendHandshake);
+    else socket.on("connect", sendHandshake);
+    socket.on("data", (chunk) => {
+      if (upgraded) return;
+      handshakeBuffer = Buffer.concat([handshakeBuffer, chunk]);
+      const headerEnd = handshakeBuffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) return;
+      try {
+        verifyWebSocketHandshake(handshakeBuffer.subarray(0, headerEnd).toString("latin1"), key);
+        upgraded = true;
+        this.readyState = MinimalWebSocketClient.OPEN;
+        this.events.emit("open");
+      } catch (error) {
+        this.emitError(error);
+        this.close();
+      }
+    });
+    socket.on("error", (error) => {
+      this.emitError(error);
+    });
+    socket.on("close", () => {
+      this.markClosed();
+    });
+  }
+
+  emitError(error) {
+    this.events.emit("error", error);
+  }
+
+  markClosed() {
+    if (this.readyState === MinimalWebSocketClient.CLOSED) return;
+    this.readyState = MinimalWebSocketClient.CLOSED;
+    this.events.emit("close");
+  }
+}
+
+function resolveWebSocketClient() {
+  if (typeof WebSocket !== "undefined") return WebSocket;
+  return MinimalWebSocketClient;
+}
+
+function createWebSocketHandshake(url, key) {
+  const pathWithSearch = `${url.pathname || "/"}${url.search || ""}`;
+  return [
+    `GET ${pathWithSearch} HTTP/1.1`,
+    `Host: ${url.host}`,
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Key: ${key}`,
+    "Sec-WebSocket-Version: 13",
+    "\r\n",
+  ].join("\r\n");
+}
+
+function verifyWebSocketHandshake(rawHeaders, key) {
+  const lines = rawHeaders.split("\r\n");
+  if (!/^HTTP\/1\.[01] 101\b/.test(lines[0] || "")) {
+    throw new Error("WebSocket handshake failed");
+  }
+  const headers = new Map();
+  for (const line of lines.slice(1)) {
+    const separator = line.indexOf(":");
+    if (separator === -1) continue;
+    headers.set(line.slice(0, separator).trim().toLowerCase(), line.slice(separator + 1).trim());
+  }
+  const expectedAccept = createHash("sha1")
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest("base64");
+  if (headers.get("sec-websocket-accept") !== expectedAccept) {
+    throw new Error("WebSocket handshake accept mismatch");
+  }
+}
+
+function createWebSocketTextFrame(payload) {
+  const body = Buffer.from(payload);
+  const mask = randomBytes(4);
+  let header;
+  if (body.length < 126) {
+    header = Buffer.alloc(2);
+    header[1] = 0x80 | body.length;
+  } else if (body.length < 65_536) {
+    header = Buffer.alloc(4);
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(body.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(body.length), 2);
+  }
+  header[0] = 0x81;
+  const maskedBody = Buffer.alloc(body.length);
+  for (let index = 0; index < body.length; index += 1) {
+    maskedBody[index] = body[index] ^ mask[index % 4];
+  }
+  return Buffer.concat([header, mask, maskedBody]);
+}
+
+function isControlSocketOpen(socket) {
+  const constructorOpen = socket?.constructor?.OPEN;
+  const globalOpen = typeof WebSocket !== "undefined" ? WebSocket.OPEN : undefined;
+  const openState = typeof constructorOpen === "number"
+    ? constructorOpen
+    : typeof globalOpen === "number"
+      ? globalOpen
+      : 1;
+  return socket.readyState === openState;
+}
+
 function startControlChannel(config, args) {
   const wsUrl = resolveWsUrl(config, args);
-  if (!wsUrl || typeof WebSocket === "undefined") return;
+  const WebSocketClient = resolveWebSocketClient();
+  if (!wsUrl || !WebSocketClient) return;
 
   const serverUrl = resolveServerUrl(config, args);
   if (!serverUrl && !args.printOnly) return;
@@ -929,7 +1149,7 @@ function startControlChannel(config, args) {
 
   const connect = () => {
     if (closed) return;
-    const socket = new WebSocket(wsUrl);
+    const socket = new WebSocketClient(wsUrl);
 
     socket.addEventListener("open", () => {
       const observedAt = isoNow();

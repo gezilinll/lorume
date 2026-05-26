@@ -375,6 +375,8 @@ Collector 必须记录本地结构化耗时指标，至少包含 run id、总耗
 
 数据采集 interval 和 CLI subprocess timeout 必须可配置。默认数据采集 interval 应大于正常真实设备 run 的预期耗时；WebSocket heartbeat 仍是连接健康信号，必须独立于数据采集 interval，并继续使用较短心跳周期。
 
+Collector 的采集 subprocess 不能阻塞控制通道 heartbeat。即使 `device_state` 采集耗时接近或超过设备离线阈值，常驻 collector 也必须保持事件循环可运行并继续发送 heartbeat。Collector 还必须兼容没有全局 `WebSocket` 的 Node 运行时；如果设备 Node 可以执行 HTTP 上报但没有内置 WebSocket，collector 仍应使用设备包内能力建立标准 WebSocket 控制连接，不能静默跳过 heartbeat。
+
 ## 安装与卸载
 
 组织 owner / admin 可以生成 device token，并得到一条包含 server URL、device id 和 device token 的安装命令。Device token 明文只在创建响应中出现一次，后端只保存 hash 和 token prefix。

@@ -186,7 +186,7 @@ Production-like 本地验收形态：
 - operation runner harness：Postgres Job claim、lease、retry、完成态和失败态。
 - notification harness：事件聚合、限流、in-app 记录和 email delivery 记录。
 - collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime 采集失败通知。
-- collector contract harness：当前 collector `device_state` payload 可被后端接收。
+- collector contract harness：当前 collector `device_state` payload 可被后端接收；常驻 collector 在采集 subprocess 运行期间仍会发送 heartbeat，且 Node 运行时缺少全局 `WebSocket` 时仍能通过设备包内 fallback 建立控制通道。
 - error catalog harness：规范化错误码能映射为用户可读 message，API 不能直接返回 `invalid_or_expired_code` 一类技术字符串。
 - structured logging harness：后端和 collector 失败路径能写结构化日志，并确认 secret 字段被脱敏。
 - deploy config harness：backend bundle、Dockerfile、Nginx、production-like compose 必须和当前服务入口一致。

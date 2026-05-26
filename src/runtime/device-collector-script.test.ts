@@ -3,8 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { deviceInstallerRuntimeFiles } from "../backend/device-installer-manifest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -321,6 +322,85 @@ console.log(JSON.stringify({
       expect((snapshot.device as { id: string }).id).toBe("fixture-mac");
     } finally {
       server.close();
+    }
+  });
+
+  it("keeps sending control heartbeats while device-state collection is in progress", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-heartbeat-during-collection-"));
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(tempDir, "config.json");
+    const controlServer = await startControlAndSnapshotServer();
+    const collector = createCollectorProcessTracker();
+
+    writeFileSync(fakeCli, `await new Promise((resolve) => setTimeout(resolve, 900));
+console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("heartbeat-device"))}));
+`);
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "heartbeat-device",
+      deviceToken: "heartbeat-token",
+      serverUrl: controlServer.baseUrl,
+    }));
+
+    try {
+      collector.child = spawn(process.execPath, [
+        collectorScript,
+        "--config",
+        configPath,
+        "--interval-ms",
+        "100",
+      ], {
+        cwd: repoRoot,
+        env: { ...process.env, LORUME_CLI_PATH: fakeCli },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => controlServer.heartbeatBeforeFirstSnapshot(),
+        "heartbeat before first device-state snapshot",
+        2_000,
+      );
+    } finally {
+      await collector.stop();
+      controlServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("uses a bundled fallback control client when the Node runtime has no global WebSocket", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-heartbeat-fallback-"));
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(tempDir, "config.json");
+    const wrapperPath = path.join(tempDir, "run-without-global-websocket.mjs");
+    const controlServer = await startControlAndSnapshotServer();
+    const collector = createCollectorProcessTracker();
+
+    writeFileSync(fakeCli, `console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("fallback-device"))}));\n`);
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "fallback-device",
+      deviceToken: "fallback-token",
+      serverUrl: controlServer.baseUrl,
+    }));
+    writeFileSync(wrapperPath, `globalThis.WebSocket = undefined;
+process.argv = [process.execPath, ${JSON.stringify(collectorScript)}, "--config", ${JSON.stringify(configPath)}, "--interval-ms", "100"];
+await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
+`);
+
+    try {
+      collector.child = spawn(process.execPath, [wrapperPath], {
+        cwd: repoRoot,
+        env: { ...process.env, LORUME_CLI_PATH: fakeCli },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => controlServer.messages().some((message) => message.type === "heartbeat" && message.deviceId === "fallback-device"),
+        "fallback heartbeat",
+        2_000,
+      );
+    } finally {
+      await collector.stop();
+      controlServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
     }
   });
 
@@ -1045,13 +1125,115 @@ function runCommand(command: string, args: string[], options: { env?: NodeJS.Pro
   });
 }
 
-async function waitForCondition(predicate: () => boolean, label: string): Promise<void> {
+async function waitForCondition(predicate: () => boolean, label: string, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 2_000) {
+  while (Date.now() - startedAt < timeoutMs) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`Timed out waiting for ${label}`);
+}
+
+function createMinimalSnapshot(deviceId: string): Record<string, unknown> {
+  const collectedAt = "2026-05-26T01:00:00.000Z";
+  return {
+    collectedAt,
+    device: {
+      architecture: "arm64",
+      collectionStatus: "online",
+      collector: { version: "test" },
+      hostname: `${deviceId}.local`,
+      id: deviceId,
+      lastSeenAt: collectedAt,
+      os: "darwin",
+    },
+    runtimes: [],
+    agents: [],
+    tasks: [],
+  };
+}
+
+function createCollectorProcessTracker(): {
+  child?: ReturnType<typeof spawn>;
+  stop: () => Promise<void>;
+} {
+  return {
+    child: undefined,
+    stop() {
+      if (!this.child || this.child.killed || this.child.exitCode !== null) return Promise.resolve();
+      const child = this.child;
+      child.kill("SIGTERM");
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          if (!child.killed) child.kill("SIGKILL");
+          resolve();
+        }, 500);
+        child.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+async function startControlAndSnapshotServer(): Promise<{
+  baseUrl: string;
+  close: () => void;
+  heartbeatBeforeFirstSnapshot: () => boolean;
+  messages: () => Array<Record<string, unknown>>;
+}> {
+  const controlMessages: Array<Record<string, unknown>> = [];
+  let firstSnapshotReceived = false;
+  let heartbeatBeforeSnapshot = false;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
+      response.statusCode = 404;
+      response.end("not found");
+      return;
+    }
+    request.resume();
+    request.on("end", () => {
+      if (request.url === "/api/device-state-snapshots") firstSnapshotReceived = true;
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: true, acked: [] }));
+    });
+  });
+  const webSocketServer = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    if (request.url !== "/api/device-control/ws") {
+      socket.destroy();
+      return;
+    }
+    webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+      webSocketServer.emit("connection", webSocket, request);
+    });
+  });
+  webSocketServer.on("connection", (webSocket) => {
+    webSocket.on("message", (data) => {
+      const message = JSON.parse(data.toString()) as Record<string, unknown>;
+      controlMessages.push(message);
+      if (message.type === "hello") {
+        webSocket.send(JSON.stringify({ type: "hello.ack", deviceId: message.deviceId }));
+      }
+      if (message.type === "heartbeat" && !firstSnapshotReceived) heartbeatBeforeSnapshot = true;
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close() {
+      webSocketServer.close();
+      server.close();
+    },
+    heartbeatBeforeFirstSnapshot: () => heartbeatBeforeSnapshot,
+    messages: () => [...controlMessages],
+  };
 }
 
 async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{

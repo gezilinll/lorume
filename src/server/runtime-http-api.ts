@@ -17,6 +17,11 @@ import type { CollectionHealthIngestion } from "../runtime/runtime-collection-he
 
 const maxJsonBodyChars = 10_000_000;
 type CollectorSnapshotType = "device_state" | "task_batch";
+type RuntimeOrganizationId = string | undefined;
+
+interface RuntimeUserSessionLike {
+  organizations?: Array<{ organizationId?: unknown }>;
+}
 
 /** Dependencies for the Runtime Fleet local HTTP API. */
 export interface RuntimeHttpApiHandlerOptions {
@@ -79,28 +84,34 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
     }
 
     if (request.method === "GET" && requestUrl.pathname === "/api/runtime-fleet") {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
       }
-      sendJson(response, 200, await options.postgresStore.readRuntimeFleet());
+      sendJson(response, 200, await options.postgresStore.readRuntimeFleet({ organizationId }));
       return;
     }
 
     if (request.method === "GET" && requestUrl.pathname === "/api/runtime-tasks") {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
       }
+      const channelKinds = parseChannelKindFilters(requestUrl.searchParams);
       sendJson(response, 200, await options.postgresStore.listRuntimeTasks({
-        channelKind: requestUrl.searchParams.get("channelKind"),
+        channelKind: channelKinds[0] ?? null,
+        channelKinds,
         endAt: requestUrl.searchParams.get("endAt"),
         limit: parseLimit(requestUrl.searchParams.get("limit")),
         cursor: requestUrl.searchParams.get("cursor"),
+        organizationId,
         search: requestUrl.searchParams.get("search"),
         status: requestUrl.searchParams.get("status"),
+        statusScope: requestUrl.searchParams.get("statusScope"),
         startAt: requestUrl.searchParams.get("startAt"),
         taskType: requestUrl.searchParams.get("taskType"),
       }));
@@ -109,9 +120,10 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
 
     const agentSkillProbeMatch = requestUrl.pathname.match(/^\/api\/agents\/([^/]+)\/skill-probe$/);
     if (request.method === "GET" && agentSkillProbeMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       const agentId = decodeURIComponent(agentSkillProbeMatch[1] ?? "");
-      const snapshot = await readAgentSkillProbeSnapshot(options, agentId);
+      const snapshot = await readAgentSkillProbeSnapshot(options, agentId, organizationId);
       sendJson(response, 200, snapshot);
       return;
     }
@@ -149,7 +161,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         const snapshot = normalizeDeviceStateSnapshot(enrichDeviceStateSnapshotWithRequestNetwork(body, request));
         if (!snapshot) throw new Error("invalid device state snapshot");
         if (snapshot.tasks.length > 0) throw new Error("device state snapshots must not include tasks; use task batches");
-        await options.postgresStore.upsertDeviceStateSnapshot(snapshot);
+        await options.postgresStore.upsertDeviceStateSnapshot(snapshot, { organizationId: extractOrganizationId(deviceAuth) });
         sendJson(response, 201, {
           ok: true,
           deviceId: snapshot.device.id,
@@ -157,7 +169,7 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         });
       } catch (error) {
         const errorResponse = createErrorResponse(error, "invalid_device_state_snapshot");
-        await recordFailedCollectorIngestion(options, "device_state", body, error);
+        await recordFailedCollectorIngestion(options, "device_state", body, error, extractOrganizationId(deviceAuth));
         await notifyFailedCollectorIngestion(options, "device_state", body, error, deviceAuth);
         logCollectorIngestionFailure(options, "device_state", body, errorResponse);
         sendJson(response, statusCodeForWriteError(error), errorResponse);
@@ -177,11 +189,11 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         body = await readJsonBody(request);
         const batch = normalizeRuntimeTaskBatch(body);
         if (!batch) throw new Error("invalid runtime task batch");
-        const result = await options.postgresStore.upsertRuntimeTaskBatch(batch);
+        const result = await options.postgresStore.upsertRuntimeTaskBatch(batch, { organizationId: extractOrganizationId(deviceAuth) });
         sendJson(response, 201, { ok: true, ...result });
       } catch (error) {
         const errorResponse = createErrorResponse(error, "invalid_runtime_task_batch");
-        await recordFailedCollectorIngestion(options, "task_batch", body, error);
+        await recordFailedCollectorIngestion(options, "task_batch", body, error, extractOrganizationId(deviceAuth));
         logCollectorIngestionFailure(options, "task_batch", body, errorResponse);
         sendJson(response, statusCodeForWriteError(error), errorResponse);
       }
@@ -190,7 +202,8 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
 
     const ingestionMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/ingestions$/);
     if (request.method === "GET" && ingestionMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
@@ -198,14 +211,15 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       const deviceId = decodeURIComponent(ingestionMatch[1] ?? "");
       sendJson(response, 200, {
         deviceId,
-        ingestions: await options.postgresStore.listCollectorIngestions(deviceId),
+        ingestions: await options.postgresStore.listCollectorIngestions(deviceId, { organizationId }),
       });
       return;
     }
 
     const diagnosticsMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/diagnostics$/);
     if (request.method === "GET" && diagnosticsMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
@@ -217,25 +231,34 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
         deviceId,
         now,
         connection: options.store.readDeviceConnection(deviceId, now),
-        deviceStateIngestions: toCollectionHealthIngestions(await options.postgresStore.listCollectorIngestions(deviceId)),
+        deviceStateIngestions: toCollectionHealthIngestions(await options.postgresStore.listCollectorIngestions(deviceId, { organizationId })),
       }));
       return;
     }
 
     const collectionHealthMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/collection-health$/);
     if (request.method === "GET" && collectionHealthMatch) {
-      if (!(await authorizeUserRead(options, request, response))) return;
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
       }
       const deviceId = decodeURIComponent(collectionHealthMatch[1] ?? "");
-      sendJson(response, 200, await options.postgresStore.readDeviceCollectionHealth(deviceId));
+      sendJson(response, 200, await options.postgresStore.readDeviceCollectionHealth(deviceId, { organizationId }));
       return;
     }
 
     next();
   };
+}
+
+function parseChannelKindFilters(searchParams: URLSearchParams): string[] {
+  const values = [
+    ...searchParams.getAll("channelKind"),
+    ...(searchParams.get("channelKinds")?.split(",") ?? []),
+  ].map((value) => value.trim()).filter(Boolean);
+  return Array.from(new Set(values));
 }
 
 interface AgentSkillProbeSnapshotContext {
@@ -249,13 +272,14 @@ interface AgentSkillProbeSnapshotContext {
 async function readAgentSkillProbeSnapshot(
   options: RuntimeHttpApiHandlerOptions,
   agentId: string,
+  organizationId?: string,
 ): Promise<AgentSkillProbeSnapshot> {
-  const postgresSnapshot = await options.postgresStore?.readAgentSkillProbeSnapshot(agentId).catch(() => null);
+  const postgresSnapshot = await options.postgresStore?.readAgentSkillProbeSnapshot(agentId, { organizationId }).catch(() => null);
   const storeSnapshot = options.store.readAgentSkillProbeSnapshot(agentId);
   if (postgresSnapshot) return postgresSnapshot;
-  if (storeSnapshot) return storeSnapshot;
+  if (storeSnapshot && (!organizationId || !options.postgresStore)) return storeSnapshot;
   try {
-    const context = await resolveAgentSkillProbeSnapshotContext(options, agentId);
+    const context = await resolveAgentSkillProbeSnapshotContext(options, agentId, organizationId);
     return createAgentSkillProbeSnapshot(context, "unknown");
   } catch {
     return {
@@ -272,8 +296,9 @@ async function readAgentSkillProbeSnapshot(
 async function resolveAgentSkillProbeSnapshotContext(
   options: RuntimeHttpApiHandlerOptions,
   agentId: string,
+  organizationId?: string,
 ): Promise<AgentSkillProbeSnapshotContext> {
-  const fleet = await readRuntimeFleetForProbe(options);
+  const fleet = await readRuntimeFleetForProbe(options, organizationId);
   const agent = fleet.agents.find((candidate) => candidate.id === agentId);
   const runtime = fleet.runtimes.find((candidate) => candidate.id === agent?.runtimeId);
   const device = fleet.devices.find((candidate) => candidate.id === runtime?.deviceId);
@@ -290,12 +315,12 @@ async function resolveAgentSkillProbeSnapshotContext(
   };
 }
 
-async function readRuntimeFleetForProbe(options: RuntimeHttpApiHandlerOptions): Promise<{
+async function readRuntimeFleetForProbe(options: RuntimeHttpApiHandlerOptions, organizationId?: string): Promise<{
   devices: Array<{ id: string }>;
   runtimes: Array<{ id: string; deviceId: string; name?: string }>;
   agents: Array<{ id: string; name?: string; runtimeId: string }>;
 }> {
-  const postgresFleet = await options.postgresStore?.readRuntimeFleet().catch(() => null);
+  const postgresFleet = await options.postgresStore?.readRuntimeFleet({ organizationId }).catch(() => null);
   if (postgresFleet) return postgresFleet;
   const snapshot = options.store.readLatestSnapshot();
   if (!snapshot) return { devices: [], runtimes: [], agents: [] };
@@ -389,12 +414,46 @@ async function authorizeUserRead(
   options: RuntimeHttpApiHandlerOptions,
   request: IncomingMessage,
   response: ServerResponse,
-): Promise<boolean> {
-  if (!options.auth?.requireUserSession) return true;
+): Promise<unknown | null> {
+  if (!options.auth?.requireUserSession) return undefined;
   const session = await options.auth.requireUserSession(request);
-  if (session) return true;
+  if (session) return session;
   sendJson(response, 401, { error: "unauthorized" });
-  return false;
+  return null;
+}
+
+async function authorizeOrganizationRead(
+  options: RuntimeHttpApiHandlerOptions,
+  request: IncomingMessage,
+  response: ServerResponse,
+  searchParams: URLSearchParams,
+): Promise<RuntimeOrganizationId | null> {
+  const session = await authorizeUserRead(options, request, response);
+  if (session === null) return null;
+  const organizationId = resolveRequestedOrganizationId(searchParams, session);
+  if (organizationId === null) {
+    sendJson(response, 403, { error: "forbidden" });
+    return null;
+  }
+  return organizationId;
+}
+
+function resolveRequestedOrganizationId(searchParams: URLSearchParams, session: unknown): RuntimeOrganizationId | null {
+  const requestedOrganizationId = searchParams.get("organizationId")?.trim() || undefined;
+  const memberships = listSessionOrganizationIds(session);
+  if (!memberships.length) return requestedOrganizationId;
+  if (!requestedOrganizationId) return memberships[0];
+  return memberships.includes(requestedOrganizationId) ? requestedOrganizationId : null;
+}
+
+function listSessionOrganizationIds(session: unknown): string[] {
+  if (!session || typeof session !== "object") return [];
+  const organizations = (session as RuntimeUserSessionLike).organizations;
+  if (!Array.isArray(organizations)) return [];
+  return organizations
+    .map((organization) => organization.organizationId)
+    .filter((organizationId): organizationId is string => typeof organizationId === "string" && Boolean(organizationId.trim()))
+    .map((organizationId) => organizationId.trim());
 }
 
 async function authorizeDeviceWrite(
@@ -414,6 +473,7 @@ async function recordFailedCollectorIngestion(
   snapshotType: CollectorSnapshotType,
   body: unknown,
   error: unknown,
+  organizationId?: string,
 ): Promise<void> {
   if (!options.postgresStore) return;
   const errorResponse = createErrorResponse(error, fallbackErrorCodeForSnapshotType(snapshotType));
@@ -421,6 +481,7 @@ async function recordFailedCollectorIngestion(
     deviceId: extractDeviceId(snapshotType, body),
     error: `${errorResponse.error}: ${errorResponse.message}`,
     collectedAt: extractCollectedAt(body),
+    organizationId,
     snapshotType,
   }).catch(() => undefined);
 }

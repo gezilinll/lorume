@@ -513,10 +513,10 @@ function NotificationDetailDialog({
 
 function UtilityMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
   const toneClass = {
-    blue: "border-primary/20 bg-primary/5",
-    green: "border-emerald-500/20 bg-emerald-500/5",
-    orange: "border-amber-500/20 bg-amber-500/5",
-    purple: "border-violet-500/20 bg-violet-500/5",
+    blue: "border-[var(--blue-border)] bg-[var(--blue-soft)]",
+    green: "border-[var(--green-border)] bg-[var(--green-soft)]",
+    orange: "border-[var(--orange-border)] bg-[var(--orange-soft)]",
+    purple: "border-[var(--purple-border)] bg-[var(--purple-soft)]",
   }[tone] ?? "border-border";
 
   return (

@@ -12,6 +12,7 @@ import {
   createDeviceStateSnapshot,
   createEmptyRuntimeFleetTaskSummary,
   createEmptyTaskStatusCounts,
+  RUNTIME_TASK_BOARD_VISIBLE_STATUSES,
   TASK_CHANNEL_KIND_LABELS,
   TASK_STATUSES,
   type Agent,
@@ -30,6 +31,10 @@ import type { RuntimeTaskBatch } from "../runtime/runtime-task-sync";
 const { Pool } = pg;
 
 type CollectorSnapshotType = "device_state" | "task_batch";
+
+export interface PostgresOrganizationScope {
+  organizationId?: string | null;
+}
 
 /** Construction options for the Postgres-backed Lorume repository. */
 export interface PostgresStoreOptions {
@@ -90,6 +95,7 @@ interface PostgresRuntimeFleetTaskSummaryRow {
   deviceId: string | null;
   status: string;
   count: string;
+  lastActiveAt: Date | null;
 }
 
 interface PostgresTaskStatusSummaryRow {
@@ -119,9 +125,12 @@ export interface PostgresRuntimeFleetResult {
 
 /** Backend query filters for unified Task rows. */
 export interface PostgresRuntimeTaskFilters {
+  organizationId?: string | null;
   taskType?: string | null;
+  statusScope?: string | null;
   status?: string | null;
   channelKind?: string | null;
+  channelKinds?: string[] | null;
   startAt?: string | null;
   endAt?: string | null;
   search?: string | null;
@@ -146,9 +155,9 @@ export interface PostgresRuntimeTaskResult {
 /** Postgres-backed repository for the current Device / Runtime / Agent / Task model. */
 export interface PostgresStore {
   /** Upsert a unified Device / Runtime / Agent / Task snapshot. */
-  upsertDeviceStateSnapshot: (snapshot: DeviceStateSnapshot) => Promise<PostgresIngestionResult>;
+  upsertDeviceStateSnapshot: (snapshot: DeviceStateSnapshot, scope?: PostgresOrganizationScope) => Promise<PostgresIngestionResult>;
   /** Upsert one changed Task batch and return ACKs for cache advancement. */
-  upsertRuntimeTaskBatch: (batch: RuntimeTaskBatch) => Promise<PostgresTaskBatchResult>;
+  upsertRuntimeTaskBatch: (batch: RuntimeTaskBatch, scope?: PostgresOrganizationScope) => Promise<PostgresTaskBatchResult>;
   /** Record a failed collector ingestion when a report cannot be persisted as a valid snapshot. */
   recordFailedCollectorIngestion: (input: PostgresFailedCollectorIngestionInput) => Promise<void>;
   /** Verify the repository can serve backend traffic. */
@@ -156,17 +165,17 @@ export interface PostgresStore {
   /** Read coarse entity counts for harnesses and smoke diagnostics. */
   readEntityCounts: () => Promise<PostgresEntityCounts>;
   /** Read current Runtime Fleet records from Postgres. */
-  readRuntimeFleet: () => Promise<PostgresRuntimeFleetResult>;
+  readRuntimeFleet: (scope?: PostgresOrganizationScope) => Promise<PostgresRuntimeFleetResult>;
   /** Query unified product Task rows from Postgres. */
   listRuntimeTasks: (filters?: PostgresRuntimeTaskFilters) => Promise<PostgresRuntimeTaskResult>;
   /** Upsert the latest read-only Agent Skill probe snapshot. */
   upsertAgentSkillProbeSnapshot: (snapshot: AgentSkillProbeSnapshot) => Promise<AgentSkillProbeSnapshot>;
   /** Read the latest read-only Agent Skill probe snapshot for one Agent. */
-  readAgentSkillProbeSnapshot: (agentId: string) => Promise<AgentSkillProbeSnapshot | null>;
+  readAgentSkillProbeSnapshot: (agentId: string, scope?: PostgresOrganizationScope) => Promise<AgentSkillProbeSnapshot | null>;
   /** List collector ingestion metadata for a device. */
-  listCollectorIngestions: (deviceId: string) => Promise<PostgresCollectorIngestion[]>;
+  listCollectorIngestions: (deviceId: string, scope?: PostgresOrganizationScope) => Promise<PostgresCollectorIngestion[]>;
   /** Read product-level collection health for one device. */
-  readDeviceCollectionHealth: (deviceId: string) => Promise<DeviceCollectionHealth>;
+  readDeviceCollectionHealth: (deviceId: string, scope?: PostgresOrganizationScope) => Promise<DeviceCollectionHealth>;
   /** Close owned Postgres connections. */
   close: () => Promise<void>;
 }
@@ -179,6 +188,8 @@ export interface PostgresFailedCollectorIngestionInput {
   snapshotType: CollectorSnapshotType;
   /** Observed timestamp from the invalid payload when available. */
   collectedAt?: string;
+  /** Organization that owned the collector token, when authenticated. */
+  organizationId?: string | null;
   /** Structured diagnostics extracted before failure. */
   diagnostics?: CollectionDiagnosticItem[];
   /** Short error summary safe for diagnostics. */
@@ -191,7 +202,8 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
     connectionString: options.connectionString ?? process.env.DATABASE_URL ?? "postgres://lorume:lorume@127.0.0.1:54329/lorume",
   });
 
-  async function listCollectorIngestions(deviceId: string): Promise<PostgresCollectorIngestion[]> {
+  async function listCollectorIngestions(deviceId: string, scope: PostgresOrganizationScope = {}): Promise<PostgresCollectorIngestion[]> {
+    const organizationId = normalizeOrganizationId(scope.organizationId);
     const result = await pool.query<PostgresCollectorIngestion>(`
       SELECT
         device_id AS "deviceId",
@@ -204,15 +216,18 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         error
       FROM collector_ingestions
       WHERE device_id = $1
+        AND ($2::text IS NULL OR organization_id = $2)
       ORDER BY id DESC
-    `, [deviceId]);
+    `, [deviceId, organizationId]);
     return result.rows;
   }
 
   return {
-    upsertDeviceStateSnapshot(snapshot) {
+    upsertDeviceStateSnapshot(snapshot, scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
       return withTransaction(pool, async (client) => {
-        await upsertDeviceStateDevice(client, snapshot);
+        await assertDeviceOrganizationWritable(client, snapshot.device.id, organizationId);
+        await upsertDeviceStateDevice(client, snapshot, organizationId);
         for (const runtime of snapshot.runtimes) await upsertDeviceStateRuntime(client, runtime);
         for (const agent of snapshot.agents) {
           await upsertDeviceStateAgent(client, agent);
@@ -230,6 +245,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           deviceId: snapshot.device.id,
           error: null,
           collectedAt: snapshot.collectedAt,
+          organizationId,
           snapshotType: "device_state",
           status: "succeeded",
           diagnostics: snapshot.diagnostics?.items ?? [],
@@ -237,8 +253,10 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         return { deviceId: snapshot.device.id, snapshotType: "device_state", counts };
       });
     },
-    upsertRuntimeTaskBatch(batch) {
+    upsertRuntimeTaskBatch(batch, scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
       return withTransaction(pool, async (client) => {
+        await assertDeviceBelongsToOrganization(client, batch.deviceId, organizationId);
         const acked: Array<{ id: string; hash: string }> = [];
         for (const entry of batch.tasks) {
           await upsertTask(client, batch.deviceId, entry.task, entry.hash);
@@ -255,6 +273,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           deviceId: batch.deviceId,
           error: null,
           collectedAt: batch.collectedAt,
+          organizationId,
           snapshotType: "task_batch",
           status: "succeeded",
           diagnostics: [],
@@ -268,6 +287,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         deviceId: input.deviceId || "unknown",
         error: input.error,
         collectedAt: input.collectedAt ?? new Date().toISOString(),
+        organizationId: normalizeOrganizationId(input.organizationId),
         snapshotType: input.snapshotType,
         status: "failed",
         diagnostics: input.diagnostics ?? [],
@@ -291,26 +311,44 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         client.release();
       }
     },
-    async readRuntimeFleet() {
+    async readRuntimeFleet(scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
       const [deviceResult, runtimeResult, agentResult, taskSummaryResult] = await Promise.all([
         pool.query<{ collector: Device["collector"]; raw: Device; collected_at: Date | null }>(
-          "SELECT collector, raw, collected_at FROM devices ORDER BY hostname, id",
+          "SELECT collector, raw, collected_at FROM devices WHERE ($1::text IS NULL OR organization_id = $1) ORDER BY hostname, id",
+          [organizationId],
         ),
-        pool.query<{ raw: Runtime }>("SELECT raw FROM runtimes ORDER BY name"),
-        pool.query<{ raw: Agent }>("SELECT raw FROM agents ORDER BY name"),
+        pool.query<{ raw: Runtime }>(`
+          SELECT r.raw
+          FROM runtimes r
+          LEFT JOIN devices d ON d.id = r.device_id
+          WHERE ($1::text IS NULL OR d.organization_id = $1)
+          ORDER BY r.name
+        `, [organizationId]),
+        pool.query<{ raw: Agent }>(`
+          SELECT a.raw
+          FROM agents a
+          LEFT JOIN runtimes r ON r.id = a.runtime_id
+          LEFT JOIN devices d ON d.id = r.device_id
+          WHERE ($1::text IS NULL OR d.organization_id = $1)
+          ORDER BY a.name
+        `, [organizationId]),
         pool.query<PostgresRuntimeFleetTaskSummaryRow>(`
           SELECT
             t.agent_id AS "agentId",
             a.runtime_id AS "runtimeId",
             r.device_id AS "deviceId",
             t.status,
-            count(*)::text AS count
+            count(*)::text AS count,
+            max(${taskOrderExpression}) AS "lastActiveAt"
           FROM tasks t
           LEFT JOIN agents a ON a.id = t.agent_id
           LEFT JOIN runtimes r ON r.id = a.runtime_id
+          LEFT JOIN devices d ON d.id = t.device_id
           WHERE t.stale_at IS NULL
+            AND ($1::text IS NULL OR d.organization_id = $1)
           GROUP BY t.agent_id, a.runtime_id, r.device_id, t.status
-        `),
+        `, [organizationId]),
       ]);
       const collectedAt = deviceResult.rows
         .map((row) => row.collected_at?.toISOString() ?? null)
@@ -358,6 +396,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         FROM tasks t
         LEFT JOIN agents a ON a.id = t.agent_id
         LEFT JOIN runtimes r ON r.id = a.runtime_id
+        LEFT JOIN devices d ON d.id = t.device_id
         ${clause}`,
         values,
       );
@@ -369,6 +408,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         FROM tasks t
         LEFT JOIN agents a ON a.id = t.agent_id
         LEFT JOIN runtimes r ON r.id = a.runtime_id
+        LEFT JOIN devices d ON d.id = t.device_id
         ${clause}
         ORDER BY ${taskOrderExpression} DESC, t.id DESC
         LIMIT $${values.length + 1}
@@ -432,18 +472,21 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
       ]);
       return normalized;
     },
-    async readAgentSkillProbeSnapshot(agentId) {
+    async readAgentSkillProbeSnapshot(agentId, scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
       const result = await pool.query<{ raw: unknown }>(`
-        SELECT raw
-        FROM agent_skill_probe_snapshots
-        WHERE agent_id = $1
+        SELECT s.raw
+        FROM agent_skill_probe_snapshots s
+        LEFT JOIN devices d ON d.id = s.device_id
+        WHERE s.agent_id = $1
+          AND ($2::text IS NULL OR d.organization_id = $2)
         LIMIT 1
-      `, [agentId]);
+      `, [agentId, organizationId]);
       return normalizeAgentSkillProbeSnapshot(result.rows[0]?.raw);
     },
     listCollectorIngestions,
-    async readDeviceCollectionHealth(deviceId) {
-      return deriveDeviceCollectionHealth(deviceId, toCollectionHealthIngestions(await listCollectorIngestions(deviceId)));
+    async readDeviceCollectionHealth(deviceId, scope = {}) {
+      return deriveDeviceCollectionHealth(deviceId, toCollectionHealthIngestions(await listCollectorIngestions(deviceId, scope)));
     },
     close() {
       return pool.end();
@@ -451,13 +494,54 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
   };
 }
 
-async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceStateSnapshot): Promise<void> {
+function normalizeOrganizationId(value?: string | null): string | null {
+  return value?.trim() || null;
+}
+
+async function assertDeviceOrganizationWritable(
+  client: pg.PoolClient,
+  deviceId: string,
+  organizationId: string | null,
+): Promise<void> {
+  if (!organizationId) return;
+  const result = await client.query<{ organization_id: string | null }>(
+    "SELECT organization_id FROM devices WHERE id = $1 LIMIT 1",
+    [deviceId],
+  );
+  const existingOrganizationId = result.rows[0]?.organization_id;
+  if (existingOrganizationId && existingOrganizationId !== organizationId) {
+    throw new Error("device belongs to another organization");
+  }
+}
+
+async function assertDeviceBelongsToOrganization(
+  client: pg.PoolClient,
+  deviceId: string,
+  organizationId: string | null,
+): Promise<void> {
+  if (!organizationId) return;
+  const result = await client.query<{ organization_id: string | null }>(
+    "SELECT organization_id FROM devices WHERE id = $1 LIMIT 1",
+    [deviceId],
+  );
+  const existingOrganizationId = result.rows[0]?.organization_id;
+  if (existingOrganizationId !== organizationId) {
+    throw new Error("device does not belong to organization");
+  }
+}
+
+async function upsertDeviceStateDevice(
+  client: pg.PoolClient,
+  snapshot: DeviceStateSnapshot,
+  organizationId: string | null,
+): Promise<void> {
   await client.query(`
     INSERT INTO devices (
-      id, hostname, os, architecture, collection_status, collector, last_seen_at, collected_at, raw, updated_at
+      id, organization_id, hostname, os, architecture, collection_status, collector, last_seen_at, collected_at, raw, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, now())
     ON CONFLICT (id) DO UPDATE SET
+      organization_id = coalesce(devices.organization_id, excluded.organization_id),
       hostname = excluded.hostname,
       os = excluded.os,
       architecture = excluded.architecture,
@@ -469,6 +553,7 @@ async function upsertDeviceStateDevice(client: pg.PoolClient, snapshot: DeviceSt
       updated_at = now()
   `, [
     snapshot.device.id,
+    organizationId,
     snapshot.device.hostname,
     snapshot.device.os,
     snapshot.device.architecture ?? null,
@@ -634,16 +719,18 @@ async function insertCollectorIngestion(
     snapshotType: CollectorSnapshotType;
     status: "succeeded" | "failed";
     collectedAt: string;
+    organizationId?: string | null;
     counts: Record<string, number>;
     diagnostics: CollectionDiagnosticItem[];
     error: string | null;
   },
 ): Promise<void> {
   await client.query(`
-    INSERT INTO collector_ingestions (device_id, snapshot_type, status, collected_at, counts, diagnostics, error)
-    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+    INSERT INTO collector_ingestions (device_id, organization_id, snapshot_type, status, collected_at, counts, diagnostics, error)
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
   `, [
     input.deviceId,
+    normalizeOrganizationId(input.organizationId),
     input.snapshotType,
     input.status,
     toDate(input.collectedAt),
@@ -673,9 +760,28 @@ function buildRuntimeFleetTaskSummary(rows: PostgresRuntimeFleetTaskSummaryRow[]
     addTaskStatusCount(taskSummary.byAgentId, row.agentId, row.status, count);
     if (row.runtimeId) addTaskStatusCount(taskSummary.byRuntimeId, row.runtimeId, row.status, count);
     if (row.deviceId) addTaskStatusCount(taskSummary.byDeviceId, row.deviceId, row.status, count);
+    recordLatestActivity(taskSummary.lastActiveAtByAgentId, row.agentId, row.lastActiveAt);
+    if (row.runtimeId) recordLatestActivity(taskSummary.lastActiveAtByRuntimeId, row.runtimeId, row.lastActiveAt);
+    if (row.deviceId) recordLatestActivity(taskSummary.lastActiveAtByDeviceId, row.deviceId, row.lastActiveAt);
   }
 
   return { taskCount, taskSummary };
+}
+
+function recordLatestActivity(
+  target: Record<string, string> | undefined,
+  id: string | null | undefined,
+  value: Date | string | null | undefined,
+): void {
+  if (!target || !id || !value) return;
+  const timestamp = value instanceof Date ? value : new Date(value);
+  const epoch = timestamp.getTime();
+  if (Number.isNaN(epoch)) return;
+  const nextValue = timestamp.toISOString();
+  const previousEpoch = Date.parse(target[id] ?? "");
+  if (Number.isNaN(previousEpoch) || epoch > previousEpoch) {
+    target[id] = nextValue;
+  }
 }
 
 async function readTaskStatusSummary(
@@ -692,6 +798,7 @@ async function readTaskStatusSummary(
     FROM tasks t
     LEFT JOIN agents a ON a.id = t.agent_id
     LEFT JOIN runtimes r ON r.id = a.runtime_id
+    LEFT JOIN devices d ON d.id = t.device_id
     ${clause}
     GROUP BY t.status
   `, values);
@@ -716,6 +823,7 @@ async function readTaskFacets(
   const { clause, values } = createTaskWhereClause({
     ...filters,
     channelKind: null,
+    channelKinds: null,
     cursor: null,
   });
   const result = await client.query<PostgresTaskChannelFacetRow>(`
@@ -723,6 +831,7 @@ async function readTaskFacets(
     FROM tasks t
     LEFT JOIN agents a ON a.id = t.agent_id
     LEFT JOIN runtimes r ON r.id = a.runtime_id
+    LEFT JOIN devices d ON d.id = t.device_id
     ${addSqlCondition(clause, "t.channel->>'kind' IS NOT NULL")}
     GROUP BY t.channel->>'kind'
     ORDER BY kind
@@ -788,9 +897,20 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
   const conditions: string[] = ["t.stale_at IS NULL"];
   const values: unknown[] = [];
 
+  addTextFilter(conditions, values, "d.organization_id", normalizeOrganizationId(filters.organizationId));
   addTextFilter(conditions, values, "t.status", filters.status);
   addTextFilter(conditions, values, "t.task_type", filters.taskType);
-  addTextFilter(conditions, values, "t.channel->>'kind'", filters.channelKind);
+  const channelKinds = normalizeChannelKindFilters(filters);
+  if (channelKinds.length) {
+    values.push(channelKinds);
+    conditions.push(`t.channel->>'kind' = ANY($${values.length}::text[])`);
+  } else {
+    addTextFilter(conditions, values, "t.channel->>'kind'", filters.channelKind);
+  }
+  if (filters.statusScope === "board-visible") {
+    values.push([...RUNTIME_TASK_BOARD_VISIBLE_STATUSES]);
+    conditions.push(`t.status = ANY($${values.length}::text[])`);
+  }
 
   const cursor = decodeTaskCursor(filters.cursor);
   if (cursor) {
@@ -828,6 +948,13 @@ function createTaskWhereClause(filters: PostgresRuntimeTaskFilters): {
     clause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
     values,
   };
+}
+
+function normalizeChannelKindFilters(filters: PostgresRuntimeTaskFilters): string[] {
+  return Array.from(new Set((filters.channelKinds ?? [])
+    .concat(filters.channelKind ? [filters.channelKind] : [])
+    .map((value) => value.trim())
+    .filter(Boolean)));
 }
 
 function encodeTaskCursor(row: PostgresTaskQueryRow | undefined): string | undefined {

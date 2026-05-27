@@ -78,11 +78,12 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("在线");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).not.toContainText("工作中");
+    await expect(page.getByRole("table", { name: "Runtime 列表" }).getByRole("columnheader", { name: "Runtime" })).toHaveCount(0);
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("main");
     await expect(page.getByRole("row", { name: /main/ })).toContainText("在线");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("所属设备");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("归属 Runtime");
-    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("最近同步");
+    await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("最近活跃");
     await expect(page.getByRole("table", { name: "Agent 列表" })).toContainText("Skill");
     await expect(page.getByLabel("运行资产筛选")).toHaveCount(0);
     await expect(page.getByPlaceholder("搜索设备、Runtime、Agent 或任务")).toHaveCount(0);
@@ -99,15 +100,7 @@ test.describe("Runtime Fleet", () => {
     await expect(detail).toContainText("任务统计");
     await expect(detail).toContainText("全部任务: 2");
     await expect(detail).not.toContainText("关联渠道");
-    await expect(detail).toContainText(`最近同步: ${new Intl.DateTimeFormat("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(new Date("2026-05-21T10:00:00.000Z"))}`);
+    await expect(detail).toContainText("最近活跃:");
     await page.getByRole("button", { name: "main Skill 探测" }).click();
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("reviewer");
     await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("references/guide.md");

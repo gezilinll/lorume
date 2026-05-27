@@ -4,7 +4,22 @@ import { cn } from "@/lib/utils";
 
 export type PillKind = "status" | "channel" | "assignee" | "execution" | "runtime" | "role" | "count";
 
-export type PillTone = "neutral" | "info" | "success" | "warning" | "danger" | "inverse" | "muted";
+export type PillTone =
+  | "neutral"
+  | "info"
+  | "success"
+  | "warning"
+  | "danger"
+  | "inverse"
+  | "muted"
+  | "brand"
+  | "blue"
+  | "cyan"
+  | "orange"
+  | "green"
+  | "pink"
+  | "yellow"
+  | "purple";
 
 const toneClass: Record<PillTone, string> = {
   neutral: "border-border bg-background text-foreground",
@@ -14,6 +29,14 @@ const toneClass: Record<PillTone, string> = {
   danger: "border-[var(--status-danger-border)] bg-[var(--status-danger)] text-[var(--status-danger-foreground)]",
   inverse: "border-foreground bg-foreground text-background",
   muted: "border-border bg-muted text-muted-foreground",
+  brand: "border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand-foreground)]",
+  blue: "border-[var(--blue-border)] bg-[var(--blue-soft)] text-[var(--blue-foreground)]",
+  cyan: "border-[var(--cyan-border)] bg-[var(--cyan-soft)] text-[var(--cyan-foreground)]",
+  orange: "border-[var(--orange-border)] bg-[var(--orange-soft)] text-[var(--orange-foreground)]",
+  green: "border-[var(--green-border)] bg-[var(--green-soft)] text-[var(--green-foreground)]",
+  pink: "border-[var(--pink-border)] bg-[var(--pink-soft)] text-[var(--pink-foreground)]",
+  yellow: "border-[var(--yellow-border)] bg-[var(--yellow-soft)] text-[var(--yellow-foreground)]",
+  purple: "border-[var(--purple-border)] bg-[var(--purple-soft)] text-[var(--purple-foreground)]",
 };
 
 export function Pill({

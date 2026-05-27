@@ -69,20 +69,26 @@ test.describe("Runs conversation tasks", () => {
     await expect(page.getByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).toHaveCount(0);
     const sidebarBox = await page.locator('[data-slot="sidebar-container"]').boundingBox();
     expect(sidebarBox?.width ?? 0).toBeLessThanOrEqual(224);
-    for (const lane of ["待处理", "进行中", "待验收", "已完成", "需关注", "已取消"]) {
+    for (const lane of ["待处理", "进行中", "待验收", "已完成", "需关注"]) {
       await expect(page.getByRole("heading", { name: lane })).toBeVisible();
     }
+    await expect(page.getByRole("heading", { name: "已取消" })).toHaveCount(0);
     for (const removedLane of ["阻塞", "失败", "未知"]) {
       await expect(page.getByRole("heading", { name: removedLane })).toHaveCount(0);
     }
     await expect(page.getByLabel("任务概览")).toHaveCount(0);
     await expect(page.getByRole("tablist", { name: "状态" })).toHaveCount(0);
-    await page.getByRole("button", { name: "筛选" }).click();
-    await expect(page.getByRole("combobox", { name: "渠道" })).toContainText("全部");
-    await page.getByRole("combobox", { name: "渠道" }).click();
-    await expect(page.getByRole("option", { name: "DingTalk（3）" })).toBeVisible();
-    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "日期范围" })).toContainText("选择日期范围");
+    await page.getByRole("button", { name: "筛选" }).click();
+    await expect(page.getByRole("menu", { name: "筛选" })).toBeVisible();
+    const channelTrigger = page.getByRole("menuitem", { name: /渠道/ });
+    await expect(channelTrigger).toBeVisible();
+    await channelTrigger.hover();
+    await channelTrigger.press("ArrowRight");
+    await expect(page.getByRole("menu", { name: /渠道/ })).toBeVisible();
+    await expect(page.getByRole("menuitemcheckbox", { name: "全部" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("menuitemcheckbox", { name: /DingTalk\s*3/ })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByLabel("开始时间")).toHaveCount(0);
     await expect(page.getByLabel("结束时间")).toHaveCount(0);
 
@@ -105,16 +111,16 @@ test.describe("Runs conversation tasks", () => {
     await expect(todoLane.getByRole("button", { name: /PMO asked OpenClaw/ })).toBeVisible();
     await expect(todoLane.getByRole("button", { name: /Execute OpenClaw run/ })).toHaveCount(0);
     const todoLaneBox = await page.locator('[data-lane-key="todo"]').boundingBox();
-    expect(todoLaneBox?.width ?? 0).toBeGreaterThanOrEqual(260);
-    expect(todoLaneBox?.width ?? 0).toBeLessThanOrEqual(300);
+    expect(todoLaneBox?.width ?? 0).toBeGreaterThanOrEqual(230);
+    expect(todoLaneBox?.width ?? 0).toBeLessThanOrEqual(255);
     expect(todoLaneBox?.height ?? 0).toBeGreaterThanOrEqual((page.viewportSize()?.height ?? 900) - 210);
 
-    await page.getByRole("button", { name: "筛选" }).click();
     await page.getByRole("button", { name: "日期范围" }).click();
     await page.locator('[role="gridcell"][data-day="2026-05-10"] button').click();
     await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).not.toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "清除" }).click();
+    await page.getByRole("button", { name: "日期范围" }).click();
+    await page.getByRole("button", { name: "清除日期" }).click();
     await page.keyboard.press("Escape");
 
     await page.getByPlaceholder("搜索任务、消息、发起人、Agent 或会话/群组").fill("PMO");
@@ -136,8 +142,8 @@ test.describe("Runs conversation tasks", () => {
 
     await reviewCardSurface.hover();
     await expect.poll(async () => reviewCardSurface.evaluate((element) => window.getComputedStyle(element).boxShadow), {
-      message: "task card hover should apply the subtle spotlight depth",
-    }).toContain("24px");
+      message: "task card hover should apply the Taskflow card depth",
+    }).toContain("26px");
     const hoverStyle = await reviewCardSurface.evaluate((element) => {
       const style = window.getComputedStyle(element);
       return {
@@ -151,7 +157,7 @@ test.describe("Runs conversation tasks", () => {
     expect(hoverStyle.spotlight).toBe("task-card");
     expect([hoverStyle.transform, hoverStyle.translate, hoverStyle.rotate].some((value) => value && value !== "none")).toBe(true);
     expect(hoverStyle.boxShadow).not.toBe("none");
-    expect(hoverStyle.boxShadow).toContain("24px");
+    expect(hoverStyle.boxShadow).toContain("26px");
 
     await reviewCard.click();
     await expect(reviewCardSurface).toHaveAttribute("data-state", "idle");

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot, Copy, Cpu, Monitor, Server } from "lucide-react";
 import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Pill } from "@/components/data/Pill";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { InitialAvatar } from "@/components/data/InitialAvatar";
 import { StatusBadge as AppStatusBadge } from "@/components/data/StatusBadge";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { toast } from "sonner";
@@ -22,13 +22,15 @@ import {
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
+  formatRelativeActivityTime,
   formatRuntimeTimestamp,
   getRuntimeFleetDetail,
-  runtimeAgentLastSeenAt,
+  runtimeFleetAgentLastActiveAt,
+  runtimeFleetDeviceLastActiveAt,
   runtimeFleetObjectStatusLabels,
+  runtimeFleetRuntimeLastActiveAt,
   runtimeFleetSnapshotFromQueryResponse,
   runtimeFleetStatusFromDeviceHealth,
-  runtimeKindLabels,
   type RuntimeFleetDetail,
   type RuntimeFleetObjectStatus,
   type RuntimeFleetSnapshot,
@@ -67,8 +69,14 @@ const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
 };
 const invisibleAgentDescription = "该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。";
 
+function createRuntimeFleetUrl(pathname: string, organizationId?: string): URL {
+  const requestUrl = new URL(pathname, window.location.origin);
+  if (organizationId?.trim()) requestUrl.searchParams.set("organizationId", organizationId.trim());
+  return requestUrl;
+}
+
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and collection state. */
-export function RuntimeFleetPage() {
+export function RuntimeFleetPage({ organizationId }: { organizationId?: string }) {
   const allowFixtureFallback = isFixtureFallbackAllowed();
   const [snapshot, setSnapshot] = useState<RuntimeFleetSnapshot>(
     allowFixtureFallback ? fixtureRuntimeSnapshot : createEmptyRuntimeInventorySnapshot(),
@@ -88,7 +96,7 @@ export function RuntimeFleetPage() {
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   async function fetchLatestSnapshot(): Promise<RuntimeFleetSnapshot | null> {
-    const queryResponse = await fetch(new URL("/api/runtime-fleet", window.location.origin));
+    const queryResponse = await fetch(createRuntimeFleetUrl("/api/runtime-fleet", organizationId));
     if (!queryResponse.ok) {
       throw new Error(`runtime fleet query failed: ${queryResponse.status}`);
     }
@@ -98,7 +106,7 @@ export function RuntimeFleetPage() {
   }
 
   async function fetchCollectionHealth(deviceId: string): Promise<DeviceCollectionHealth | null> {
-    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/collection-health`);
+    const response = await fetch(createRuntimeFleetUrl(`/api/devices/${encodeURIComponent(deviceId)}/collection-health`, organizationId));
     if (!response.ok) return null;
     return deviceCollectionHealthFromResponse(await response.json());
   }
@@ -112,7 +120,7 @@ export function RuntimeFleetPage() {
   }
 
   async function fetchDeviceDiagnostics(deviceId: string): Promise<DeviceHealthStatusResult | null> {
-    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/diagnostics`);
+    const response = await fetch(createRuntimeFleetUrl(`/api/devices/${encodeURIComponent(deviceId)}/diagnostics`, organizationId));
     if (!response.ok) return null;
     return deviceHealthFromResponse(await response.json());
   }
@@ -190,7 +198,7 @@ export function RuntimeFleetPage() {
       cancelled = true;
       window.clearInterval(refreshTimer);
     };
-  }, [allowFixtureFallback]);
+  }, [allowFixtureFallback, organizationId]);
 
   const collectionHealthByDeviceId = useMemo(
     () => new Map(collectionHealth.map((health) => [health.deviceId, health])),
@@ -237,7 +245,7 @@ export function RuntimeFleetPage() {
   ]);
 
   async function fetchAgentSkillProbe(agentId: string): Promise<AgentSkillProbeSnapshot> {
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/skill-probe`);
+    const response = await fetch(createRuntimeFleetUrl(`/api/agents/${encodeURIComponent(agentId)}/skill-probe`, organizationId));
     if (!response.ok) throw new Error(formatHttpError(response.status, "读取 Skill 探测失败"));
     const snapshot = normalizeAgentSkillProbeSnapshot(await response.json());
     if (!snapshot) throw new Error("Skill 探测返回了无效数据");
@@ -451,6 +459,23 @@ function isCollectionHealthStatus(value: unknown): value is DeviceCollectionHeal
   return value === "healthy" || value === "failed";
 }
 
+function runtimeCountForDevice(snapshot: RuntimeFleetSnapshot, deviceId: string): number {
+  return snapshot.runtimes.filter((runtime) => runtime.deviceId === deviceId).length;
+}
+
+function agentCountForDevice(snapshot: RuntimeFleetSnapshot, deviceId: string): number {
+  const runtimeIds = new Set(snapshot.runtimes.filter((runtime) => runtime.deviceId === deviceId).map((runtime) => runtime.id));
+  return snapshot.agents.filter((agent) => runtimeIds.has(agent.runtimeId)).length;
+}
+
+function taskTotalForRuntime(snapshot: RuntimeFleetSnapshot, runtimeId: string): number {
+  return snapshot.taskSummary.byRuntimeId[runtimeId]?.total ?? 0;
+}
+
+function taskTotalForAgent(snapshot: RuntimeFleetSnapshot, agentId: string): number {
+  return snapshot.taskSummary.byAgentId[agentId]?.total ?? 0;
+}
+
 function DevicePanel({
   collectionHealthByDeviceId,
   deviceDiagnosticsByDeviceId,
@@ -468,9 +493,10 @@ function DevicePanel({
 }) {
   return (
     <Card size="sm" aria-label="设备">
-      <CardHeader className="grid-cols-[1fr_auto] items-start">
+      <CardHeader className="grid-cols-[1fr_auto] items-start border-b border-border pb-3">
         <div>
-          <CardTitle>设备</CardTitle>
+          <CardTitle>Device</CardTitle>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">来自所有 Runtime 和 Agent 的最近处理活动。</p>
         </div>
         <Server aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -478,16 +504,19 @@ function DevicePanel({
         {devices.length === 0 ? (
           <EmptyAsset message="暂无设备" />
         ) : (
-          <div className="grid gap-2">
+          <div className="grid gap-2.5">
             {devices.map((device) => {
               const deviceHealth = deviceDiagnosticsByDeviceId.get(device.id);
               const status = deviceHealth
                 ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
                 : deriveDeviceFleetStatus(snapshot, device, collectionHealthByDeviceId);
               const label = deviceHealth?.label ?? runtimeFleetObjectStatusLabels[status];
+              const lastActiveAt = runtimeFleetDeviceLastActiveAt(snapshot, device.id);
+              const runtimeCount = runtimeCountForDevice(snapshot, device.id);
+              const agentCount = agentCountForDevice(snapshot, device.id);
               return (
                 <Button
-                  className="h-auto w-full justify-between gap-3 border-border/80 px-3 py-3 text-left whitespace-normal data-[active=true]:border-primary data-[active=true]:bg-primary/5"
+                  className="h-auto w-full flex-col items-stretch justify-start gap-3 rounded-[14px] border-border bg-[var(--surface-soft)] px-3 py-3 text-left whitespace-normal shadow-none data-[active=true]:border-[var(--brand-border)] data-[active=true]:bg-[var(--brand-soft)] sm:flex-row sm:items-center sm:justify-between"
                   data-active={device.id === selectedId}
                   key={device.id}
                   type="button"
@@ -495,18 +524,22 @@ function DevicePanel({
                   onClick={() => onSelect(device.id)}
                 >
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-[14px] border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand-foreground)]">
                       <Monitor aria-hidden="true" className="size-4" />
                     </span>
                     <span className="min-w-0">
-                      <strong className="block truncate font-medium">{device.id}</strong>
-                      <span className="block truncate text-xs text-muted-foreground">{device.hostname}</span>
+                      <strong className="block truncate text-[13px] font-semibold">{device.id}</strong>
+                      <span className="block truncate text-[11.5px] text-muted-foreground">
+                        {device.hostname} · {runtimeCount} Runtime · {agentCount} Agent
+                      </span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        最近同步 {formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}
+                        最近活跃 {formatRelativeActivityTime(lastActiveAt)}
                       </span>
                     </span>
                   </span>
-                  <FleetStatusBadge label={label} status={status} />
+                  <span className="self-start sm:self-auto">
+                    <FleetStatusBadge label={label} status={status} />
+                  </span>
                 </Button>
               );
             })}
@@ -533,9 +566,10 @@ function RuntimeTable({
   const deviceById = new Map(snapshot.devices.map((device) => [device.id, device]));
   return (
     <Card size="sm" aria-label="Runtime 列表">
-      <CardHeader className="grid-cols-[1fr_auto] items-start">
+      <CardHeader className="grid-cols-[1fr_auto] items-start border-b border-border pb-3">
         <div>
           <CardTitle>Runtime</CardTitle>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">成员目录样式展示运行时、归属设备和任务活动。</p>
         </div>
         <Cpu aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -544,22 +578,24 @@ function RuntimeTable({
           <EmptyAsset message="暂无 Runtime" />
         ) : (
           <Table aria-label="Runtime 列表">
-            <TableHeader>
+            <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
                 <TableHead>名称</TableHead>
-                <TableHead>Runtime</TableHead>
                 <TableHead>所属设备</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="text-right">最近同步</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead className="text-right">最近活跃</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {runtimes.map((runtime) => {
                 const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
+                const lastActiveAt = runtimeFleetRuntimeLastActiveAt(snapshot, runtime.id);
+                const taskTotal = taskTotalForRuntime(snapshot, runtime.id);
                 return (
                   <TableRow
                     aria-selected={runtime.id === selectedId}
-                    className="cursor-pointer aria-selected:bg-muted/80"
+                    className="cursor-pointer border-border/70 aria-selected:bg-muted/80"
                     key={runtime.id}
                     tabIndex={0}
                     onClick={() => onSelect(runtime)}
@@ -570,9 +606,14 @@ function RuntimeTable({
                       }
                     }}
                   >
-                    <TableCell className="min-w-44 font-medium">{runtime.name}</TableCell>
-                    <TableCell>
-                      <Pill kind="runtime" tone="muted">{runtimeKindLabels[runtime.kind]}</Pill>
+                    <TableCell className="min-w-44">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <InitialAvatar text={runtime.name} />
+                        <span className="min-w-0">
+                          <strong className="block truncate text-[13px] font-semibold">{runtime.name}</strong>
+                          <span className="block truncate text-[11.5px] text-muted-foreground">{runtime.version ?? "未上报版本"}</span>
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {deviceById.get(runtime.deviceId)?.id ?? runtime.deviceId}
@@ -580,8 +621,9 @@ function RuntimeTable({
                     <TableCell>
                       <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                     </TableCell>
+                    <TableCell className="text-muted-foreground">{taskTotal}</TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {formatRuntimeTimestamp(runtime.lastSeenAt)}
+                      {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
                   </TableRow>
                 );
@@ -615,9 +657,10 @@ function AgentTable({
 
   return (
     <Card size="sm" aria-label="Agent 列表">
-      <CardHeader className="grid-cols-[1fr_auto] items-start">
+      <CardHeader className="grid-cols-[1fr_auto] items-start border-b border-border pb-3">
         <div>
           <CardTitle>Agent</CardTitle>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">成员目录样式展示 Agent、归属 Runtime、Skill 与任务活动。</p>
         </div>
         <Bot aria-hidden="true" className="size-5 text-muted-foreground" />
       </CardHeader>
@@ -626,12 +669,13 @@ function AgentTable({
           <EmptyAsset message="暂无 Agent" />
         ) : (
           <Table aria-label="Agent 列表">
-            <TableHeader>
+            <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
                 <TableHead>名称</TableHead>
                 <TableHead>归属 Runtime</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead>最近同步</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead>最近活跃</TableHead>
                 <TableHead className="w-20 text-right">Skill</TableHead>
               </TableRow>
             </TableHeader>
@@ -639,10 +683,13 @@ function AgentTable({
               {agents.map((agent) => {
                 const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
                 const skillProbeDisabled = status === "invisible";
+                const lastActiveAt = runtimeFleetAgentLastActiveAt(snapshot, agent.id);
+                const taskTotal = taskTotalForAgent(snapshot, agent.id);
+                const runtimeName = runtimeById.get(agent.runtimeId)?.name ?? "未匹配 Runtime";
                 return (
                   <TableRow
                     aria-selected={agent.id === selectedId}
-                    className="cursor-pointer aria-selected:bg-muted/80"
+                    className="cursor-pointer border-border/70 aria-selected:bg-muted/80"
                     key={agent.id}
                     tabIndex={0}
                     onClick={() => onSelect(agent)}
@@ -654,15 +701,24 @@ function AgentTable({
                       }
                     }}
                   >
-                    <TableCell className="min-w-36 font-medium">{agent.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {runtimeById.get(agent.runtimeId)?.name ?? agent.runtimeId}
+                    <TableCell className="min-w-36">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <InitialAvatar text={agent.name} variant="solid" />
+                        <span className="min-w-0">
+                          <strong className="block truncate text-[13px] font-semibold">{agent.name}</strong>
+                          <span className="block truncate text-[11.5px] text-muted-foreground">Agent · {taskTotal} Task</span>
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-48 truncate text-muted-foreground">
+                      {runtimeName}
                     </TableCell>
                     <TableCell>
                       <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                     </TableCell>
+                    <TableCell className="text-muted-foreground">{taskTotal}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtimeById.get(agent.runtimeId), snapshot))}
+                      {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
                     <TableCell className="w-20 text-right">
                       <Tooltip>
@@ -814,7 +870,7 @@ function AgentSkillProbePanel({
   const status = snapshot?.status ?? "unknown";
 
   return (
-    <section className="rounded-lg border bg-muted/20 p-3" aria-label="Skill 探测">
+    <section className="border-t border-border pt-3" aria-label="Skill 探测">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-medium">Skill 探测</h3>
         <Button
@@ -857,7 +913,7 @@ function AgentSkillProbeSnapshotView({ snapshot }: { snapshot: AgentSkillProbeSn
   return (
     <div className="space-y-3">
       {snapshot.skills.map((skill) => (
-        <article className="rounded-lg border bg-background p-3" key={`${skill.rootPath}:${skill.entryPath}`}>
+        <article className="border-t border-border pt-3 first:border-t-0 first:pt-0" key={`${skill.rootPath}:${skill.entryPath}`}>
           <h4 className="font-medium">{skill.name}</h4>
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <SkillProbeFileGroup title="Markdown" files={skill.markdownFiles} />
@@ -882,7 +938,7 @@ function SkillProbeFileGroup({
       <strong className="text-xs text-muted-foreground">{title}</strong>
       <ul className="space-y-1">
         {files.map((file) => (
-          <li className="break-all rounded-md bg-muted px-2 py-1 text-xs" key={`${title}:${file.path}`}>
+          <li className="break-all rounded-[6px] bg-muted px-2 py-1 text-xs" key={`${title}:${file.path}`}>
             {file.relativePath}
           </li>
         ))}
@@ -893,7 +949,7 @@ function SkillProbeFileGroup({
 
 function DetailBlock({ title, children }: { title: string; children: string }) {
   return (
-    <section className="rounded-lg border bg-background p-3">
+    <section className="border-t border-border pt-3 first:border-t-0 first:pt-0">
       <h3 className="text-sm font-medium">{title}</h3>
       <p className="mt-2 text-sm text-muted-foreground">{children}</p>
     </section>
@@ -910,7 +966,7 @@ function DetailList({
   emptyLabel?: string;
 }) {
   return (
-    <section className="rounded-lg border bg-background p-3">
+    <section className="border-t border-border pt-3 first:border-t-0 first:pt-0">
       <h3 className="text-sm font-medium">{title}</h3>
       {items.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">

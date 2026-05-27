@@ -230,40 +230,38 @@ describe("Console shell", () => {
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开主导航" })).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "切换组织" })).toHaveAttribute("data-sidebar", "menu-button");
+    expect(screen.getByRole("button", { name: "切换工作区和账号" })).toHaveAttribute("data-sidebar", "menu-button");
     expect(screen.getByText("精选AI")).toBeInTheDocument();
     const workbar = screen.getByRole("banner");
     expect(workbar).toHaveAttribute("data-console-workbar", "true");
-    expect(workbar).toHaveClass("border-b", "bg-background");
+    expect(workbar).toHaveClass("border-b", "bg-background/85");
     expect(workbar).not.toHaveClass("bg-muted/30", "px-3", "py-1");
     const workbarSurface = workbar.querySelector("[data-console-workbar-surface='true']");
-    expect(workbarSurface).toHaveClass("h-12");
+    expect(workbarSurface).toHaveClass("h-14");
     expect(workbarSurface).not.toHaveClass("rounded-[var(--radius)]", "border", "bg-card/95");
     const operationsButton = screen.getByRole("button", { name: "任务 0" });
     const notificationsButton = screen.getByRole("button", { name: "通知 0" });
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
 
-    await user.click(screen.getByRole("button", { name: "切换组织" }));
-    const organizationMenu = await screen.findByRole("menu");
-    expect(organizationMenu).toHaveClass("bg-card", "text-card-foreground");
-    expect(organizationMenu).not.toHaveClass("dark");
-    expect(within(organizationMenu).getByText("精选AI")).toBeInTheDocument();
-    expect(within(organizationMenu).getByText("owner")).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    await user.click(screen.getByRole("button", { name: "打开个人入口" }));
-    const profileMenu = await screen.findByRole("menu");
-    expect(profileMenu).toHaveClass("bg-card", "text-card-foreground");
-    expect(profileMenu).not.toHaveClass("dark");
-    expect(within(profileMenu).getByText("agent@local.lorume")).toBeInTheDocument();
-    expect(within(profileMenu).getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开个人入口" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "切换工作区和账号" }));
+    const workspaceMenu = await screen.findByRole("menu", { name: "切换工作区和账号" });
+    expect(workspaceMenu).toHaveClass("bg-card", "text-card-foreground");
+    expect(workspaceMenu).not.toHaveClass("dark");
+    expect(within(workspaceMenu).getByText("Agent")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByText("agent@local.lorume")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByText("工作区")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByRole("menuitem", { name: /精选AI/ })).toHaveTextContent("owner");
+    expect(within(workspaceMenu).getByRole("menuitem", { name: "创建工作区" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(workspaceMenu).getByRole("menuitem", { name: "退出登录" })).toHaveClass("text-destructive");
     await user.keyboard("{Escape}");
 
     await user.click(within(nav).getByRole("button", { name: "Runs" }));
 
     expect(window.location.pathname).toBe("/runs");
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+    expect(document.querySelector('[data-console-layout-tier="workspace"]')).toBeInTheDocument();
 
     await user.click(operationsButton);
     expect(window.location.pathname).toBe("/operations");
@@ -317,19 +315,28 @@ describe("Console shell", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
-    for (const lane of ["待处理", "进行中", "待验收", "已完成", "需关注", "已取消"]) {
+    for (const lane of ["待处理", "进行中", "待验收", "已完成", "需关注"]) {
       expect(screen.getByRole("heading", { name: lane })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("heading", { name: "已取消" })).not.toBeInTheDocument();
     for (const removedLane of ["阻塞", "失败", "未知"]) {
       expect(screen.queryByRole("heading", { name: removedLane })).not.toBeInTheDocument();
     }
     expect(screen.queryByText("查看 Agent 承接的会话任务、发起人、Channel、会话/群组、消息摘要和当前状态。")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("任务概览")).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "状态" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent("选择日期范围");
     await user.click(screen.getByRole("button", { name: "筛选" }));
-    expect(screen.getByRole("combobox", { name: "渠道" })).toHaveTextContent("全部");
-    await user.click(screen.getByRole("combobox", { name: "渠道" }));
-    expect(screen.getByRole("listbox")).toHaveClass("bg-card", "text-card-foreground");
+    const filterMenu = screen.getByRole("menu", { name: "筛选" });
+    expect(filterMenu).toHaveClass("bg-card", "text-card-foreground");
+    const channelSubTrigger = within(filterMenu).getByRole("menuitem", { name: /渠道/ });
+    expect(channelSubTrigger).toHaveAttribute("aria-haspopup", "menu");
+    await user.hover(channelSubTrigger);
+    channelSubTrigger.focus();
+    await user.keyboard("{ArrowRight}");
+    const channelMenu = await screen.findByRole("menu", { name: /渠道/ });
+    expect(within(channelMenu).getByRole("menuitemcheckbox", { name: "全部" })).toHaveAttribute("aria-checked", "true");
+    expect(within(channelMenu).getByRole("menuitemcheckbox", { name: /DingTalk/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
@@ -684,7 +691,6 @@ describe("Console shell", () => {
     const lanes = screen.getByLabelText("任务泳道");
     expect(within(lanes).getAllByText("Old task").length).toBeGreaterThan(0);
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: "筛选" }));
     expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent("选择日期范围");
     expect(screen.queryByLabelText("开始时间")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("结束时间")).not.toBeInTheDocument();
@@ -712,9 +718,10 @@ describe("Console shell", () => {
     expect(within(screen.getByLabelText("设备")).getByText("fixture-mac")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Runtime 列表" })).getByText("OpenClaw Gateway")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Agent 列表" })).getByText("main")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Runtime 列表" })).queryByRole("columnheader", { name: "Runtime" })).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "所属设备" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "归属 Runtime" })).toBeInTheDocument();
-    expect(screen.getAllByRole("columnheader", { name: "最近同步" }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole("columnheader", { name: "最近活跃" }).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByLabelText("运行资产筛选")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("搜索设备、Runtime、Agent 或任务")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Channel")).not.toBeInTheDocument();
@@ -735,7 +742,7 @@ describe("Console shell", () => {
     expect(screen.queryByText(/个已采集 Agent/)).not.toBeInTheDocument();
 
     const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
-    expect(within(runtimeTable).getAllByText("OpenClaw")[0].closest("[data-pill-kind]")).toHaveAttribute("data-pill-kind", "runtime");
+    expect(within(runtimeTable).queryByText("OpenClaw")).not.toBeInTheDocument();
 
     const skillHeader = screen.getByRole("columnheader", { name: "Skill" });
     const skillCell = screen.getByRole("button", { name: "main Skill 探测" }).closest("td");

@@ -27,19 +27,17 @@ const item: RuntimeTaskBoardItem = {
 };
 
 describe("RuntimeTaskCard", () => {
-  it("renders a compact mail-style task card with a subtle 3D affordance", async () => {
+  it("renders a compact Taskflow-style task card", async () => {
     const onSelect = vi.fn();
     render(<RuntimeTaskCard item={item} onSelect={onSelect} />);
 
     const card = screen.getByRole("button", { name: /PMO asked OpenCl/ });
     expect(card).toHaveAttribute("data-view", "mail-list-item");
-    expect(card).toHaveAttribute("data-surface", "spotlight-card");
     expect(card).toHaveAttribute("data-spotlight", "task-card");
     expect(card).toHaveAttribute("data-state", "idle");
-    expect(card).toHaveClass("px-3");
     expect(card).toHaveClass("py-3");
-    expect(card.className).toContain("hover:[box-shadow:0_10px_24px");
-    expect(card.className).not.toContain("hover:shadow-[0_18px_45px");
+    expect(card.className).toContain("before:bg-[var(--card-color)]");
+    expect(card.className).toContain("hover:shadow-[0_12px_26px");
     expect(screen.getByTestId("runtime-task-card-assignee")).toHaveTextContent("main");
     expect(screen.getByTestId("runtime-task-card-title")).toHaveTextContent("PMO asked OpenCl...");
     expect(screen.getByTestId("runtime-task-card-title")).toHaveAttribute("title", item.userMessage);
@@ -53,7 +51,7 @@ describe("RuntimeTaskCard", () => {
     expect(card).not.toHaveTextContent("DingTalk 群聊");
     expect(card).not.toHaveTextContent("未关联执行");
     expect(card).not.toHaveTextContent("cid-private-raw");
-    expect(card.querySelector("[data-spotlight-blob]")).toBeInTheDocument();
+    expect(card.querySelector("[data-spotlight-blob]")).not.toBeInTheDocument();
 
     await userEvent.click(card);
     expect(onSelect).toHaveBeenCalledTimes(1);

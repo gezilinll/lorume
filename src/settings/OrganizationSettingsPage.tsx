@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { AuthMemberRole, AuthSessionContext } from "../auth/auth-store";
+import type { AuthMemberRole, AuthOrganizationMembership, AuthSessionContext } from "../auth/auth-store";
+import { InitialAvatar } from "@/components/data/InitialAvatar";
 import { StatusBadge } from "@/components/data/StatusBadge";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -11,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface OrganizationSettingsPageProps {
+  organization?: AuthOrganizationMembership;
   session?: AuthSessionContext;
 }
 
@@ -21,8 +23,8 @@ const roleLabels: Record<AuthMemberRole, string> = {
 };
 
 /** Organization settings entry for member visibility and invitation link creation. */
-export function OrganizationSettingsPage({ session }: OrganizationSettingsPageProps) {
-  const organization = session?.organizations[0];
+export function OrganizationSettingsPage({ organization: activeOrganization, session }: OrganizationSettingsPageProps) {
+  const organization = activeOrganization ?? session?.organizations[0];
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AuthMemberRole>("member");
   const [inviteLink, setInviteLink] = useState("");
@@ -213,7 +215,16 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
               </TableHeader>
               <TableBody>
                 <TableRow>
-                  <TableCell className="font-medium">{session.user.email}</TableCell>
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <InitialAvatar
+                        text={session?.user.email ?? "当前用户"}
+                        tone="pink"
+                        variant="solid"
+                      />
+                      <span className="min-w-0 truncate font-medium">{session?.user.email ?? "当前用户"}</span>
+                    </div>
+                  </TableCell>
                   <TableCell>{roleLabels[organization.role]}</TableCell>
                   <TableCell>
                     <StatusBadge tone="info">当前登录成员</StatusBadge>
@@ -335,7 +346,7 @@ export function OrganizationSettingsPage({ session }: OrganizationSettingsPagePr
 
 function SummaryItem({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
+    <div className="rounded-lg border border-border bg-[var(--surface-soft)] p-3">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
     </div>

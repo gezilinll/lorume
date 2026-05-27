@@ -5,24 +5,28 @@ import {
   listRuntimeTaskChannelOptions,
   runtimeTaskBoardLaneDefinitions,
   runtimeTasksQueryPageFromResponse,
+  taskStatusLabels,
 } from "./runtime-work-query-api";
 
 describe("Runtime task query API helpers", () => {
   it("creates backend query URLs for Task rows", () => {
     const url = createTasksQueryUrl("http://lorume.local", {
-      channelKind: "dingtalk",
+      channelKinds: ["dingtalk", "webchat"],
+      organizationId: "org_1",
       search: "handoff",
       status: "in_progress",
       timeRange: { start: "2026-05-21T10:00:00", end: "2026-05-21T11:00:00" },
-    }, { cursor: "cursor-1" });
+    } as any, { cursor: "cursor-1" });
 
     expect(url.pathname).toBe("/api/runtime-tasks");
-    expect(url.searchParams.get("channelKind")).toBe("dingtalk");
+    expect(url.searchParams.getAll("channelKind")).toEqual(["dingtalk", "webchat"]);
     expect(url.searchParams.get("cursor")).toBe("cursor-1");
     expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.get("organizationId")).toBe("org_1");
     expect(url.searchParams.get("search")).toBe("handoff");
     expect(url.searchParams.get("status")).toBe("in_progress");
     expect(url.searchParams.get("startAt")).toBe("2026-05-21T02:00:00.000Z");
+    expect(url.searchParams.get("statusScope")).toBe("board-visible");
     expect(url.searchParams.get("taskType")).toBe("conversation");
     expect(url.searchParams.get("endAt")).toBe("2026-05-21T03:00:00.000Z");
   });
@@ -99,7 +103,7 @@ describe("Runtime task query API helpers", () => {
     ]);
   });
 
-  it("groups Runs board lanes into the six product states", () => {
+  it("groups Runs board lanes into the five visible product states", () => {
     const page = runtimeTasksQueryPageFromResponse({
       items: [
         { id: "task-1", agentId: "agent-1", userMessage: "Queued", status: "todo", adapter: { kind: "openclaw" } },
@@ -123,7 +127,6 @@ describe("Runtime task query API helpers", () => {
       "待验收",
       "已完成",
       "需关注",
-      "已取消",
     ]);
     expect(board.lanes.map((lane) => [lane.key, lane.statuses, lane.items.map((item) => item.id)])).toEqual([
       ["todo", ["todo"], ["task-1"]],
@@ -131,8 +134,25 @@ describe("Runtime task query API helpers", () => {
       ["review", ["review"], ["task-3"]],
       ["done", ["done"], ["task-4"]],
       ["attention", ["failed", "unknown"], ["task-5", "task-6"]],
-      ["cancelled", ["cancelled"], ["task-7"]],
     ]);
+    expect(board.visibleItems.map((item) => item.id)).not.toContain("task-7");
+    expect(taskStatusLabels.cancelled).toBe("已取消");
+  });
+
+  it("filters Runs board items by multiple selected channels", () => {
+    const page = runtimeTasksQueryPageFromResponse({
+      items: [
+        { id: "task-1", agentId: "agent-1", userMessage: "DingTalk", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "dingtalk" } },
+        { id: "task-2", agentId: "agent-1", userMessage: "Web", status: "todo", adapter: { kind: "openclaw" }, channel: { kind: "webchat" } },
+        { id: "task-3", agentId: "agent-1", userMessage: "Slock", status: "todo", adapter: { kind: "slock" }, channel: { kind: "slock" } },
+      ],
+      total: 3,
+    });
+
+    if (!page) throw new Error("query page should be parsed");
+    const board = createRuntimeTaskBoard(page.tasks, { channelKinds: ["dingtalk", "webchat"] } as any);
+
+    expect(board.visibleItems.map((item) => item.id)).toEqual(["task-1", "task-2"]);
   });
 
   it("lists user-facing channel filters from backend facets", () => {

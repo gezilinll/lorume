@@ -14,8 +14,11 @@ Lorume 文案应像生产工具：准确、短、可操作。不要把调试信�
 | Runs | 会话任务 |
 | Catalog | 对象目录 |
 | Last Seen / Last Sync | 最近同步 |
+| Last Active | 最近活跃 |
 
 Runtime 是 OpenClaw、Codex 等执行运行环境。Channel 是 DingTalk、Web Chat、Slock 等用户触点。Adapter 是 OpenClaw、Slock、Codex 等采集归一化来源。三者不能混用。
+
+Runtime Fleet 中 `最近同步` 表示采集新鲜度，`最近活跃` 表示 Task 处理活动。两者不能混用；列表和详情中的用户可见活动时间应优先使用 `最近活跃`。
 
 定时任务当前不放进 Runs 会话任务页，不使用 Work Board 作为页面标题。
 

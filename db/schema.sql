@@ -91,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_device_tokens_token_prefix ON device_tokens(token
 
 CREATE TABLE IF NOT EXISTS devices (
   id text PRIMARY KEY,
+  organization_id text REFERENCES organizations(id) ON DELETE CASCADE,
   hostname text NOT NULL,
   os text NOT NULL,
   architecture text,
@@ -102,6 +103,11 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE devices
+  ADD COLUMN IF NOT EXISTS organization_id text REFERENCES organizations(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_devices_organization_id ON devices(organization_id);
 
 CREATE TABLE IF NOT EXISTS runtimes (
   id text PRIMARY KEY,
@@ -171,6 +177,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_stale_at ON tasks(stale_at);
 CREATE TABLE IF NOT EXISTS collector_ingestions (
   id bigserial PRIMARY KEY,
   device_id text NOT NULL,
+  organization_id text REFERENCES organizations(id) ON DELETE CASCADE,
   snapshot_type text NOT NULL,
   status text NOT NULL,
   collected_at timestamptz,
@@ -182,7 +189,11 @@ CREATE TABLE IF NOT EXISTS collector_ingestions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE collector_ingestions
+  ADD COLUMN IF NOT EXISTS organization_id text REFERENCES organizations(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_collector_ingestions_device_id ON collector_ingestions(device_id);
+CREATE INDEX IF NOT EXISTS idx_collector_ingestions_organization_id ON collector_ingestions(organization_id);
 CREATE INDEX IF NOT EXISTS idx_collector_ingestions_snapshot_type ON collector_ingestions(snapshot_type);
 CREATE INDEX IF NOT EXISTS idx_collector_ingestions_received_at ON collector_ingestions(received_at);
 

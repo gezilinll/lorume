@@ -1,5 +1,5 @@
 import type { PillKind, PillTone } from "@/components/data/Pill";
-import type { TaskStatus } from "./runtime-model";
+import type { TaskChannelKind, TaskStatus } from "./runtime-model";
 import type { RuntimeTaskBoardItem } from "./runtime-work-query-api";
 
 export const agentReplyFallback = "暂无 Agent 答复";
@@ -30,7 +30,7 @@ export function getRuntimeTaskCardPills(
     pills.push({
       kind: "channel",
       label: item.channelKindLabel,
-      tone: "neutral",
+      tone: channelPillTone(item.channel?.kind),
     });
   }
   const maxVisible = options.maxVisible ?? 4;
@@ -42,6 +42,13 @@ export function getRuntimeTaskCardPills(
     tone: "muted",
   });
   return visible;
+}
+
+function channelPillTone(kind?: TaskChannelKind): PillTone {
+  if (kind === "dingtalk") return "blue";
+  if (kind === "slock") return "purple";
+  if (kind === "webchat") return "green";
+  return "cyan";
 }
 
 export function formatRuntimeTaskCardTitle(item: RuntimeTaskBoardItem): string {

@@ -140,6 +140,30 @@ export function formatRuntimeTimestamp(value?: string): string {
   }).format(timestamp);
 }
 
+/** Format Task-derived activity recency for Runtime Fleet. */
+export function formatRelativeActivityTime(
+  value?: string,
+  options: { now?: Date } = {},
+): string {
+  if (!value) return "暂无活跃";
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "未知";
+  const now = options.now ?? new Date();
+  const diffMs = now.getTime() - timestamp.getTime();
+  if (diffMs < -60_000) return formatAbsoluteDate(timestamp, true);
+  if (diffMs < 60_000) return "刚刚";
+
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(diffMs / 3_600_000);
+  if (hours < 24) return `${hours} 小时前`;
+
+  const dayDiff = localCalendarDayDiff(timestamp, now);
+  if (dayDiff === 1) return `昨天 ${formatLocalHourMinute(timestamp)}`;
+  if (dayDiff >= 2 && dayDiff <= 6) return `${dayDiff} 天前`;
+  return formatAbsoluteDate(timestamp, timestamp.getFullYear() !== now.getFullYear());
+}
+
 /** Runtime display label used consistently across Runtime and Agent surfaces. */
 export function runtimeDisplayName(runtime: Runtime): string {
   return runtime.name;
@@ -152,6 +176,21 @@ export function runtimeAgentLastSeenAt(
   snapshot?: RuntimeFleetSnapshot,
 ): string | undefined {
   return agent.lastSeenAt ?? runtime?.lastSeenAt ?? snapshot?.collectedAt;
+}
+
+/** Resolve Task-derived recent activity for a Device. */
+export function runtimeFleetDeviceLastActiveAt(snapshot: RuntimeFleetSnapshot, deviceId: string): string | undefined {
+  return snapshot.taskSummary.lastActiveAtByDeviceId?.[deviceId];
+}
+
+/** Resolve Task-derived recent activity for a Runtime. */
+export function runtimeFleetRuntimeLastActiveAt(snapshot: RuntimeFleetSnapshot, runtimeId: string): string | undefined {
+  return snapshot.taskSummary.lastActiveAtByRuntimeId?.[runtimeId];
+}
+
+/** Resolve Task-derived recent activity for an Agent. */
+export function runtimeFleetAgentLastActiveAt(snapshot: RuntimeFleetSnapshot, agentId: string): string | undefined {
+  return snapshot.taskSummary.lastActiveAtByAgentId?.[agentId];
 }
 
 /** Summarize one query result for Runtime Fleet cards. */
@@ -207,6 +246,7 @@ export function getRuntimeFleetDetail(
     const runtimeIds = new Set(runtimes.map((runtime) => runtime.id));
     const agents = snapshot.agents.filter((agent) => runtimeIds.has(agent.runtimeId));
     const taskCounts = taskCountsForDevice(snapshot, device.id);
+    const lastActiveAt = runtimeFleetDeviceLastActiveAt(snapshot, device.id);
     const deviceHealth = deviceHealthByDeviceId?.get(device.id);
     const status = deviceHealth
       ? runtimeFleetStatusFromDeviceHealth(deviceHealth.status)
@@ -216,7 +256,7 @@ export function getRuntimeFleetDetail(
       kind: "device",
       id: device.id,
       title: deviceDisplayLabel(device),
-      subtitle: `最近同步 ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}`,
+      subtitle: `最近活跃 ${formatRelativeActivityTime(lastActiveAt)}`,
       status,
       statusLabel,
       sections: [
@@ -244,7 +284,7 @@ export function getRuntimeFleetDetail(
             `Runtime 数量: ${runtimes.length}`,
             `Agent 数量: ${agents.length}`,
             `Task 数量: ${taskCounts.total}`,
-            `最近同步: ${formatRuntimeTimestamp(device.lastSeenAt ?? snapshot.collectedAt)}`,
+            `最近活跃: ${formatRelativeActivityTime(lastActiveAt)}`,
           ],
         },
         {
@@ -260,6 +300,7 @@ export function getRuntimeFleetDetail(
     if (!runtime) return null;
     const agents = snapshot.agents.filter((agent) => agent.runtimeId === runtime.id);
     const taskCounts = taskCountsForRuntime(snapshot, runtime.id);
+    const lastActiveAt = runtimeFleetRuntimeLastActiveAt(snapshot, runtime.id);
     const status = deriveRuntimeFleetStatus(snapshot, runtime, collectionHealthByDeviceId);
     const device = deviceForRuntime(snapshot, runtime);
 
@@ -277,7 +318,7 @@ export function getRuntimeFleetDetail(
           items: [
             `Version: ${runtime.version ?? "未上报"}`,
             `状态: ${collectionStatusLabels[status]}`,
-            `最近同步: ${formatRuntimeTimestamp(runtime.lastSeenAt)}`,
+            `最近活跃: ${formatRelativeActivityTime(lastActiveAt)}`,
           ],
         },
         {
@@ -303,6 +344,7 @@ export function getRuntimeFleetDetail(
     const status = deriveAgentFleetStatus(snapshot, agent, collectionHealthByDeviceId);
     const device = runtime ? deviceForRuntime(snapshot, runtime) : snapshot.devices[0];
     const taskCounts = taskCountsForAgent(snapshot, agent.id);
+    const lastActiveAt = runtimeFleetAgentLastActiveAt(snapshot, agent.id);
 
     return {
       kind: "agent",
@@ -319,7 +361,7 @@ export function getRuntimeFleetDetail(
           title: "基础信息",
           items: [
             `状态: ${collectionStatusLabels[status]}`,
-            `最近同步: ${formatRuntimeTimestamp(runtimeAgentLastSeenAt(agent, runtime, snapshot))}`,
+            `最近活跃: ${formatRelativeActivityTime(lastActiveAt)}`,
           ],
         },
         {
@@ -453,6 +495,9 @@ function normalizeRuntimeFleetTaskSummary(value: unknown): RuntimeFleetTaskSumma
     byAgentId: normalizeTaskCountMap(candidate.byAgentId),
     byDeviceId: normalizeTaskCountMap(candidate.byDeviceId),
     byRuntimeId: normalizeTaskCountMap(candidate.byRuntimeId),
+    lastActiveAtByAgentId: normalizeTimestampMap(candidate.lastActiveAtByAgentId),
+    lastActiveAtByDeviceId: normalizeTimestampMap(candidate.lastActiveAtByDeviceId),
+    lastActiveAtByRuntimeId: normalizeTimestampMap(candidate.lastActiveAtByRuntimeId),
   };
 }
 
@@ -501,9 +546,42 @@ function totalTaskCount(taskSummary: RuntimeFleetTaskSummary): number {
   return Object.values(taskSummary.byAgentId).reduce((sum, counts) => sum + counts.total, 0);
 }
 
+function normalizeTimestampMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const output: Record<string, string> = {};
+  for (const [id, rawTimestamp] of Object.entries(value)) {
+    if (!id || typeof rawTimestamp !== "string") continue;
+    const timestamp = new Date(rawTimestamp);
+    if (Number.isNaN(timestamp.getTime())) continue;
+    output[id] = timestamp.toISOString();
+  }
+  return output;
+}
+
 function normalizeCount(value: unknown, fallback = 0): number {
   const count = Number(value);
   return Number.isFinite(count) && count >= 0 ? count : fallback;
+}
+
+function localCalendarDayDiff(earlier: Date, later: Date): number {
+  const earlierDay = new Date(earlier.getFullYear(), earlier.getMonth(), earlier.getDate()).getTime();
+  const laterDay = new Date(later.getFullYear(), later.getMonth(), later.getDate()).getTime();
+  return Math.floor((laterDay - earlierDay) / 86_400_000);
+}
+
+function formatAbsoluteDate(timestamp: Date, includeYear: boolean): string {
+  const month = padTwoDigits(timestamp.getMonth() + 1);
+  const day = padTwoDigits(timestamp.getDate());
+  if (!includeYear) return `${month}月${day}日`;
+  return `${timestamp.getFullYear()}年${month}月${day}日`;
+}
+
+function formatLocalHourMinute(timestamp: Date): string {
+  return `${padTwoDigits(timestamp.getHours())}:${padTwoDigits(timestamp.getMinutes())}`;
+}
+
+function padTwoDigits(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 function localPathItems(paths?: Array<{ label: string; path: string }>, emptyFallback?: string): string[] {

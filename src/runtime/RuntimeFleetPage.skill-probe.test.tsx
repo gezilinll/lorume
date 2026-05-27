@@ -89,7 +89,9 @@ describe("Runtime Fleet Agent Skill probe panel", () => {
 
     const panel = await screen.findByRole("region", { name: "Skill 探测" });
     expect(within(panel).getByText("reviewer")).toBeInTheDocument();
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/agents/fixture-mac%3Aruntime%3Aopenclaw%3Aagent%3Amain/skill-probe");
+    expect(vi.mocked(globalThis.fetch).mock.calls.map(([input]) => input.toString())).toContain(
+      "http://localhost:3000/api/agents/fixture-mac%3Aruntime%3Aopenclaw%3Aagent%3Amain/skill-probe",
+    );
   });
 
   it("surfaces unsupported and failed states from stored probe snapshots", async () => {

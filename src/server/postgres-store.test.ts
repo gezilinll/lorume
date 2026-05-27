@@ -80,6 +80,9 @@ describeDb("Postgres runtime store", () => {
           todo: 1,
           total: 2,
         });
+        expect(fleet.taskSummary.lastActiveAtByAgentId?.["fixture-mac:runtime:openclaw:agent:main"]).toBe("2026-05-21T10:00:00.000Z");
+        expect(fleet.taskSummary.lastActiveAtByRuntimeId?.["fixture-mac:runtime:openclaw"]).toBe("2026-05-21T10:00:00.000Z");
+        expect(fleet.taskSummary.lastActiveAtByDeviceId?.["fixture-mac"]).toBe("2026-05-21T10:00:00.000Z");
         expect(fleet.runtimes[0]).not.toHaveProperty("endpoint");
         expect(fleet.runtimes[0]).not.toHaveProperty("capabilities");
         expect(fleet.runtimes[0]).not.toHaveProperty("sourceRefs");
@@ -108,6 +111,93 @@ describeDb("Postgres runtime store", () => {
           total: 1,
         });
         expect(tasks.items[0]).not.toHaveProperty("runtimeId");
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("keeps cancelled Tasks queryable while excluding them from board-visible Runs scope", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        const cancelledTask = {
+          ...snapshot.tasks[0],
+          id: `${snapshot.agents[0].id}:task:cancelled-1`,
+          status: "cancelled" as const,
+          updatedAt: "2026-05-21T11:00:00.000Z",
+          userMessage: "Cancelled task",
+        };
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...snapshot,
+          tasks: [...snapshot.tasks, cancelledTask],
+        }));
+
+        const allTasks = await store.listRuntimeTasks({ channelKind: "dingtalk" });
+        const visibleTasks = await store.listRuntimeTasks({ channelKind: "dingtalk", statusScope: "board-visible" });
+        const directCancelled = await store.listRuntimeTasks({ status: "cancelled" });
+
+        expect(allTasks.total).toBe(3);
+        expect(allTasks.summary.byStatus).toMatchObject({ cancelled: 1, total: 3 });
+        expect(allTasks.facets.channels).toEqual([{ count: 3, kind: "dingtalk", label: "DingTalk" }]);
+        expect(visibleTasks.total).toBe(2);
+        expect(visibleTasks.summary.byStatus).toMatchObject({ cancelled: 0, total: 2 });
+        expect(visibleTasks.facets.channels).toEqual([{ count: 2, kind: "dingtalk", label: "DingTalk" }]);
+        expect(directCancelled).toMatchObject({
+          items: [expect.objectContaining({ id: cancelledTask.id, status: "cancelled" })],
+          total: 1,
+        });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("filters Runtime Tasks by multiple selected channels", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        const webChatTask = {
+          ...snapshot.tasks[0],
+          channel: { kind: "webchat" as const },
+          id: `${snapshot.agents[0].id}:task:webchat-1`,
+          userMessage: "Web chat task",
+        };
+        const slockTask = {
+          ...snapshot.tasks[0],
+          channel: { kind: "slock" as const },
+          id: `${snapshot.agents[0].id}:task:slock-1`,
+          userMessage: "Slock task",
+        };
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...snapshot,
+          tasks: [snapshot.tasks[0], webChatTask, slockTask],
+        }));
+
+        const selectedChannels = await store.listRuntimeTasks({ channelKinds: ["dingtalk", "webchat"] } as any);
+
+        expect(selectedChannels.items.map((item) => item.id).sort()).toEqual([
+          snapshot.tasks[0].id,
+          webChatTask.id,
+        ].sort());
+        expect(selectedChannels.total).toBe(2);
+        expect(selectedChannels.facets.channels).toEqual([
+          { count: 1, kind: "dingtalk", label: "DingTalk" },
+          { count: 1, kind: "slock", label: "Slock" },
+          { count: 1, kind: "webchat", label: "Web Chat" },
+        ]);
       } finally {
         await store.close();
       }

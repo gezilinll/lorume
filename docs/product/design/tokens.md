@@ -26,6 +26,8 @@ Business pages should use Tailwind utilities mapped to semantic or component tok
 
 - Font: `--font-sans`, `--font-mono`, and Tailwind font utilities backed by `src/index.css`.
 - Color: `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--secondary`, `--secondary-foreground`, `--muted`, `--muted-foreground`, `--accent`, `--accent-foreground`, `--destructive`, `--border`, `--input`, `--ring`, `--chart-*`, and `--sidebar-*`.
+- Accent families: `--brand-*`, `--blue-*`, `--cyan-*`, `--orange-*`, `--green-*`, `--pink-*`, `--red-*`, `--yellow-*`, and `--purple-*`. Each family exposes `solid`, `soft`, `border`, and `foreground` roles through the naming pattern documented in [color.md](color.md).
+- Product surface helpers: `--surface`, `--surface-soft`, `--surface-muted`, `--ink-2`, `--muted-2`, `--line-2`, `--menu-selection`, `--menu-shadow`, `--active-filter`, and `--active-filter-foreground`.
 - Border and ring: `--border`, `--input`, `--ring`, and Tailwind utilities for hairlines, focus-visible rings, and disabled states.
 - Radius: `--radius` plus shadcn radius utilities for small, medium, large, and full-pill forms.
 - Shadow: Tailwind/shadcn shadow utilities for subtle surface, elevated surface, floating drawer, and focus states.
@@ -38,6 +40,7 @@ Business pages should use Tailwind utilities mapped to semantic or component tok
 - If the same visual value appears three times for the same intent, promote it to token or component variant.
 - If a layout is truly page-specific, keep it page-scoped but still use tokens for visual values.
 - Token names describe intent, not current color. Use shadcn semantic names such as `--primary` and `--muted-foreground`, not `--blue-button`.
+- Product page components may choose from named accent families, but they must not embed raw hex or one-off `rgba` values for repeated chips, avatars, status stripes, menu selections, or active filter states.
 - Token changes must be checked against Brand, Identity, and Console surfaces.
 
 ## Forbidden

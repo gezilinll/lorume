@@ -79,6 +79,7 @@ Collector 保持主动上报：
 - `POST /api/device-task-batches` 按稳定 Task ID upsert Task，并返回 ACK 列表；collector 只有在 ACK 中看到当前 `{ id, hash }` 后才推进本地 task sync cache。
 - Task 删除使用 soft tombstone 语义。后端不因普通 collector sync 物理删除 Task；只在认证后的 `task_batch.removedTaskIds` 被 ACK 后标记 stale，默认产品查询 API 过滤 stale rows。
 - Runtime / Agent / Device metadata 仍由 metadata snapshot 路径按当前快照 upsert 和收敛。
+- 认证后的 collector 写入必须绑定 device token 所属 `organizationId`。`devices.organization_id` 是 Runtime Fleet / Runs 组织隔离的来源；`task_batch` 只能写入同组织设备下的 Task。
 - `inventory` 和 `work_state` 不作为兼容回退保留；对应旧 HTTP 入口、CLI 命令和 DB 表都不属于当前规则。
 - Task 必须引用当前数据库中真实存在的 Agent。无法关联 Agent 的平台证据由 adapter 跳过并记录结构化 diagnostic，不能写成悬空任务。
 - 每次上报必须写 `collector_ingestions`，记录设备、类型、状态、对象数量、结构化 diagnostics、规范化错误码、用户可读错误摘要、`collectedAt` 和 `receivedAt`。
@@ -113,10 +114,12 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
 正式查询 API：
 
 - `GET /api/runtime-fleet`
-  - 当前不接收搜索或筛选参数。
-  - 返回 Runtime Fleet 页面需要的全量设备、Runtime、Agent、summary 和详情基础数据。
+  - 参数：`organizationId`。
+  - 返回当前组织内 Runtime Fleet 页面需要的全量设备、Runtime、Agent、summary 和详情基础数据。
 - `GET /api/runtime-tasks`
-  - 参数：`search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
+  - 参数：`organizationId`、`search`、`status`、`statusScope`、`channelKind`、`channelKinds`、`startAt`、`endAt`、`limit`、`cursor`。
+  - `channelKind` 可以重复出现，用于 Runs 多选渠道筛选，例如 `channelKind=dingtalk&channelKind=webchat`；`channelKinds` 作为逗号分隔兼容参数。后端按去重后的 channel kind 集合过滤。
+  - `statusScope=board-visible` 用于 Runs 看板可见工作集，排除 `cancelled` 并影响 `items`、`total`、`summary.byStatus` 和 `facets.channels`；不传该参数时保留完整 Task 查询行为。
   - 后端负责筛选、时间范围、稳定 cursor 分页和排序，返回 `total` 与 `nextCursor`。
   - 返回行是 Lorume `Task`。`Task.status` 是任务当前状态的唯一来源，Task 不包含 `runtimeId` 或 `lastRun`。
 - `GET /api/devices/:deviceId/ingestions`

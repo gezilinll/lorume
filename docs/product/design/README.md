@@ -33,6 +33,8 @@
 | [content-and-terminology.md](content-and-terminology.md) | 文案、术语、标签、错误信息和中英文边界 |
 | [responsive-and-accessibility.md](responsive-and-accessibility.md) | 响应式、可访问性、长文本和边界状态 |
 | [page-patterns.md](page-patterns.md) | 当前页面的页面级视觉和交互规则 |
+| [taskflow-ui-redesign.md](taskflow-ui-redesign.md) | Taskflow 视觉大改版的落地边界、前置数据契约、spec/harness 更新和验收规则 |
+| [runs-sidebar-filter-redesign.md](runs-sidebar-filter-redesign.md) | Runs 大屏间距、取消泳道隐藏、Sidebar 组织/账号菜单和筛选交互的落地规则 |
 | [review-and-harness.md](review-and-harness.md) | 截图 Review、CSS/token Review 和测试责任 |
 
 ## Relationship To Product Specs

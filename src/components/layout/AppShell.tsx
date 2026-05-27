@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Bell, ChevronsUpDown, ListChecks, LogOut, Play, RefreshCw, Server, Settings } from "lucide-react";
+import { Bell, Check, ChevronDown, ListChecks, LogOut, Play, Plus, RefreshCw, Server, Settings } from "lucide-react";
 import type { AuthOrganizationMembership } from "@/auth/auth-store";
+import { InitialAvatar, initialFromText } from "@/components/data/InitialAvatar";
 import { ConsoleWorkbarContext, type ConsoleWorkbarState } from "@/components/layout/ConsoleWorkbar";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +15,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 
 export type ConsolePageKey = "runtime" | "runs" | "settings";
 export type ConsoleUtilityKey = "notifications" | "operations";
+type ConsoleLayoutTier = "workspace" | "data-dense" | "standard";
 
 const navItems = [
   { icon: Server, label: "Runtime Fleet", page: "runtime" },
@@ -47,75 +48,90 @@ const pageTitles: Record<ConsolePageKey, string> = {
   settings: "组织设置",
 };
 
+const layoutTierByPage: Record<ConsolePageKey, ConsoleLayoutTier> = {
+  runtime: "data-dense",
+  runs: "workspace",
+  settings: "standard",
+};
+
 export function AppShell({
   activePage,
   activeUtility,
   children,
   organization,
+  organizations = organization ? [organization] : [],
   onLogout,
   onNavigate,
   onOpenUtility,
+  onSwitchOrganization,
   utilityBar,
+  userDisplayName,
   userEmail,
 }: {
   activePage: ConsolePageKey;
   activeUtility: ConsoleUtilityKey | null;
   children: ReactNode;
   organization?: AuthOrganizationMembership;
+  organizations?: AuthOrganizationMembership[];
   onLogout?: () => void;
   onNavigate: (page: ConsolePageKey) => void;
   onOpenUtility: (view: ConsoleUtilityKey) => void;
+  onSwitchOrganization?: (organizationId: string) => void;
   utilityBar?: ReactNode;
+  userDisplayName?: string | null;
   userEmail?: string;
 }) {
   const [workbar, setWorkbar] = useState<ConsoleWorkbarState | null>(null);
   const currentWorkbar = workbar ?? { title: pageTitles[activePage] };
+  const layoutTier = layoutTierByPage[activePage];
 
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <Sidebar variant="inset" collapsible="icon">
-          <SidebarHeader>
+        <Sidebar variant="sidebar" collapsible="icon">
+          <SidebarHeader className="gap-2 px-[14px] pt-5 pb-2">
             <SidebarMenu>
               <SidebarMenuItem>
                 {organization ? (
-                  <OrganizationSwitcher organization={organization} />
+                  <WorkspaceAccountMenu
+                    activeOrganization={organization}
+                    organizations={organizations}
+                    userDisplayName={userDisplayName}
+                    userEmail={userEmail}
+                    onLogout={onLogout}
+                    onSwitchOrganization={onSwitchOrganization}
+                  />
                 ) : null}
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
-          <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel>Console</SidebarGroupLabel>
+          <SidebarContent className="px-[14px]">
+            <SidebarGroup className="p-0">
+              <SidebarGroupLabel className="h-auto px-1 pb-2 pt-3 text-[10px] font-bold uppercase tracking-[0.09em] text-sidebar-foreground/50">
+                Main Menu
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <ConsoleNavigation activePage={activePage} onNavigate={onNavigate} />
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
-          <SidebarFooter>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                {userEmail ? <UserAccountMenu userEmail={userEmail} onLogout={onLogout} /> : null}
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarFooter>
           <SidebarRail />
         </Sidebar>
         <ConsoleWorkbarContext.Provider value={setWorkbar}>
           <SidebarInset
             className={cn(
-              "md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none",
+              "bg-background",
               activePage === "runs" && "overflow-hidden md:max-h-svh",
             )}
           >
-            <header className="sticky top-0 z-20 border-b border-border bg-background" data-console-workbar="true">
+            <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-xl" data-console-workbar="true">
               <div
-                className="flex h-12 items-center gap-2 px-4"
+                className="flex h-14 items-center gap-4 px-4 md:px-6"
                 data-console-workbar-surface="true"
               >
                 <SidebarTrigger aria-label="打开主导航" className="md:hidden" />
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <h1 className="truncate text-sm font-semibold text-foreground">{currentWorkbar.title}</h1>
+                  <h1 className="truncate text-[15px] font-bold text-foreground">{currentWorkbar.title}</h1>
                   {currentWorkbar.meta ? (
                     <div className="hidden min-w-0 items-center gap-2 truncate text-xs text-muted-foreground sm:flex">
                       {currentWorkbar.meta}
@@ -169,13 +185,24 @@ export function AppShell({
             </header>
             <div
               className={cn(
-                "bg-muted/30 p-3 md:p-4",
+                "bg-background px-[var(--console-page-padding-x)] py-[var(--console-page-padding-y)]",
                 activePage === "runs"
                   ? "min-h-0 flex-1 overflow-hidden"
-                  : "min-h-[calc(100svh-3rem)]",
+                  : "min-h-[calc(100svh-3.5rem)]",
               )}
             >
-              {children}
+              <div
+                className={cn(
+                  "w-full",
+                  layoutTier === "workspace" && "max-w-none",
+                  layoutTier === "data-dense" && "mx-auto max-w-[var(--console-content-max-data)]",
+                  layoutTier === "standard" && "mx-auto max-w-[var(--console-content-max-standard)]",
+                  activePage === "runs" && "h-full",
+                )}
+                data-console-layout-tier={layoutTier}
+              >
+                {children}
+              </div>
             </div>
             <Toaster position="bottom-right" />
           </SidebarInset>
@@ -185,72 +212,102 @@ export function AppShell({
   );
 }
 
-function OrganizationSwitcher({ organization }: { organization: AuthOrganizationMembership }) {
+function WorkspaceAccountMenu({
+  activeOrganization,
+  onLogout,
+  organizations,
+  onSwitchOrganization,
+  userDisplayName,
+  userEmail,
+}: {
+  activeOrganization: AuthOrganizationMembership;
+  onLogout?: () => void;
+  organizations: AuthOrganizationMembership[];
+  onSwitchOrganization?: (organizationId: string) => void;
+  userDisplayName?: string | null;
+  userEmail?: string;
+}) {
+  const displayName = userDisplayName?.trim() || "Agent";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton
-          aria-label="切换组织"
-          className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+          aria-label="切换工作区和账号"
+          className="h-11 gap-2 rounded-[10px] bg-sidebar-accent px-2 text-sidebar-foreground data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground hover:bg-sidebar-accent"
           size="lg"
           type="button"
         >
-          <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
-            {initialFromText(organization.name)}
+          <span className="flex aspect-square size-7 items-center justify-center rounded-[8px] border border-border bg-background text-xs font-bold text-muted-foreground" aria-hidden="true">
+            {initialFromText(activeOrganization.name)}
           </span>
           <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-semibold">{organization.name}</span>
-            <span className="truncate text-xs text-muted-foreground">当前组织</span>
+            <span className="truncate text-[15px] font-bold tracking-normal text-foreground">{activeOrganization.name}</span>
           </span>
-          <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
         </SidebarMenuButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56 border-border bg-card text-card-foreground">
-        <DropdownMenuLabel>组织</DropdownMenuLabel>
-        <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
-          <span className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
-            {initialFromText(organization.name)}
-          </span>
+      <DropdownMenuContent
+        aria-label="切换工作区和账号"
+        align="start"
+        side="bottom"
+        sideOffset={8}
+        className="w-[min(276px,calc(100vw-24px))] overflow-hidden border-border bg-card p-0 text-card-foreground shadow-[var(--menu-shadow)]"
+      >
+        <DropdownMenuLabel className="flex items-center gap-2.5 px-3 py-3">
+          <InitialAvatar
+            size="md"
+            text={displayName || userEmail || activeOrganization.name}
+            tone="blue"
+            variant="solid"
+          />
           <span className="grid min-w-0">
-            <span className="truncate font-medium">{organization.name}</span>
-            <span className="truncate text-xs text-muted-foreground">{organization.role}</span>
+            <span className="truncate text-[14px] font-bold leading-tight text-foreground">{displayName}</span>
+            {userEmail ? (
+              <span className="truncate text-[12px] font-normal leading-tight text-muted-foreground">{userEmail}</span>
+            ) : null}
           </span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function UserAccountMenu({
-  onLogout,
-  userEmail,
-}: {
-  onLogout?: () => void;
-  userEmail: string;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarMenuButton aria-label="打开个人入口" size="lg" type="button">
-          <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground" aria-hidden="true">
-            {initialFromText(userEmail)}
-          </span>
-          <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-semibold">个人入口</span>
-            <span className="truncate text-xs text-muted-foreground">{userEmail}</span>
-          </span>
-          <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
-        </SidebarMenuButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56 border-border bg-card text-card-foreground">
-        <DropdownMenuLabel className="grid gap-0.5">
-          <span>个人入口</span>
-          <span className="truncate text-xs font-normal text-muted-foreground">{userEmail}</span>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator className="m-0" />
+        <DropdownMenuLabel className="px-3 py-2 text-[12px] font-semibold text-muted-foreground">工作区</DropdownMenuLabel>
+        <div className="grid gap-1 px-2 pb-2">
+          {organizations.map((organization) => {
+            const isActive = organization.organizationId === activeOrganization.organizationId;
+            return (
+              <DropdownMenuItem
+                className={cn(
+                  "min-h-9 rounded-[9px] px-2 py-1.5 text-sm",
+                  isActive && "bg-accent text-accent-foreground",
+                )}
+                key={organization.organizationId}
+                onSelect={() => {
+                  onSwitchOrganization?.(organization.organizationId);
+                }}
+              >
+                <InitialAvatar size="sm" text={organization.name} tone="brand" />
+                <span className="grid min-w-0 flex-1">
+                  <span className="truncate text-[13px] font-semibold">{organization.name}</span>
+                  <span className="truncate text-[11px] text-muted-foreground">{organization.slug} · {organization.role}</span>
+                </span>
+                {isActive ? <Check className="size-4 text-foreground" aria-hidden="true" /> : null}
+              </DropdownMenuItem>
+            );
+          })}
+          <DropdownMenuItem
+            className="min-h-9 rounded-[9px] px-2 py-1.5 text-[13px] font-medium"
+            disabled
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            创建工作区
+          </DropdownMenuItem>
+        </div>
         {onLogout ? (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onLogout}>
+            <DropdownMenuSeparator className="m-0" />
+            <DropdownMenuItem
+              className="mx-2 my-2 h-9 rounded-[9px] px-2 text-[13px] font-medium text-destructive focus:text-destructive"
+              variant="destructive"
+              onSelect={onLogout}
+            >
               <LogOut className="size-4" aria-hidden="true" />
               退出登录
             </DropdownMenuItem>
@@ -284,6 +341,7 @@ function ConsoleNavigation({
           <SidebarMenuItem key={item.page}>
             <SidebarMenuButton
               aria-current={activePage === item.page ? "page" : undefined}
+              className="h-8 rounded-[7px] px-2 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-semibold data-active:text-sidebar-accent-foreground [&_svg]:size-[15px]"
               isActive={activePage === item.page}
               tooltip={item.label}
               type="button"
@@ -297,10 +355,4 @@ function ConsoleNavigation({
       </SidebarMenu>
     </nav>
   );
-}
-
-function initialFromText(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) return "L";
-  return normalized.slice(0, 1).toUpperCase();
 }

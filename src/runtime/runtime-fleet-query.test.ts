@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   collectionStatusLabels,
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
-  formatRuntimeTimestamp,
+  formatRelativeActivityTime,
   getRuntimeFleetDetail,
+  runtimeFleetAgentLastActiveAt,
+  runtimeFleetDeviceLastActiveAt,
+  runtimeFleetRuntimeLastActiveAt,
   runtimeDisplayName,
   runtimeFleetSnapshotFromQueryResponse,
   summarizeRuntimeFleet,
@@ -13,13 +16,14 @@ import {
 } from "./runtime-fleet-query";
 import { createEmptyTaskStatusCounts } from "./runtime-model";
 
-const fixtureLastSeenAt = formatRuntimeTimestamp("2026-05-21T10:00:00.000Z");
 const fixtureTaskCounts = {
   ...createEmptyTaskStatusCounts(),
   in_progress: 1,
   todo: 1,
   total: 2,
 };
+const fixtureLastActiveAt = "2026-05-21T09:58:00.000Z";
+const fixtureLastActiveLabel = "2 分钟前";
 
 const snapshot: RuntimeFleetSnapshot = {
   collectedAt: "2026-05-21T10:00:00.000Z",
@@ -55,11 +59,22 @@ const snapshot: RuntimeFleetSnapshot = {
     byAgentId: { "fixture-mac:runtime:openclaw:agent:main": fixtureTaskCounts },
     byDeviceId: { "fixture-mac": fixtureTaskCounts },
     byRuntimeId: { "fixture-mac:runtime:openclaw": fixtureTaskCounts },
+    lastActiveAtByAgentId: { "fixture-mac:runtime:openclaw:agent:main": fixtureLastActiveAt },
+    lastActiveAtByDeviceId: { "fixture-mac": fixtureLastActiveAt },
+    lastActiveAtByRuntimeId: { "fixture-mac:runtime:openclaw": fixtureLastActiveAt },
   },
   summary: { agentCount: 1, deviceCount: 1, runtimeCount: 1, taskCount: 2 },
 };
 
 describe("runtime fleet query", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-05-21T10:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("summarizes the four product objects for Runtime Fleet metrics", () => {
     expect(summarizeRuntimeFleet(snapshot)).toEqual({
       agents: 1,
@@ -122,7 +137,7 @@ describe("runtime fleet query", () => {
       "Runtime 数量: 1",
       "Agent 数量: 1",
       "Task 数量: 2",
-      `最近同步: ${fixtureLastSeenAt}`,
+      `最近活跃: ${fixtureLastActiveLabel}`,
     ]);
   });
 
@@ -139,7 +154,7 @@ describe("runtime fleet query", () => {
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
       "Version: 2026.5.1",
       "状态: 在线",
-      `最近同步: ${fixtureLastSeenAt}`,
+      `最近活跃: ${fixtureLastActiveLabel}`,
     ]);
     expect(sectionItems(detailSections(detail), "归属关系")).toEqual([
       "所属设备: fixture-mac",
@@ -172,7 +187,7 @@ describe("runtime fleet query", () => {
     });
     expect(sectionItems(detailSections(detail), "基础信息")).toEqual([
       "状态: 在线",
-      `最近同步: ${fixtureLastSeenAt}`,
+      `最近活跃: ${fixtureLastActiveLabel}`,
     ]);
     expect(sectionItems(detailSections(detail), "归属关系")).toEqual([
       "所属 Runtime: OpenClaw Gateway",
@@ -230,10 +245,33 @@ describe("runtime fleet query", () => {
     expect(parsed).not.toHaveProperty("tasks");
     expect(parsed?.summary.taskCount).toBe(2);
     expect(parsed?.taskSummary.byAgentId["fixture-mac:runtime:openclaw:agent:main"]).toMatchObject({ total: 2 });
+    expect(parsed?.taskSummary.lastActiveAtByAgentId?.["fixture-mac:runtime:openclaw:agent:main"]).toBe(fixtureLastActiveAt);
+    expect(parsed?.taskSummary.lastActiveAtByRuntimeId?.["fixture-mac:runtime:openclaw"]).toBe(fixtureLastActiveAt);
+    expect(parsed?.taskSummary.lastActiveAtByDeviceId?.["fixture-mac"]).toBe(fixtureLastActiveAt);
   });
 
   it("uses runtime names as the stable display label", () => {
     expect(runtimeDisplayName(snapshot.runtimes[0])).toBe("OpenClaw Gateway");
+  });
+
+  it("resolves Task-derived recent activity by Device, Runtime, and Agent", () => {
+    expect(runtimeFleetDeviceLastActiveAt(snapshot, "fixture-mac")).toBe(fixtureLastActiveAt);
+    expect(runtimeFleetRuntimeLastActiveAt(snapshot, "fixture-mac:runtime:openclaw")).toBe(fixtureLastActiveAt);
+    expect(runtimeFleetAgentLastActiveAt(snapshot, "fixture-mac:runtime:openclaw:agent:main")).toBe(fixtureLastActiveAt);
+  });
+
+  it("formats recent activity with product-level relative time rules", () => {
+    const now = new Date("2026-05-21T10:00:00.000Z");
+
+    expect(formatRelativeActivityTime(undefined, { now })).toBe("暂无活跃");
+    expect(formatRelativeActivityTime("not-a-date", { now })).toBe("未知");
+    expect(formatRelativeActivityTime("2026-05-21T09:59:30.000Z", { now })).toBe("刚刚");
+    expect(formatRelativeActivityTime("2026-05-21T09:17:00.000Z", { now })).toBe("43 分钟前");
+    expect(formatRelativeActivityTime("2026-05-21T06:00:00.000Z", { now })).toBe("4 小时前");
+    expect(formatRelativeActivityTime("2026-05-20T08:30:00.000Z", { now })).toBe("昨天 16:30");
+    expect(formatRelativeActivityTime("2026-05-18T08:30:00.000Z", { now })).toBe("3 天前");
+    expect(formatRelativeActivityTime("2026-05-08T08:30:00.000Z", { now })).toBe("05月08日");
+    expect(formatRelativeActivityTime("2025-12-08T08:30:00.000Z", { now })).toBe("2025年12月08日");
   });
 });
 

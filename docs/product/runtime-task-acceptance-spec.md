@@ -1,6 +1,6 @@
 # Runtime Task Acceptance Spec
 
-版本：TinySpec v1.5
+版本：TinySpec v1.6
 
 本文定义 Lorume 当前 Task 采集与 Runs 展示的验收口径。它不是平台能力承诺；它约束 adapter、collector、backend query 和 Runs 必须围绕 `Device / Runtime / Agent / Task` 一套模型工作。
 
@@ -51,12 +51,16 @@ Runs 的会话任务页必须让用户看清：
 - `items`: 当前页 Task。
 - `total`: 当前筛选条件下的 Task 总数。
 - `nextCursor`: 下一页 cursor，可为空。
-- `summary.byStatus`: 按状态聚合的数量。它应用当前 search/time/channel 过滤，但不被当前选中的 status 再次收窄。
-- `facets.channels`: 当前可选 Channel kind 和用户可读 label。它应用当前 search/time/status 过滤，但不被当前选中的 channel 再次收窄。
+- `summary.byStatus`: 按状态聚合的数量。它应用当前 search/time/channel/statusScope 过滤，但不被当前选中的 status 再次收窄。
+- `facets.channels`: 当前可选 Channel kind 和用户可读 label。它应用当前 search/time/status/statusScope 过滤，但不被当前选中的 channel 再次收窄。
 
 Runs 页面可以按状态泳道分别分页请求。每个泳道的加载、错误、空态和“加载更多”互相独立。
 
-Runs UI 状态泳道固定为六组：
+Runs 页面必须传入 `statusScope=board-visible`。该 scope 只定义看板可见工作集：排除 `cancelled`，并作用于 `items`、`total`、`summary.byStatus` 和 `facets.channels`。不带该参数的后端 Task 查询仍保留完整状态集，后端和数据库仍可采集、存储、直接查询 `cancelled`。
+
+Runs 渠道筛选是多选筛选。前端使用筛选菜单中的 `渠道` 子菜单展示后端 facet，用户可以同时选中多个 Channel kind；未选中任何具体渠道时表示 `全部`。查询 API 使用重复的 `channelKind` 参数表达多选，例如 `channelKind=dingtalk&channelKind=webchat`；后端也可兼容逗号分隔的 `channelKinds`，但 UI 生成的规范形式是重复参数。`facets.channels` 不能被当前选中的 channel 再次收窄，否则用户无法从已选状态切换到其他渠道。
+
+Runs UI 状态泳道固定为五组：
 
 | 泳道 | 包含状态 |
 |---|---|
@@ -65,9 +69,8 @@ Runs UI 状态泳道固定为六组：
 | `待验收` | `review` |
 | `已完成` | `done` |
 | `需关注` | `failed`, `unknown` |
-| `已取消` | `cancelled` |
 
-当前页面不展示状态筛选 tab，也不把 `blocked` 单独渲染为泳道。若后端需要重新启用 `blocked`，必须先更新本 spec、前端 lane mapping、query harness 和 Playwright 看板验收。
+当前页面不展示状态筛选 tab，不展示 `已取消` 泳道，也不把 `blocked` 单独渲染为泳道。若后端需要重新启用 `blocked` 或前端重新展示 `cancelled`，必须先更新本 spec、前端 lane mapping、query harness 和 Playwright 看板验收。
 
 无 channel/conversation 的会话任务必须使用用户可读兜底：
 
@@ -118,5 +121,5 @@ Codex adapter 只有在本机 Codex thread 能安全分类为 `codex-native-or-o
 - 真实设备验证结果只能沉淀为当前字段约束、脱敏 fixture 或可执行测试，不保留个人机器路径、原始 token 或临时 checklist。
 - 如果验收发现测试金字塔漏掉真实行为，先把缺口归类为 unit、script、backend API、DB integration 或 Playwright E2E，再补最小 harness。
 - 后端 WebSocket 只验证连接健康，不作为采集触发器。
-- Runs 视觉验收必须覆盖：六泳道状态收敛、无状态筛选 tab、空泳道 inline 空态、Mail-list 卡片密度、任务卡 spotlight / 2.5D hover、点击卡片后详情 Dialog 打开且卡片回到 idle 状态。任务卡固定展示承接 Agent、`userMessage` 16 字截断、`agentReply` 或 `暂无 Agent 答复`、更新时间和渠道 pill；不重复泳道状态，不展示执行关联状态，也不把 `DingTalk 群聊` 等会话/群组名称当作卡片 pill。
+- Runs 视觉验收必须覆盖：五个可见泳道状态收敛、`cancelled` 后端保留但前端不展示 `已取消` 泳道、无状态筛选 tab、空泳道 inline 空态、Taskflow Kanban lane/card 密度、任务卡左侧状态条、Taskflow hover 深度、点击卡片后详情 Dialog 打开且卡片回到 idle 状态。任务卡固定展示渠道 pill、短截断 `userMessage`、`agentReply` 或 `暂无 Agent 答复`、发起人/承接 Agent 元数据和更新时间；不重复泳道状态，不展示执行关联状态，也不把 `DingTalk 群聊` 等会话/群组名称当作卡片 pill。
 - Runs 任务详情必须是结构化卡片而不是字段堆叠：顶部只展示短截断的 `userMessage` 标题；正文只包含任务信息、用户消息、Agent 回复三块。任务信息只能展示发起人、承接 Agent、更新时间、渠道；渠道应组合渠道类型和后端已归一化的可读会话/来源名，例如 `DingTalk 小卷和用户支持的同学们` 或 `Slock #AjisFarm`；不得展示 raw external id、adapter evidence、执行关联状态、采集来源或执行调试字段。

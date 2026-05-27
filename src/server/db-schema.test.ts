@@ -49,6 +49,7 @@ describeDb("database schema baseline", () => {
         ]);
         await expect(listPublicColumnNames(client, "devices")).resolves.toEqual([
           "id",
+          "organization_id",
           "hostname",
           "os",
           "architecture",
@@ -84,6 +85,7 @@ describeDb("database schema baseline", () => {
         await expect(listPublicColumnNames(client, "collector_ingestions")).resolves.toEqual([
           "id",
           "device_id",
+          "organization_id",
           "snapshot_type",
           "status",
           "collected_at",

@@ -77,6 +77,15 @@ test.describe("Runtime backend API", () => {
         byRuntimeId: {
           "fixture-mac:runtime:openclaw": expect.objectContaining({ todo: 1, total: 2 }),
         },
+        lastActiveAtByAgentId: {
+          "fixture-mac:runtime:openclaw:agent:main": "2026-05-21T10:00:00.000Z",
+        },
+        lastActiveAtByDeviceId: {
+          "fixture-mac": "2026-05-21T10:00:00.000Z",
+        },
+        lastActiveAtByRuntimeId: {
+          "fixture-mac:runtime:openclaw": "2026-05-21T10:00:00.000Z",
+        },
       },
     });
 

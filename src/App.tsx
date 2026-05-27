@@ -11,9 +11,11 @@ import { HomePage } from "./HomePage";
 import { RuntimeFleetPage } from "./runtime/RuntimeFleetPage";
 import { RuntimeWorkBoardPage } from "./runtime/RuntimeWorkBoardPage";
 import { OrganizationSettingsPage } from "./settings/OrganizationSettingsPage";
+import type { AuthOrganizationMembership } from "./auth/auth-store";
 
 type PageKey = ConsolePageKey;
 type UtilityKey = ConsoleUtilityKey;
+const emptyOrganizations: AuthOrganizationMembership[] = [];
 
 const pagePathByKey: Record<PageKey, string> = {
   runtime: "/runtime",
@@ -48,8 +50,24 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
   const [activePage, setActivePage] = useState<PageKey>(() => pageFromPath(getCurrentPath()) ?? "runtime");
   const [utilityView, setUtilityView] = useState<ConsoleUtilityView | null>(() => utilityViewFromPath(getCurrentPath()));
   const [utilityReturnPath, setUtilityReturnPath] = useState(() => pagePathByKey[pageFromPath(getCurrentPath()) ?? "runtime"]);
-  const currentOrganization = auth?.session.organizations[0];
+  const organizations = auth?.session.organizations ?? emptyOrganizations;
+  const [activeOrganizationId, setActiveOrganizationId] = useState("");
+  const currentOrganization = organizations.find((organization) => organization.organizationId === activeOrganizationId) ?? organizations[0];
   const organizationId = currentOrganization?.organizationId;
+  const runtimeOrganizationId = utilityDataEnabled ? organizationId : undefined;
+
+  useEffect(() => {
+    if (!organizations.length) {
+      setActiveOrganizationId("");
+      return;
+    }
+    setActiveOrganizationId((current) => {
+      if (current && organizations.some((organization) => organization.organizationId === current)) return current;
+      const stored = readStoredActiveOrganizationId(auth?.session.user.id);
+      if (stored && organizations.some((organization) => organization.organizationId === stored)) return stored;
+      return organizations[0].organizationId;
+    });
+  }, [auth?.session.user.id, organizations]);
 
   useEffect(() => {
     const syncPageFromUrl = () => {
@@ -108,10 +126,16 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       activePage={activePage}
       activeUtility={utilityView}
       organization={currentOrganization}
+      organizations={organizations}
+      userDisplayName={auth?.session.user.displayName}
       userEmail={auth?.session.user.email}
       onLogout={auth ? () => void auth.logout() : undefined}
       onNavigate={navigateToPage}
       onOpenUtility={openUtility}
+      onSwitchOrganization={(nextOrganizationId) => {
+        setActiveOrganizationId(nextOrganizationId);
+        writeStoredActiveOrganizationId(auth?.session.user.id, nextOrganizationId);
+      }}
       utilityBar={(
         <ConsoleUtilityBar
           activeView={utilityView}
@@ -122,11 +146,11 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       )}
     >
       {activePage === "runtime" ? (
-        <RuntimeFleetPage />
+        <RuntimeFleetPage organizationId={runtimeOrganizationId} />
       ) : activePage === "runs" ? (
-        <RuntimeWorkBoardPage />
+        <RuntimeWorkBoardPage organizationId={runtimeOrganizationId} />
       ) : (
-        <OrganizationSettingsPage session={auth?.session} />
+        <OrganizationSettingsPage organization={currentOrganization} session={auth?.session} />
       )}
       <ConsoleUtilityDrawer
         organizationId={organizationId}
@@ -154,6 +178,26 @@ function utilityViewFromPath(path: string): ConsoleUtilityView | null {
   if (path === "/operations") return "operations";
   if (path === "/notifications") return "notifications";
   return null;
+}
+
+function storedActiveOrganizationKey(userId?: string): string {
+  return `lorume.activeOrganization.${userId || "anonymous"}`;
+}
+
+function readStoredActiveOrganizationId(userId?: string): string {
+  try {
+    return window.localStorage.getItem(storedActiveOrganizationKey(userId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredActiveOrganizationId(userId: string | undefined, organizationId: string): void {
+  try {
+    window.localStorage.setItem(storedActiveOrganizationKey(userId), organizationId);
+  } catch {
+    // Persistence is a convenience; the in-memory active organization remains authoritative.
+  }
 }
 
 function createAgentAuthContext(): AuthContextValue {

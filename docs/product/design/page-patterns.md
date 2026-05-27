@@ -57,7 +57,7 @@ Rules:
 
 ## Runtime Fleet
 
-Purpose: View Device, Runtime, Agent, recent sync, ownership, and one clear operating status.
+Purpose: View Device, Runtime, Agent, Task-derived recent activity, ownership, and one clear operating status.
 
 Rules:
 
@@ -65,8 +65,11 @@ Rules:
 - Runtime Fleet does not provide Channel filtering.
 - Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `同步中`、`在线`、`离线`、`异常`.
 - The layout exposes counts in the top workbar, then Device, Runtime, and Agent lists plus a sticky detail inspector. It does not repeat body-level metric cards, page explanations, or secondary title blocks.
+- Device uses the `users.html` team-activity rhythm: icon/dot, object title, compact metadata, recent activity, and status badge.
+- Runtime and Agent use the `users.html` member-directory rhythm: compact avatar, primary label, secondary metadata, status, Task count, and recent activity. Runtime does not use a separate kind column or repeated kind badge in the directory table.
+- `最近活跃` is derived from active Task activity aggregates. It must not fall back to collector sync time.
 - The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
-- The left navigation stays fixed and keeps the identity entry at the bottom of the viewport.
+- The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
 - Agent Skill probing appears as a compact row-level action with read-only metadata; it does not become a standalone page, editor, import flow, or migration wizard.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
@@ -83,10 +86,11 @@ Rules:
 - Do not render listener status, raw execution records, adapter evidence, or debugging notes as task cards.
 - Runtime and Channel filters are separate.
 - Channel options come from backend facets, not from currently loaded rows.
-- Time range uses one Date Picker Range control backed by shadcn Popover + Calendar; do not split it into two datetime inputs in the compact filter popover.
-- Status filtering tabs are not shown. Status is represented by six board lanes: `待处理`、`进行中`、`待验收`、`已完成`、`需关注`、`已取消`; `需关注` groups `failed` and `unknown`.
-- Lanes use a compact project-board width and fill the available viewport height. The current desktop target is approximately `17.5rem` per lane. The Runs page itself must avoid body-level vertical scrolling in the primary desktop view; the board owns horizontal scrolling at its bottom edge, and each lane owns its own vertical scrolling. Empty lanes show inline muted text on the lane background rather than a nested empty card. Lane backgrounds use the shared `--runs-lane-*` tokens with low saturation; no single normal workflow lane should visually dominate the board.
-- Task cards follow the Mail preview pattern with a fixed four-row hierarchy: assignee Agent, `userMessage` truncated to 16 characters, `agentReply` or `暂无 Agent 答复`, then last updated time and the channel pill. Card pills show channel kind only; they do not repeat lane status or conversation/group labels and they never invent an execution-link state. Click opens a detail dialog and immediately returns the card to idle visual state.
+- Channel filtering is multi-select. The compact filter menu exposes a `渠道` submenu; the submenu opens beside the main menu and uses checkbox items for `全部` plus each channel kind/count. Selecting no specific channel means `全部`.
+- Time range uses one Date Picker Range control backed by shadcn Popover + Calendar. It is a first-level control beside search, not nested inside the compact filter popover, and must not split into two datetime inputs.
+- Status filtering tabs are not shown. Status is represented by five visible board lanes: `待处理`、`进行中`、`待验收`、`已完成`、`需关注`; `需关注` groups `failed` and `unknown`. `cancelled` remains a valid backend Task status but is hidden from the Runs Kanban visible work set.
+- Lanes use the Taskflow Kanban rhythm and fill the available viewport height. The current desktop target is about `235px` per lane. The Runs page itself must avoid body-level vertical scrolling in the primary desktop view; the board owns horizontal scrolling at its bottom edge, and each lane owns its own vertical scrolling. Empty lanes show inline muted text on the lane background rather than a nested empty card. Lane backgrounds use the shared `--runs-lane-*` tokens with low saturation; no single normal workflow lane should visually dominate the board.
+- Task cards follow the Taskflow Kanban card pattern: compact chips at the top, short `userMessage` title, `agentReply` or `暂无 Agent 答复`, lightweight Task metadata, footer time, and a thin left status stripe. Card pills show channel kind only; they do not repeat lane status or conversation/group labels and they never invent an execution-link state. Click opens a detail dialog and immediately returns the card to idle visual state.
 - The detail dialog shows only the task fields that currently exist in the Task query model. The header title is a short truncated `userMessage`; the body uses three sections: task information (`发起人`、`承接 Agent`、`更新时间`、`渠道`), user message, and Agent reply. The channel value combines the channel kind and backend-normalized readable conversation/source label when available, such as `DingTalk 小卷和用户支持的同学们` or `Slock #AjisFarm`. It opens centered, keeps Radix DialogContent responsible for positioning, and applies any 3D treatment only to an inner visual card layer. It must stay compact and must not degrade into a raw field list or show execution association, source summary, adapter evidence, or raw IDs.
 - Long text wraps or clamps without body-level horizontal scroll.
 - Raw IDs, `cid...`, phone numbers, and opaque conversation IDs are not used as conversation names.

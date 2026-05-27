@@ -1,6 +1,7 @@
 import {
   createDeviceStateSnapshot,
   createEmptyTaskStatusCounts,
+  RUNTIME_TASK_BOARD_VISIBLE_STATUSES,
   TASK_CHANNEL_KIND_LABELS,
   TASK_STATUSES,
   type Task,
@@ -11,6 +12,7 @@ import {
 
 export type RuntimeTaskChannelKind = TaskChannelKind;
 export type RuntimeTaskStatusFilter = TaskStatus | "all";
+export type RuntimeTaskStatusScope = "board-visible";
 
 export interface RuntimeTaskTimeRangeFilter {
   start?: string;
@@ -19,8 +21,11 @@ export interface RuntimeTaskTimeRangeFilter {
 
 export interface RuntimeTaskBoardFilters {
   channelKind?: RuntimeTaskChannelKind | "all";
+  channelKinds?: RuntimeTaskChannelKind[];
+  organizationId?: string;
   search?: string;
   status?: RuntimeTaskStatusFilter;
+  statusScope?: RuntimeTaskStatusScope;
   timeRange?: RuntimeTaskTimeRangeFilter;
 }
 
@@ -67,7 +72,7 @@ export interface RuntimeTaskBoardItem extends Task {
   requestExcerpt: string;
 }
 
-export type RuntimeTaskBoardLaneKey = "todo" | "in_progress" | "review" | "done" | "attention" | "cancelled";
+export type RuntimeTaskBoardLaneKey = "todo" | "in_progress" | "review" | "done" | "attention";
 
 export interface RuntimeTaskBoardLane {
   key: RuntimeTaskBoardLaneKey;
@@ -109,7 +114,6 @@ export const runtimeTaskBoardLaneDefinitions: Array<{
   { key: "review", label: "待验收", statuses: ["review"] },
   { key: "done", label: "已完成", statuses: ["done"] },
   { key: "attention", label: "需关注", statuses: ["failed", "unknown"] },
-  { key: "cancelled", label: "已取消", statuses: ["cancelled"] },
 ];
 
 /** Create the formal backend query URL for Runtime Tasks. */
@@ -120,11 +124,14 @@ export function createTasksQueryUrl(
 ): URL {
   const requestUrl = new URL("/api/runtime-tasks", origin);
   requestUrl.searchParams.set("taskType", "conversation");
+  requestUrl.searchParams.set("statusScope", filters?.statusScope ?? "board-visible");
   requestUrl.searchParams.set("limit", String(options.limit ?? 50));
+  if (filters?.organizationId?.trim()) requestUrl.searchParams.set("organizationId", filters.organizationId.trim());
   if (options.cursor) requestUrl.searchParams.set("cursor", options.cursor);
   if (filters?.status && filters.status !== "all") requestUrl.searchParams.set("status", filters.status);
-  if (filters?.channelKind && filters.channelKind !== "all") {
-    requestUrl.searchParams.set("channelKind", filters.channelKind);
+  const channelKinds = selectedChannelKinds(filters);
+  for (const channelKind of channelKinds) {
+    requestUrl.searchParams.append("channelKind", channelKind);
   }
   if (filters?.search?.trim()) requestUrl.searchParams.set("search", filters.search.trim());
   const startAt = isoTimestampFromFilter(filters?.timeRange?.start);
@@ -161,8 +168,9 @@ export function createRuntimeTaskBoard(
 ): RuntimeTaskBoard {
   const query = normalizeSearch(filters.search ?? "");
   const visibleTasks = tasks.filter((task) =>
+    (RUNTIME_TASK_BOARD_VISIBLE_STATUSES as readonly TaskStatus[]).includes(task.status) &&
     matchesStatus(task, filters.status) &&
-    matchesChannel(task, filters.channelKind) &&
+    matchesChannel(task, filters) &&
     matchesSearch(task, query) &&
     matchesTimeRange(task, filters.timeRange)
   );
@@ -229,8 +237,18 @@ function matchesStatus(task: Task, status?: RuntimeTaskStatusFilter): boolean {
   return !status || status === "all" || task.status === status;
 }
 
-function matchesChannel(task: Task, channelKind?: RuntimeTaskChannelKind | "all"): boolean {
-  return !channelKind || channelKind === "all" || task.channel?.kind === channelKind;
+function matchesChannel(task: Task, filters?: RuntimeTaskBoardFilters): boolean {
+  const channelKinds = selectedChannelKinds(filters);
+  return channelKinds.length === 0 || Boolean(task.channel?.kind && channelKinds.includes(task.channel.kind));
+}
+
+function selectedChannelKinds(filters?: RuntimeTaskBoardFilters): RuntimeTaskChannelKind[] {
+  const values = filters?.channelKinds?.length
+    ? filters.channelKinds
+    : filters?.channelKind && filters.channelKind !== "all"
+      ? [filters.channelKind]
+      : [];
+  return Array.from(new Set(values.filter(isRuntimeTaskChannelKind))).sort();
 }
 
 function matchesSearch(task: Task, query: string): boolean {

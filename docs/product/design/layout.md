@@ -18,8 +18,13 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 
 ## Console Shell
 
-- Desktop Console uses compact left rail navigation.
-- Topbar contains breadcrumbs/search and utility buttons for tasks and notifications.
+- Desktop Console uses a Taskflow-style fixed left sidebar at about `220px`.
+- Topbar is about `56px` tall and contains page identity, compact metadata, utility buttons, and refresh actions. Do not add a fake global search unless the search behavior is implemented.
+- Content uses shared responsive padding around `18px` to `30px` and one of three width tiers:
+  - `workspace`: full available width with guarded page padding for boards and operational canvases such as Runs.
+  - `data-dense`: about `1680px` max width for directory/table pages such as Runtime Fleet.
+  - `standard`: about `1280px` max width for forms/settings pages such as Organization Settings.
+- Sidebar nav rows are about `32px` tall with `7px` radius and a muted active background.
 - Main pages use summary rail + primary workspace + detail inspector when the data model supports it.
 - Utility drawers open from the right and preserve the current Console context.
 - Operations and Notifications drawers target `min(440px, calc(100vw - 16px))` on desktop unless a specific workflow proves more width is required.
@@ -43,6 +48,8 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 - Brand surfaces use meaningful product preview density.
 - Identity surfaces focus one form task and a compact operations preview.
 - Console surfaces reduce decoration and emphasize lists, metrics, filters, lanes, and inspectors.
+- Runtime Fleet uses Device activity-list rhythm plus Runtime/Agent directory-table rhythm.
+- Runs uses a Kanban board rhythm: five visible lanes, `235px` minimum lane width, about `14px` lane gaps, `44px` lane headers, `11px` task-card radius, and a thin left status stripe.
 
 ## Responsive
 

@@ -42,6 +42,15 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const RUNTIME_TASK_BOARD_VISIBLE_STATUSES = [
+  "todo",
+  "in_progress",
+  "review",
+  "done",
+  "failed",
+  "unknown",
+] as const satisfies readonly TaskStatus[];
+
 export type TaskStatusCounts = Record<TaskStatus, number> & {
   total: number;
 };
@@ -50,6 +59,9 @@ export interface RuntimeFleetTaskSummary {
   byAgentId: Record<string, TaskStatusCounts>;
   byRuntimeId: Record<string, TaskStatusCounts>;
   byDeviceId: Record<string, TaskStatusCounts>;
+  lastActiveAtByAgentId?: Record<string, string>;
+  lastActiveAtByRuntimeId?: Record<string, string>;
+  lastActiveAtByDeviceId?: Record<string, string>;
 }
 
 export const TASK_TYPES = ["conversation", "scheduled"] as const;
@@ -258,6 +270,9 @@ export function createEmptyRuntimeFleetTaskSummary(): RuntimeFleetTaskSummary {
     byAgentId: {},
     byDeviceId: {},
     byRuntimeId: {},
+    lastActiveAtByAgentId: {},
+    lastActiveAtByDeviceId: {},
+    lastActiveAtByRuntimeId: {},
   };
 }
 

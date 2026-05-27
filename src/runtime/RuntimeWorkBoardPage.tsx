@@ -7,11 +7,21 @@ import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/Con
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { RuntimeTaskCard } from "./RuntimeTaskCard";
 import { RuntimeTaskDetailDialog } from "./RuntimeTaskDetailDialog";
@@ -53,7 +63,7 @@ interface RuntimeTaskLaneState {
 type RuntimeTaskLaneStateByStatus = Record<TaskStatus, RuntimeTaskLaneState>;
 
 /** Read-only board for normalized Agent Tasks. */
-export function RuntimeWorkBoardPage() {
+export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: string }) {
   const allowFixtureFallback = isFixtureFallbackAllowed();
   const [laneStates, setLaneStates] = useState<RuntimeTaskLaneStateByStatus>(
     allowFixtureFallback ? fixtureLaneStates : createEmptyLaneStates(),
@@ -71,7 +81,7 @@ export function RuntimeWorkBoardPage() {
   }>({ status: "idle", message: "" });
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [search, setSearch] = useState("");
-  const [channelKind, setChannelKind] = useState<RuntimeTaskChannelKind | "all">("all");
+  const [selectedChannelKinds, setSelectedChannelKinds] = useState<RuntimeTaskChannelKind[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [detailItem, setDetailItem] = useState<RuntimeTaskBoardItem | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -79,11 +89,12 @@ export function RuntimeWorkBoardPage() {
 
   const filters: RuntimeTaskBoardFilters = useMemo(
     () => ({
-      channelKind,
+      channelKinds: selectedChannelKinds,
+      organizationId,
       search,
       timeRange: createDateRangeFilter(dateRange),
     }),
-    [channelKind, dateRange, search],
+    [dateRange, organizationId, search, selectedChannelKinds],
   );
   const filtersKey = useMemo(() => createRuntimeTaskFiltersKey(filters), [filters]);
 
@@ -174,10 +185,14 @@ export function RuntimeWorkBoardPage() {
   }, [allowFixtureFallback, filters, filtersKey]);
 
   useEffect(() => {
-    if (channelKind !== "all" && !channelOptions.some((option) => option.value === channelKind)) {
-      setChannelKind("all");
-    }
-  }, [channelKind, channelOptions]);
+    setSelectedChannelKinds((current) => {
+      const next = current.filter((channelKind) => channelOptions.some((option) => option.value === channelKind));
+      if (next.length === current.length && next.every((channelKind, index) => channelKind === current[index])) {
+        return current;
+      }
+      return next;
+    });
+  }, [channelOptions]);
 
   const visibleTasks = useMemo(() => flattenLaneTasks(laneStates), [laneStates]);
   const board = useMemo(() => createRuntimeTaskBoard(visibleTasks, filters, summary), [filters, summary, visibleTasks]);
@@ -185,6 +200,7 @@ export function RuntimeWorkBoardPage() {
   const paginationMatchesFilters = loadedFiltersKey === filtersKey;
   const displayedTotal = paginationMatchesFilters ? visibleTotal(laneStates) : displayedItems;
   const attentionCount = summary.failed + summary.unknown;
+  const activeFilterCount = selectedChannelKinds.length;
 
   useConsoleWorkbar({
     meta: (
@@ -269,96 +285,144 @@ export function RuntimeWorkBoardPage() {
         </Alert>
       ) : null}
 
-      <section className="flex min-w-0 items-center gap-2 rounded-[var(--radius)] border border-border bg-card p-2" aria-label="会话任务筛选">
-        <div className="relative min-w-0 flex-1">
+      <section className="flex min-w-0 flex-wrap items-center gap-2 rounded-[13px] border border-border bg-card p-2 shadow-[0_1px_2px_rgba(16,24,40,0.035)]" aria-label="会话任务筛选">
+        <div className="relative min-w-[260px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             id="runs-search"
             aria-label="搜索"
-            className="h-10 rounded-full border-border bg-background pl-9"
+            className="h-[34px] rounded-[10px] border-border bg-background pl-9 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.025)]"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="搜索任务、消息、发起人、Agent 或会话/群组"
           />
         </div>
-        <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+
+        <Popover>
           <PopoverTrigger asChild>
-            <Button aria-label="筛选" variant="outline" size="icon-sm" type="button">
-              <Filter className="size-4" aria-hidden="true" />
+            <Button
+              aria-label="日期范围"
+              variant="outline"
+              className="min-w-[154px] justify-start bg-background px-2.5 font-normal"
+              type="button"
+            >
+              <CalendarIcon aria-hidden="true" className="size-4" />
+              <span className="min-w-0 truncate">{formatDateRangeLabel(dateRange)}</span>
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-4 border-border bg-card/95 p-3 text-card-foreground shadow-lg">
-            <Field>
-              <FieldLabel htmlFor="runs-channel-filter">渠道</FieldLabel>
-              <Select
-                value={channelKind}
-                onValueChange={(value) => setChannelKind(value as RuntimeTaskChannelKind | "all")}
-              >
-                <SelectTrigger id="runs-channel-filter" className="w-full bg-background" aria-label="渠道">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-border bg-card text-card-foreground shadow-lg">
-                  <SelectItem className="data-[state=checked]:bg-accent data-[state=checked]:text-foreground" value="all">全部</SelectItem>
-                  {channelOptions.map((option) => (
-                    <SelectItem
-                      className="data-[state=checked]:bg-accent data-[state=checked]:text-foreground"
-                      key={option.value}
-                      value={option.value}
-                    >
-                      {option.label}（{option.count}）
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <div className="flex items-center justify-between gap-3">
-                <FieldLabel htmlFor="runs-date-range">日期范围</FieldLabel>
-                {dateRange?.from || dateRange?.to ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => setDateRange(undefined)}
-                  >
-                    <X aria-hidden="true" className="size-3" />
-                    清除
-                  </Button>
-                ) : null}
+          <PopoverContent className="w-auto max-w-[calc(100vw-2rem)] overflow-auto p-0" align="end">
+            <Calendar
+              mode="range"
+              defaultMonth={dateRange?.from}
+              selected={dateRange}
+              onSelect={setDateRange}
+              numberOfMonths={2}
+            />
+            {dateRange?.from || dateRange?.to ? (
+              <div className="border-t border-border p-2">
+                <Button
+                  className="w-full justify-center"
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDateRange(undefined)}
+                >
+                  <X aria-hidden="true" className="size-3.5" />
+                  清除日期
+                </Button>
               </div>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    id="runs-date-range"
-                    className="w-full justify-start bg-background px-2.5 font-normal"
-                  >
-                    <CalendarIcon aria-hidden="true" className="size-4" />
-                    <span className="min-w-0 truncate">{formatDateRangeLabel(dateRange)}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto max-w-[calc(100vw-2rem)] overflow-auto p-0" align="end">
-                  <Calendar
-                    mode="range"
-                    defaultMonth={dateRange?.from}
-                    selected={dateRange}
-                    onSelect={setDateRange}
-                    numberOfMonths={2}
-                  />
-                </PopoverContent>
-              </Popover>
-            </Field>
+            ) : null}
           </PopoverContent>
         </Popover>
+
+        <DropdownMenu open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={activeFilterCount ? `筛选，已启用 ${activeFilterCount} 个筛选` : "筛选"}
+              variant={activeFilterCount ? "default" : "outline"}
+              className={cn(
+                "px-3",
+                activeFilterCount && "border-[var(--active-filter)] bg-[var(--active-filter)] text-[var(--active-filter-foreground)] hover:bg-[var(--active-filter)]/90",
+              )}
+              type="button"
+            >
+              <Filter className="size-4" aria-hidden="true" />
+              <span>{activeFilterCount ? `${activeFilterCount} 个筛选` : "筛选"}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            aria-label="筛选"
+            className="w-[206px] border-border bg-card p-2 text-card-foreground shadow-[var(--menu-shadow)]"
+          >
+            <DropdownMenuLabel className="px-2 py-1.5 text-[13px] font-bold text-foreground">筛选</DropdownMenuLabel>
+            <DropdownMenuSeparator className="my-1" />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="h-9 rounded-[9px] px-2 text-[13px] font-medium focus:bg-[var(--menu-selection)] data-open:bg-[var(--menu-selection)]">
+                <span className="min-w-0 flex-1 truncate">渠道</span>
+                <span className="mr-1 text-xs text-muted-foreground">
+                  {activeFilterCount || ""}
+                </span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent
+                aria-label="渠道筛选"
+                sideOffset={8}
+                className="w-[238px] border-border bg-card p-2 text-card-foreground shadow-[var(--menu-shadow)]"
+              >
+                <DropdownMenuLabel className="px-2 py-1.5 text-[13px] font-bold text-foreground">渠道</DropdownMenuLabel>
+                <DropdownMenuSeparator className="my-1" />
+                <DropdownMenuCheckboxItem
+                  checked={selectedChannelKinds.length === 0}
+                  className={channelFilterItemClass(selectedChannelKinds.length === 0)}
+                  onCheckedChange={() => setSelectedChannelKinds([])}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <span className="min-w-0 flex-1 truncate">全部</span>
+                </DropdownMenuCheckboxItem>
+                {channelOptions.map((option) => (
+                  <DropdownMenuCheckboxItem
+                    checked={selectedChannelKinds.includes(option.value)}
+                    className={channelFilterItemClass(selectedChannelKinds.includes(option.value))}
+                    key={option.value}
+                    onCheckedChange={(checked) => {
+                      setSelectedChannelKinds((current) => toggleSelectedChannel(current, option.value, Boolean(checked)));
+                    }}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{option.count}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            {activeFilterCount ? (
+              <>
+                <DropdownMenuSeparator className="my-1" />
+                <DropdownMenuItem
+                  className="h-9 rounded-[9px] px-2 text-[13px] font-medium"
+                  onSelect={() => {
+                    setSelectedChannelKinds([]);
+                    setIsFilterOpen(false);
+                  }}
+                >
+                  重置全部筛选
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <span className="sr-only" aria-live="polite">
+          当前渠道：{selectedChannelLabel(selectedChannelKinds, channelOptions)}
+        </span>
       </section>
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
-        <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
           <span>已显示 {displayedItems} / {displayedTotal}</span>
           {lastLoadedAt ? <span className="hidden md:inline">更新 {formatRuntimeTimestamp(lastLoadedAt)}</span> : null}
         </div>
         <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden pb-2" aria-label="任务泳道">
-          <div className="grid h-full min-w-max grid-flow-col auto-cols-[17.5rem] gap-3">
+          <div className="grid h-full w-full min-w-[1231px] max-w-[1756px] grid-cols-5 gap-[var(--runs-lane-gap)]">
             {board.lanes.map((lane) => (
               <RuntimeTaskLaneView
                 key={lane.key}
@@ -388,6 +452,26 @@ export function RuntimeWorkBoardPage() {
   );
 }
 
+function channelFilterItemClass(isChecked: boolean): string {
+  return cn(
+    "h-9 rounded-[9px] py-1 pl-8 pr-2 text-[13px] font-medium",
+    "focus:bg-[var(--menu-selection)]",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:right-auto",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:left-2",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:size-5",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:rounded-[6px]",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border-transparent",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:text-white",
+    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]_svg]:size-3.5",
+    isChecked && [
+      "bg-[var(--menu-selection)]",
+      "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border-foreground",
+      "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:bg-foreground",
+    ],
+  );
+}
+
 function RuntimeTaskLaneView({
   error,
   hasNextCursor,
@@ -408,18 +492,18 @@ function RuntimeTaskLaneView({
   return (
     <section
       className={cn(
-        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-border",
+        "flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[12px] border border-border shadow-[0_1px_2px_rgba(16,24,40,0.03)]",
         laneSurfaceClass(lane.key),
       )}
       aria-label={`${lane.label}泳道`}
       data-lane-key={lane.key}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-border/80 px-3 py-2">
-        <h2 className="text-sm font-semibold">{lane.label}</h2>
-        <span className="text-xs text-muted-foreground">{lane.items.length} / {laneTotal}</span>
+      <div className="flex min-h-11 items-center justify-center gap-3 border-b border-border/80 px-3 py-2">
+        <h2 className="text-[13px] font-medium tracking-normal text-foreground">{lane.label}</h2>
+        <span className="sr-only">{lane.items.length} / {laneTotal}</span>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="grid min-h-full min-w-0 content-start gap-2.5 p-3">
+        <div className="grid min-h-full min-w-0 content-start gap-3 p-3">
           {lane.items.length ? (
             lane.items.map((item) => (
               <RuntimeTaskCard
@@ -460,8 +544,26 @@ function laneSurfaceClass(laneKey: RuntimeTaskBoardLane["key"]): string {
   if (laneKey === "review") return "bg-[var(--runs-lane-review)]";
   if (laneKey === "done") return "bg-[var(--runs-lane-done)]";
   if (laneKey === "attention") return "bg-[var(--runs-lane-attention)]";
-  if (laneKey === "cancelled") return "bg-[var(--runs-lane-cancelled)]";
   return "bg-[var(--runs-lane-todo)]";
+}
+
+function selectedChannelLabel(
+  selectedChannelKinds: RuntimeTaskChannelKind[],
+  channelOptions: RuntimeTaskChannelOption[],
+): string {
+  if (selectedChannelKinds.length === 0) return "全部";
+  return selectedChannelKinds
+    .map((channelKind) => channelOptions.find((option) => option.value === channelKind)?.label ?? channelKind)
+    .join("、");
+}
+
+function toggleSelectedChannel(
+  current: RuntimeTaskChannelKind[],
+  channelKind: RuntimeTaskChannelKind,
+  checked: boolean,
+): RuntimeTaskChannelKind[] {
+  if (checked) return Array.from(new Set([...current, channelKind])).sort();
+  return current.filter((value) => value !== channelKind);
 }
 
 function formatDateRangeLabel(dateRange: DateRange | undefined): string {
@@ -486,7 +588,8 @@ function createDateRangeFilter(dateRange: DateRange | undefined): RuntimeTaskTim
 
 function createRuntimeTaskFiltersKey(filters?: RuntimeTaskBoardFilters): string {
   return JSON.stringify({
-    channelKind: filters?.channelKind ?? "all",
+    channelKinds: [...(filters?.channelKinds ?? [])].sort(),
+    organizationId: filters?.organizationId ?? "",
     search: filters?.search?.trim() ?? "",
     timeEnd: filters?.timeRange?.end ?? "",
     timeStart: filters?.timeRange?.start ?? "",

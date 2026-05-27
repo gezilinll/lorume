@@ -1,6 +1,6 @@
 # Runtime Fleet Page Spec
 
-版本：TinySpec v1.3
+版本：TinySpec v1.4
 
 Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。页面只展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
 
@@ -15,9 +15,9 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 
 ## 目标
 
-- 展示设备的 device id、hostname、OS、架构、最近同步、本地 / 出口 IP 和 collector 元信息。
+- 展示设备的 device id、hostname、OS、架构、Task 派生的最近活跃、本地 / 出口 IP 和 collector 元信息。
 - 展示设备上的 Runtime；Runtime kind 候选项来自后端真实返回的数据。
-- 展示 Runtime 下的 Agent、归属 Runtime、采集状态、最近同步和派生 Task 数量。
+- 展示 Runtime 下的 Agent、归属 Runtime、采集状态、Task 派生的最近活跃和派生 Task 数量。
 - Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面顶部工作栏展示全局数量，页面主体展示全量 Device、Runtime 和 Agent。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
 - 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
@@ -56,9 +56,35 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 | `error` | 异常 | 最近采集、校验或入库失败。 |
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
-Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为 `不可见` 并保留最近同步时间，避免旧 Agent 长期停留在在线状态。Agent 本轮仍在但没有任务时仍显示 `在线`。
+Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为 `不可见` 并保留最近同步时间作为内部采集新鲜度证据，避免旧 Agent 长期停留在在线状态。Agent 本轮仍在但没有任务时仍显示 `在线`。
 
-Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳道：
+## 最近活跃
+
+Runtime Fleet 用户可见的 `最近活跃` 表示 Task 处理活动时间，不表示 collector 最近同步、设备 heartbeat、页面刷新、Skill 探测、Operation 或 Notification 更新时间。
+
+聚合规则：
+
+- Agent：该 Agent 下 active non-stale Task 的最大活动时间。
+- Runtime：该 Runtime 下所有 Agent 的 active non-stale Task 最大活动时间。
+- Device：该 Device 下所有 Runtime 和 Agent 的 active non-stale Task 最大活动时间。
+- Task 活动时间使用 `Task.updatedAt`，缺失时回退 `Task.createdAt`；Postgres 查询使用 `updated_source_at -> created_source_at -> updated_at -> created_at` 兜底，避免旧数据缺字段时无法排序。
+- 缺少 Task 活动时展示 `暂无活跃`，不能回退到最近同步。
+
+展示规则：
+
+| 条件 | 展示 |
+|---|---|
+| 缺失 | `暂无活跃` |
+| 无效时间 | `未知` |
+| 0-59 秒 | `刚刚` |
+| 1-59 分钟 | `N 分钟前` |
+| 1-23 小时 | `N 小时前` |
+| 本地时间昨天 | `昨天 HH:mm` |
+| 2-6 天 | `N 天前` |
+| 当前年 7 天以上 | `MM月DD日` |
+| 往年或超过 60 秒的未来时间 | `YYYY年MM月DD日` |
+
+Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-visible` 下收敛后的五个可见泳道：
 
 | 泳道 | 包含状态 |
 |---|---|
@@ -67,9 +93,8 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳
 | `待验收` | `review` |
 | `已完成` | `done` |
 | `需关注` | `failed`, `unknown` |
-| `已取消` | `cancelled` |
 
-`blocked` 暂不作为 Runs 页面独立泳道展示；进入页面泳道前必须先有后端上报、产品命名和 harness 覆盖。
+`cancelled` 仍是合法 Task 状态，但不在 Runs 前端展示为泳道，也不计入 board-visible 总数和 channel facets。`blocked` 暂不作为 Runs 页面独立泳道展示；进入页面泳道前必须先有后端上报、产品命名和 harness 覆盖。
 
 ## 页面字段策略
 
@@ -77,21 +102,21 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示收敛后的六个泳
 
 ### Device
 
-- 列表/卡片展示 device id、hostname、collector version、collection status、最近同步、Runtime 数和 Agent 数。
+- 列表/卡片使用 `users.html` 的团队动态节奏展示 device id、hostname、collection status、最近活跃、Runtime 数和 Agent 数。
 - 详情展示基础信息、网络、collector、已注册 Runtime。
 - 网络详情展示去噪后的本机局域网 IP 和公网 IP。`localIps` 只展示 collector 认为对用户有解释价值的地址，不展示 link-local IPv6、虚拟网桥、Docker/VM/VPN 噪音地址。
 - 不展示由 Runtime/Agent/Task 推导出的工作状态。
 
 ### Runtime
 
-- 列表展示 Runtime 名称、kind、所属设备、collection status、最近同步、Agent 数和 Task 计数。
+- 列表使用 `users.html` 的成员目录节奏展示 Runtime 名称、版本、所属设备、collection status、最近活跃和 Task 计数。Runtime kind 不作为独立表格列或重复 badge 展示；需要识别 kind 时优先在详情或后端诊断语境中呈现。
 - 详情展示基础信息、归属关系、diagnostics paths 和 lastError。
 - 本地路径只展示 Runtime 根目录；adapter 内部文件、状态库、sessions 子目录等不作为默认详情字段展示。
 - 不展示 `endpoint`、`capabilities`、`sourceRefs`。
 
 ### Agent
 
-- 列表展示 Agent 名称、归属 Runtime、collection status、最近同步和 Task 计数。
+- 列表使用 `users.html` 的成员目录节奏展示 Agent 名称、归属 Runtime、collection status、最近活跃、Task 计数和只读 Skill 入口。
 - Agent 来源通过 `agent.runtimeId -> runtime.kind` 派生，不显示 `origin` 字段。
 - 详情展示基础信息、归属关系、diagnostics paths、Task 计数和 Skill metadata 状态。
 - 本地路径只在 adapter 能证明存在本机目录时展示；没有本机目录时显示 `不适用`，不能留空造成漏采集错觉。
@@ -118,8 +143,11 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - `byAgentId`: 按 `Task.agentId` 聚合的状态计数。
 - `byRuntimeId`: 通过 `Task.agentId -> Agent.runtimeId` 聚合的状态计数。
 - `byDeviceId`: 通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 聚合的状态计数。
+- `lastActiveAtByAgentId`: 按 `Task.agentId` 聚合的最近活跃 ISO 时间。
+- `lastActiveAtByRuntimeId`: 通过 `Task.agentId -> Agent.runtimeId` 聚合的最近活跃 ISO 时间。
+- `lastActiveAtByDeviceId`: 通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 聚合的最近活跃 ISO 时间。
 
-每个计数对象包含全部 `Task.status` 计数和 `total`。缺少某个对象 id 时，前端按全 0 处理。Runtime Fleet 不为搜索或详情请求 Task 明细。
+每个计数对象包含全部 `Task.status` 计数和 `total`。缺少某个对象 id 时，前端按全 0 处理；缺少最近活跃时展示 `暂无活跃`。Runtime Fleet 不为搜索或详情请求 Task 明细。
 
 ## 验收标准
 
@@ -133,6 +161,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - Agent 任务数量由 `Task.agentId` 聚合。
 - Runtime 任务数量通过 `Task.agentId -> Agent.runtimeId` 聚合。
 - Device 任务数量通过 `Task.agentId -> Agent.runtimeId -> Runtime.deviceId` 聚合。
+- Runtime 表格不展示单独的 `Runtime` kind 列；名称列承载用户可读名称和版本，避免同一对象的类型信息重复占用目录宽度。
+- Runtime Fleet 的 `最近活跃` 只来自 Task 活动聚合，不能来自最近同步或页面刷新时间。
 - 设备即使暂时没有 Runtime，也必须在 Device 列表里可见。
 - 页面不展示 Runtime `capabilities/endpoint/sourceRefs`。
 - 页面不展示 Agent `origin/sourceRefs/load`。

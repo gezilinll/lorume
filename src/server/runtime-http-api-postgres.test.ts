@@ -110,6 +110,15 @@ describeDb("runtime HTTP API with Postgres store", () => {
                 total: 1,
               }),
             },
+            lastActiveAtByAgentId: {
+              "openclaw-device:runtime:openclaw:agent:main": "2026-05-21T03:00:00.000Z",
+            },
+            lastActiveAtByDeviceId: {
+              "openclaw-device": "2026-05-21T03:00:00.000Z",
+            },
+            lastActiveAtByRuntimeId: {
+              "openclaw-device:runtime:openclaw": "2026-05-21T03:00:00.000Z",
+            },
           },
         });
         expect(fleetBody).not.toHaveProperty("tasks");
@@ -156,6 +165,217 @@ describeDb("runtime HTTP API with Postgres store", () => {
           status: "healthy",
           summary: "设备状态采集正常",
         });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("scopes Runtime Fleet and Runtime Task reads to the requested organization", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("multi-org@example.com");
+        const firstOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "First Runtime Team",
+          slug: "first-runtime-team",
+        });
+        const secondOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Second Runtime Team",
+          slug: "second-runtime-team",
+        });
+        let collectorOrganizationId = firstOrganization.id;
+        const { baseUrl } = await startRuntimeApi(postgresStore, {
+          auth: {
+            requireDeviceToken: async () => ({ organizationId: collectorOrganizationId }),
+            requireUserSession: async () => ({
+              id: "session-1",
+              organizations: await authStore.listOrganizationsForUser(user.id),
+              user,
+            }),
+          },
+        });
+        const firstSnapshot = createDeviceStateSnapshot({
+          deviceId: "first-org-device",
+          tasks: [{
+            ...createDeviceStateSnapshot({ deviceId: "first-org-device" }).tasks[0],
+            userMessage: "First organization task",
+          }],
+        });
+        const secondSnapshot = createDeviceStateSnapshot({
+          deviceId: "second-org-device",
+          tasks: [{
+            ...createDeviceStateSnapshot({ deviceId: "second-org-device" }).tasks[0],
+            userMessage: "Second organization task",
+          }],
+        });
+
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...firstSnapshot, tasks: [] });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(firstSnapshot));
+        collectorOrganizationId = secondOrganization.id;
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...secondSnapshot, tasks: [] });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(secondSnapshot));
+
+        const firstFleetResponse = await fetch(`${baseUrl}/api/runtime-fleet?organizationId=${firstOrganization.id}`);
+        const firstTasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?organizationId=${firstOrganization.id}`);
+        const secondFleetResponse = await fetch(`${baseUrl}/api/runtime-fleet?organizationId=${secondOrganization.id}`);
+        const secondTasksResponse = await fetch(`${baseUrl}/api/runtime-tasks?organizationId=${secondOrganization.id}`);
+        const forbiddenResponse = await fetch(`${baseUrl}/api/runtime-fleet?organizationId=org_forbidden`);
+
+        await expect(firstFleetResponse.json()).resolves.toMatchObject({
+          devices: [expect.objectContaining({ id: "first-org-device" })],
+          summary: { deviceCount: 1, taskCount: 1 },
+        });
+        await expect(firstTasksResponse.json()).resolves.toMatchObject({
+          items: [expect.objectContaining({
+            agentId: "first-org-device:runtime:openclaw:agent:main",
+            userMessage: "First organization task",
+          })],
+          total: 1,
+        });
+        await expect(secondFleetResponse.json()).resolves.toMatchObject({
+          devices: [expect.objectContaining({ id: "second-org-device" })],
+          summary: { deviceCount: 1, taskCount: 1 },
+        });
+        await expect(secondTasksResponse.json()).resolves.toMatchObject({
+          items: [expect.objectContaining({
+            agentId: "second-org-device:runtime:openclaw:agent:main",
+            userMessage: "Second organization task",
+          })],
+          total: 1,
+        });
+        expect(forbiddenResponse.status).toBe(403);
+      } finally {
+        await Promise.all([authStore.close(), postgresStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("applies board-visible status scope to Runtime Task API totals and facets", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createDeviceStateSnapshot();
+        const agentId = deviceStateSnapshot.agents[0].id;
+        const baseTask = deviceStateSnapshot.tasks[0];
+        const snapshotWithCancelledTask = createDeviceStateSnapshot({
+          tasks: [
+            baseTask,
+            {
+              ...baseTask,
+              id: `${agentId}:task:done-1`,
+              status: "done",
+              updatedAt: "2026-05-21T03:10:00.000Z",
+              userMessage: "A visible completed task.",
+            },
+            {
+              ...baseTask,
+              id: `${agentId}:task:cancelled-1`,
+              status: "cancelled",
+              updatedAt: "2026-05-21T03:20:00.000Z",
+              userMessage: "A cancelled task that stays queryable.",
+            },
+          ],
+        });
+
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...snapshotWithCancelledTask, tasks: [] });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(snapshotWithCancelledTask));
+        const visibleResponse = await fetch(`${baseUrl}/api/runtime-tasks?taskType=conversation&channelKind=dingtalk&statusScope=board-visible`);
+        const allResponse = await fetch(`${baseUrl}/api/runtime-tasks?taskType=conversation&channelKind=dingtalk`);
+        const cancelledResponse = await fetch(`${baseUrl}/api/runtime-tasks?status=cancelled`);
+
+        const visibleBody = await visibleResponse.json();
+        expect(visibleBody).toMatchObject({
+          facets: {
+            channels: [{ count: 2, kind: "dingtalk", label: "DingTalk" }],
+          },
+          summary: {
+            byStatus: expect.objectContaining({
+              cancelled: 0,
+              done: 1,
+              in_progress: 1,
+              total: 2,
+            }),
+            total: 2,
+          },
+          total: 2,
+        });
+        expect(visibleBody.items.map((item: { status: string }) => item.status)).not.toContain("cancelled");
+
+        await expect(allResponse.json()).resolves.toMatchObject({
+          facets: {
+            channels: [{ count: 3, kind: "dingtalk", label: "DingTalk" }],
+          },
+          summary: {
+            byStatus: expect.objectContaining({
+              cancelled: 1,
+              done: 1,
+              in_progress: 1,
+              total: 3,
+            }),
+            total: 3,
+          },
+          total: 3,
+        });
+        await expect(cancelledResponse.json()).resolves.toMatchObject({
+          items: [expect.objectContaining({ id: `${agentId}:task:cancelled-1`, status: "cancelled" })],
+          total: 1,
+        });
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("accepts repeated channelKind parameters for multi-channel Runtime Task filtering", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createDeviceStateSnapshot();
+        const agentId = deviceStateSnapshot.agents[0].id;
+        const baseTask = deviceStateSnapshot.tasks[0];
+        const snapshotWithChannels = createDeviceStateSnapshot({
+          tasks: [
+            baseTask,
+            {
+              ...baseTask,
+              channel: { kind: "webchat" },
+              id: `${agentId}:task:webchat-1`,
+              userMessage: "A web chat task.",
+            },
+            {
+              ...baseTask,
+              channel: { kind: "slock" },
+              id: `${agentId}:task:slock-1`,
+              userMessage: "A Slock task.",
+            },
+          ],
+        });
+
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...snapshotWithChannels, tasks: [] });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(snapshotWithChannels));
+        const response = await fetch(`${baseUrl}/api/runtime-tasks?taskType=conversation&channelKind=dingtalk&channelKind=webchat`);
+        const payload = await response.json() as { items: Array<{ channel?: { kind?: string } }>; total: number };
+
+        expect(payload.total).toBe(2);
+        expect(payload.items.map((item) => item.channel?.kind).sort()).toEqual(["dingtalk", "webchat"]);
       } finally {
         await postgresStore.close();
       }

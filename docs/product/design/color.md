@@ -1,46 +1,65 @@
 # Color
 
-Lorume uses a cool, low-noise palette grounded in mature Slate / Blue / Teal UI scales. Color serves hierarchy, state, and product memory; it must not decorate every component.
+Lorume Console uses the Taskflow reference palette: compact white surfaces on a pale gray background, purple primary actions, and vivid but controlled blue/cyan/orange/green/pink/red/yellow/purple accents. Color serves hierarchy, state, object memory, and scan speed; it should make the product feel明快、年轻、统一, without turning large surfaces into decorative color blocks.
 
 ## Active Palette
 
 | Role | Token | Value |
 |---|---|---|
-| Page background | `--lorume-color-bg` | `#f8fafc` |
-| Rail background | `--lorume-color-bg-rail` | `#eef4f8` |
-| Surface | `--lorume-color-surface` | `rgba(255, 255, 255, 0.88)` |
-| Soft surface | `--lorume-color-surface-soft` | `#f1f5f9` |
-| Blue surface | `--lorume-color-surface-blue` | `#eff6ff` |
-| Ink | `--lorume-color-ink` | `#0f172a` |
-| Muted text | `--lorume-color-muted` | `#64748b` |
-| Faint text | `--lorume-color-faint` | `#94a3b8` |
-| Hairline | `--lorume-color-line` | `#d8e2ee` |
-| Strong line | `--lorume-color-line-strong` | `#b6c4d2` |
-| Primary action | `--lorume-color-action` | `#2563eb` |
-| Primary action bright | `--lorume-color-action-bright` | `#3b82f6` |
-| Primary action dark | `--lorume-color-action-dark` | `#1d4ed8` |
-| Operational signal | `--lorume-color-accent` | `#0f9f9a` |
-| Success | `--lorume-color-success` | `#15803d` |
-| Warning | `--lorume-color-warning` | `#a16207` |
-| Danger | `--lorume-color-danger` | `#dc2626` |
-| Info | `--lorume-color-info` | `#2563eb` |
+| Page background | `--background` | `#f6f8fb` |
+| Sidebar / card surface | `--card`, `--sidebar` | `#ffffff` |
+| Soft surface | `--muted` | `#f3f4f6` |
+| Ink | `--foreground` | `#111827` |
+| Muted text | `--muted-foreground` | `#737d8f` |
+| Faint text | local text token | `#a2aab7` |
+| Hairline | `--border` | `#e7ebf0` |
+| Soft line / input | `--input` | `#eef1f5` |
+| Primary action / active mark | `--primary` | `#6658f6` |
+| Info blue | `--chart-1` / info status | `#2764ff` / `#eef4ff` |
+| Cyan accent | `--chart-4` | `#35b7d5` / `#e7f8fb` |
+| Warning orange | warning status | `#ff7a1a` / `#fff1e8` |
+| Success green | success status | `#19b46b` / `#e9fbf2` |
+| Danger red | `--destructive` / danger status | `#ff4f5e` / `#fff0f2` |
+| Yellow auxiliary | `--chart-3` | `#f6b739` / `#fff8e8` |
+| Purple auxiliary | local chip token | `#9a46ff` / `#f5ebff` |
+
+## Accent Token Families
+
+Each accent family must expose the same roles in `src/index.css`:
+
+| Family | Solid | Soft | Border | Foreground | Use |
+|---|---|---|---|---|---|
+| Brand | `--brand` | `--brand-soft` | `--brand-border` | `--brand-foreground` | primary action, current navigation, Lorume identity |
+| Blue | `--blue` | `--blue-soft` | `--blue-border` | `--blue-foreground` | active filters, information, review/acceptance state |
+| Cyan | `--cyan` | `--cyan-soft` | `--cyan-border` | `--cyan-foreground` | runtime/category context, secondary object avatars |
+| Orange | `--orange` | `--orange-soft` | `--orange-border` | `--orange-foreground` | in-progress, pending/manual attention |
+| Green | `--green` | `--green-soft` | `--green-border` | `--green-foreground` | healthy, online, complete |
+| Pink | `--pink` | `--pink-soft` | `--pink-border` | `--pink-foreground` | people/team accent, auxiliary chips |
+| Red | `--red` | `--red-soft` | `--red-border` | `--red-foreground` | failed, blocked, destructive |
+| Yellow | `--yellow` | `--yellow-soft` | `--yellow-border` | `--yellow-foreground` | low-priority/notice accents, not primary warning |
+| Purple | `--purple` | `--purple-soft` | `--purple-border` | `--purple-foreground` | roles, admin labels, auxiliary chips |
+
+The visual rule is "rich small accents on calm surfaces": use solid color for icons, left stripes, dots, avatar gradients, active filter pills, and primary CTAs; use soft color for chips, status pills, icon containers, selected rows, and light lane tinting. Do not apply vivid fills to entire panels, page backgrounds, or large table regions.
 
 ## Usage Ratio
 
-- 70% cool background and white surfaces.
-- 20% text, lines, and structural chrome.
-- 10% action, signal, and semantic state color.
+- 65-75% cool background and white / near-white surfaces.
+- 15-25% text, lines, and structural chrome.
+- 8-12% action, signal, object memory, and semantic state color.
 
 If a screen feels busy, reduce accent usage before reducing useful data.
 
 ## Semantic Rules
 
-- Action blue means primary action or active navigation.
-- Teal means operational signal, sync, routing, or online context.
+- Purple means primary action, active mark, or current navigation.
+- Blue and cyan mean informational or runtime/category context.
 - Green means healthy or completed.
-- Amber means attention, manual step, delayed sync, or pending user review. It should not create a separate "stale" asset status when recent sync time already explains freshness.
+- Orange means attention, manual step, delayed sync, or pending user review. It should not create a separate "stale" asset status when recent sync time already explains freshness.
 - Red means failed, blocked, critical, or destructive.
-- Source/runtime/channel badges should be neutral by default. Semantic color is reserved for actual health, availability, progress, warning, and error states.
+- Source/runtime/channel badges may use a stable soft accent when they are the main scannable category on the surface, such as Runs channel pills. They must not reuse state colors to imply health or progress unless the label is actually a state.
+- Avatars and initials use deterministic accent families so directory pages feel lively without changing object semantics.
+- Runs lane backgrounds stay low-saturation; task card left stripes carry the stronger status signal.
+- Active filter controls use `--active-filter` with white foreground. Inactive filter controls stay outline/white.
 
 ## Contrast
 
@@ -52,6 +71,8 @@ If a screen feels busy, reduce accent usage before reducing useful data.
 
 - High-saturation yellow sidebars.
 - Thick black borders as a primary visual language.
-- Single-hue blue SaaS pages.
+- Single-hue blue or purple SaaS pages.
 - Random untokenized hex values in product CSS.
 - Platform source colors mapped directly to product state colors.
+- Decorative radial blobs or gradient-orb backgrounds behind Console content.
+- Making every surface neutral gray when a small, tokenized accent would improve scan speed.

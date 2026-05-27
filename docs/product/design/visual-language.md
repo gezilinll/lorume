@@ -1,6 +1,8 @@
 # Visual Language
 
-Lorume uses a shadcn/ui and Tailwind CSS v4 design-system foundation initialized from preset `b1FS9kEKH`: a modern operations console language built from semantic CSS variables, cool white backgrounds, quiet grid texture, hairline borders, compact navigation, clear primary actions, operational signal accents, restrained warning states, and document-like detail surfaces.
+Lorume uses a shadcn/ui and Tailwind CSS v4 design-system foundation with a Taskflow-inspired Console language: pale gray background, white surfaces, compact fixed sidebar, 56px topbar, purple primary actions, hairline borders, dense lists, activity rows, directory tables, and Kanban task cards with left status stripes.
+
+The desired feeling is明快、鲜艳、年轻但统一. That comes from rich small accents on calm surfaces: colored chips, status dots, avatar initials, active filter pills, task-card stripes, and tiny icon containers. It should not come from tinting whole pages or panels.
 
 The UI must not rely on retro pixel styling, thick black borders, high-saturation yellow sidebars, decorative sprites, or large empty atmospheric panels.
 
@@ -16,11 +18,10 @@ Lorume should feel like a calm control plane for an Agent Network:
 ## Core Ingredients
 
 - Cool white and pale gray backgrounds.
-- Low-contrast grid texture that never competes with text.
 - Hairline borders and subtle elevation instead of hard black outlines.
-- Cobalt action blue for primary operations.
-- Teal signal accent for routing, online, sync, and current-context cues.
-- Amber and red used only for warning and danger.
+- Purple primary actions and active navigation.
+- Blue/cyan contextual accents for runtime/category information.
+- Orange, green, red, pink, yellow, and purple used through tokenized soft/solid families for status, chips, avatars, active filters, and category memory.
 - Compact left navigation, top-right utility buttons, summary rails, lists, lanes, and right inspectors.
 
 ## Composition
@@ -34,8 +35,8 @@ Lorume should feel like a calm control plane for an Agent Network:
 
 The memory point comes from precision and calm contrast:
 
-- The compact dark Lorume mark.
-- Cobalt and teal signal pairing.
+- The compact Taskflow-style Lorume mark.
+- Purple primary action paired with restrained blue/cyan context accents.
 - Document-like detail surfaces.
 - Hairline operational traces and summary rails.
 - Real runtime, Skill, Run, Operation, and Notification objects visible in the layout.
@@ -46,6 +47,7 @@ It does not come from:
 - Stickers, sprites, or playful decoration.
 - Oversized empty hero panels.
 - Decorative gradients that hide the actual product.
+- Decorative orbs or radial blob backgrounds on Console surfaces.
 
 ## Visual Consistency
 
@@ -53,3 +55,4 @@ It does not come from:
 - Same semantic state, same tone.
 - Same icon source, same visual weight.
 - Decoration must be quiet enough that a user can work in the UI for hours.
+- Color accents must be distributed deliberately across repeated elements. A page with every chip gray is under-designed; a page with every panel tinted is over-designed.

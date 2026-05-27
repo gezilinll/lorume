@@ -42,8 +42,8 @@ describe("auth pages", () => {
     render(<App runtimeMode="agent" />);
 
     expect(screen.getByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "切换组织" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "打开个人入口" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换工作区和账号" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开个人入口" })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalledWith("/api/me", expect.anything());
   });
 
@@ -243,7 +243,7 @@ describe("auth pages", () => {
     render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "打开个人入口" }));
+    await user.click(screen.getByRole("button", { name: "切换工作区和账号" }));
     await user.click(screen.getByRole("menuitem", { name: "退出登录" }));
 
     await waitFor(() => {

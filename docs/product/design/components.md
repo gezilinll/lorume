@@ -16,20 +16,22 @@ Shared UI primitives are generated shadcn files in `src/components/ui/`. App-own
 - `Select`, `DropdownMenu`, and `Tabs`: filtering and view controls. Select dropdown content uses the card surface token (`bg-card` / `text-card-foreground`) so compact filter popovers stay visually aligned with the light Console surfaces instead of becoming a high-contrast black menu.
 - `Skeleton` and `Alert`: loading and error states.
 - `Sonner`: ephemeral feedback such as copy success.
-- Console Sidebar: composed from the generated shadcn `Sidebar` primitives. The Console shell must use `SidebarHeader` + `SidebarMenu` for the organization switcher, `SidebarGroupLabel` + `SidebarMenuButton` for primary nav, `SidebarFooter` + `DropdownMenu` for the profile/logout menu, and `SidebarRail` for collapse. Do not add a separate Lorume wordmark inside the protected Console sidebar; the organization switcher is the header identity.
+- Console Sidebar: composed from the generated shadcn `Sidebar` primitives. The Console shell must use `SidebarHeader` + `SidebarMenu` for one unified workspace/account switcher, `SidebarGroupLabel` + `SidebarMenuButton` for primary nav, and `SidebarRail` for collapse. The workspace/account menu shows current user identity, workspace list, active workspace check, optional future create-workspace entry, and logout in one shadcn `DropdownMenu`. Do not add a separate Lorume wordmark inside the protected Console sidebar, and do not reintroduce a separate profile card in `SidebarFooter`.
 
 App-owned wrappers:
 
 - `Pill`: normalized status/channel/runtime/assignee metadata chips. Use stable `data-pill-kind` and `data-pill-tone` attributes for harnesses. Compact card pills use a stable `h-6` hit/readability box with `leading-4` so labels do not look clipped.
+- `Pill` tone usage follows the accent token families. Status pills use semantic `success` / `warning` / `danger` / `info`; channel/category pills may use `blue`, `cyan`, `orange`, `green`, `pink`, `yellow`, or `purple` when the category is the primary scanning cue.
+- Directory/avatar initials should use a shared deterministic accent wrapper instead of one-off gradients or page-local hex values.
 - `StatusBadge`: product status wrapper over `Pill`; use it instead of hand-colored badges.
-- `SpotlightSurface`: click/hover surface for Runs task cards. It composes shadcn-style card surfaces with a scoped cursor-following glow, `data-surface="spotlight-card"`, and `data-spotlight="task-card"`; reduced motion must keep the card readable without requiring movement. Runs task hover stays subtle: one-pixel lift, restrained `0 10px 24px` shadow, and a small local glow.
+- `SpotlightSurface`: reusable click/hover surface for non-Kanban surfaces that need a subtle focus affordance. Runs task cards no longer use cursor-following glow; they use the Taskflow Kanban card pattern with `data-spotlight="task-card"` kept only as a stable harness hook.
 - `DetailSurface`: shadcn Dialog-backed detail card for task, operation, notification, and other focused object details. Runs task details use `data-surface="task-detail"`, `data-depth="modal-3d"`, and `data-layout="task-detail-simple"`. DialogContent remains the accessible centered positioning layer; 3D transform belongs to an internal `data-depth-plane` visual layer. Close controls must live inside that plane so the whole visible card, including close affordance, moves as one surface. Detail overlays may use a very light `2px` backdrop blur plus dimming to separate the focused card without obscuring the underlying board.
 - Console Workbar: the sticky top strip for page title/summary on the left and utility icons/refresh on the right.
 
 ## Buttons
 
 - Button text uses Sans.
-- Primary actions use action blue and clear object-specific labels.
+- Primary actions use Taskflow purple and clear object-specific labels.
 - Secondary actions use white/soft surfaces and hairline borders.
 - Danger actions use danger tone and explicit object labels.
 - Disabled, loading, focus-visible, hover, and active states must exist.
@@ -50,6 +52,7 @@ App-owned wrappers:
 - Runtime/source/channel badges use neutral or info color unless expressing state.
 - A row should not accumulate badges that repeat the same fact.
 - Runs task cards use a consistent pill order: channel kind only. The lane already expresses status, so cards must not repeat status pills such as `待处理`; conversation/group labels such as `DingTalk 群聊` do not appear as card pills. Creator and assignee appear as text metadata, not extra pills. Missing optional facts are omitted rather than replaced with raw IDs or frontend-fabricated execution states. If the pill set exceeds the card limit, remaining pills collapse into a `+N` count pill.
+- Runs channel pills should be visually richer than neutral source badges, using a stable soft accent per channel kind while keeping status meaning on lane/card stripes.
 
 ## Metrics
 
@@ -63,8 +66,16 @@ App-owned wrappers:
 - Work items include task, creator/user-facing source, Agent, Runtime/Channel, and stage when available.
 - Long titles and summaries wrap or clamp.
 - Debug payloads, adapter evidence, opaque external IDs, tokens, and raw JSON do not enter rows/cards.
-- Runs cards follow a Mail-list density with four rows: assignee Agent, `userMessage` truncated to 16 characters, `agentReply` or `暂无 Agent 答复`, then last updated time plus channel pill. Target card padding is `px-3 py-3`; title line-height is tight enough for repeated scanning.
-- Hover adds a low-intensity spotlight and 2.5D lift through `SpotlightSurface`: `translateY(-1px)`, scoped glow, and a restrained shadow. The card footer remains overflow-visible so compact channel pills are not clipped. Selected state is not persistent after opening a detail dialog.
+- Runs cards follow the Taskflow Kanban density: compact channel pill row, short `userMessage` title, `agentReply` or `暂无 Agent 答复`, creator/assignee metadata, footer time, and a thin left status stripe. Target card radius is about `11px`, padding is about `14px 13px 12px 17px`, and title line-height is tight enough for repeated scanning.
+- Hover adds a one-pixel lift and restrained `0 12px 26px` shadow. Do not add cursor-following glow, decorative blobs, or persistent selected state after opening a detail dialog.
+
+## Menus And Filters
+
+- Compact Console menus use `bg-card`, `border-border`, `--menu-shadow`, 36px-ish rows, and 12-13px text. Avoid large profile-panel spacing inside Sidebar account menus.
+- Filter triggers have two visible states: inactive outline (`Filter` icon + `筛选`) and active solid blue (`Filter` icon + `N 个筛选` + inline clear `x`).
+- Filter menu dimensions should fit the available options. A single-dimension menu should not reserve large blank vertical space.
+- Multi-select submenu rows use a left checkbox treatment: selected rows show a black square with a white check and a `--menu-selection` background; unselected rows reserve the same left column so text does not shift.
+- `全部` in a multi-select filter represents zero selected concrete options. It is not checked together with specific options.
 
 ## Detail Panels
 
@@ -84,7 +95,7 @@ App-owned wrappers:
 ## Workbar
 
 - Console pages use one sticky top workbar instead of page-level hero/title blocks.
-- The workbar is a shared flat top strip (`bg-background`, bottom border, fixed `h-12` content row) inside the Console shell, not a page-owned loose header or a floating card inside a header. Runtime Fleet, Runs, and Settings must render the same workbar treatment.
+- The workbar is a shared flat Taskflow top strip (`bg-background/85`, bottom border, fixed `h-14` content row) inside the Console shell, not a page-owned loose header or a floating card inside a header. Runtime Fleet, Runs, and Settings must render the same workbar treatment.
 - The workbar must span the main content width without padded side color blocks. Avoid nested rounded workbar cards that reveal sidebar/page background on the left or right edges.
 - The left side shows page identity and compact page-specific facts. The right side holds utility icons and, only on refreshable pages, a refresh icon as the last action.
 - Page bodies do not repeat the workbar title, explanatory paragraph, or summary metrics unless the data is part of the primary workflow.

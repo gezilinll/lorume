@@ -297,7 +297,7 @@ HTTP 上报规则：
 - `POST /api/device-state-snapshots`：Collector 上报 Device / Runtime / Agent metadata snapshot，使用 device token 鉴权；`tasks` 必须为空。
 - `POST /api/device-task-batches`：Collector 上报变化 Task 批次，使用 device token 鉴权；后端返回 ACK 列表供本地 cache 推进。
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
-- `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`channelKind`、`startAt`、`endAt`、`limit`、`cursor`。
+- `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`statusScope`、可重复 `channelKind`、兼容逗号分隔 `channelKinds`、`startAt`、`endAt`、`limit`、`cursor`。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
 - `WS /api/device-control/ws`：只处理 `hello`、`heartbeat`、断开和 stale 判定。
 

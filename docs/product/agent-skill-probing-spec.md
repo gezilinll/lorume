@@ -98,6 +98,32 @@ Rules:
 - `modelVisible` and `commandVisible` do not decide Lorume `scope` or `available`.
 - `builtIn = raw.bundled === true || raw.source === "openclaw-bundled"`.
 
+## Codex And Slock Mapping
+
+Codex is an execution Runtime. Slock is a channel / orchestration / Agent profile source, not a Lorume Runtime by itself. When a Slock profile reports `runtime=codex`, its Agent belongs under the Codex Runtime and its Agent-owned Skills are reported in that Codex Runtime's Skill snapshot.
+
+Codex global Skill sources map to runtime-scope rows:
+
+| Codex source | Lorume scope | `builtIn` |
+|---|---|---:|
+| `~/.codex/skills/.system/<name>/SKILL.md` | `runtime` | true |
+| `~/.codex/skills/<name>/SKILL.md` | `runtime` | false |
+| `~/.codex/plugins/cache/<provider>/<plugin>/<version>/skills/<name>/SKILL.md` | `runtime` | true |
+
+Codex probing must not treat `.codex/.tmp`, `.codex/sessions`, `.codex/log`, `.codex/vendor_imports`, marketplace clones, or other temporary candidate directories as current runtime Skills.
+
+Slock Agent Skill sources map to agent-scope rows when the Slock profile is active, local to the current Device, and its `runtime` is an implemented Lorume Runtime kind:
+
+| Slock source | Lorume scope | `builtIn` |
+|---|---|---:|
+| `~/.slock/agents/<agentId>/.agents/skills/<name>/SKILL.md` | `agent` | false |
+| `~/.slock/agents/<agentId>/repos/**/.agents/skills/<name>/SKILL.md` | `agent` | false |
+| `~/.slock/agents/<agentId>/repos/**/.cursor/skills/<name>/SKILL.md` | `agent` | false |
+
+For Slock Agent Skills, `agentIds` must contain the Lorume Agent ids derived from the owning Slock profiles. Runtime-scope Codex rows must use `agentIds: []`.
+
+If multiple adapters contribute Skill rows for the same Runtime, the collector/backend normalization must merge rows by `runtimeId` and recompute summary counts. One adapter's Runtime Skill contribution must not overwrite another adapter's rows for the same Runtime.
+
 ## APIs
 
 - `POST /api/runtime-skill-probe-snapshots` accepts collector/device reported Runtime Skill snapshots and stores normalized metadata only.

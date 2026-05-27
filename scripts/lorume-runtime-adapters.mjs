@@ -10,6 +10,20 @@ const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock,codex";
 const FNM_MULTISHELL_SEARCH_LIMIT = 64;
 const KNOWN_OPENCLAW_RUNTIME_SCOPE_SKILLS = new Set(["clawhub", "healthcheck", "weather"]);
+const SKILL_SCAN_SKIP_DIRS = new Set([
+  ".git",
+  ".tmp",
+  "tmp",
+  "temp",
+  "node_modules",
+  "dist",
+  "build",
+  "logs",
+  "log",
+  "sessions",
+  "vendor_imports",
+]);
+const SKILL_DESCRIPTION_MAX_CHARS = 180;
 const executableCache = new Map();
 
 function readJsonFile(filePath) {
@@ -621,6 +635,57 @@ function mergeRuntimeSkillRow(rowsByName, row) {
   });
 }
 
+function mergeCollectedRuntimeSkillRow(rowsByKey, row) {
+  const normalized = normalizeRuntimeSkillRow(row);
+  if (!normalized) return;
+  const key = runtimeSkillRowMergeKey(normalized);
+  const existing = rowsByKey.get(key);
+  if (!existing) {
+    rowsByKey.set(key, normalized);
+    return;
+  }
+  const scope = existing.scope === "runtime" || normalized.scope === "runtime" ? "runtime" : "agent";
+  rowsByKey.set(key, {
+    name: existing.name,
+    description: existing.description || normalized.description,
+    scope,
+    available: existing.available || normalized.available,
+    builtIn: existing.builtIn || normalized.builtIn,
+    agentIds: scope === "agent" ? uniqueSorted([...existing.agentIds, ...normalized.agentIds]) : [],
+  });
+}
+
+function normalizeRuntimeSkillRow(row) {
+  const name = cleanText(row?.name);
+  const scope = cleanText(row?.scope);
+  if (!name || (scope !== "runtime" && scope !== "agent")) return null;
+  return {
+    name,
+    description: cleanText(row?.description),
+    scope,
+    available: row?.available === true,
+    builtIn: row?.builtIn === true,
+    agentIds: scope === "agent" ? uniqueSorted(Array.isArray(row?.agentIds) ? row.agentIds : []) : [],
+  };
+}
+
+function runtimeSkillRowMergeKey(row) {
+  return [row.scope, row.name, row.description].join("\u0000");
+}
+
+function sortRuntimeSkillRows(rows) {
+  return rows
+    .map((row) => ({
+      ...row,
+      agentIds: row.scope === "agent" ? uniqueSorted(row.agentIds) : [],
+    }))
+    .sort((left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.scope.localeCompare(right.scope) ||
+      left.description.localeCompare(right.description),
+    );
+}
+
 function createRuntimeSkillSummary(skills) {
   return {
     total: skills.length,
@@ -638,6 +703,112 @@ function uniqueSorted(values) {
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function listSkillDirectories(skillsRoot) {
+  let entries = [];
+  try {
+    entries = readdirSync(skillsRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !SKILL_SCAN_SKIP_DIRS.has(entry.name))
+    .map((entry) => path.join(skillsRoot, entry.name))
+    .filter((skillDir) => existsSync(path.join(skillDir, "SKILL.md")));
+}
+
+function skillRowFromDirectory(skillDir, { scope, builtIn, agentIds = [] }) {
+  const skillFile = path.join(skillDir, "SKILL.md");
+  if (!existsSync(skillFile)) return null;
+  const name = cleanText(path.basename(skillDir));
+  if (!name) return null;
+  return normalizeRuntimeSkillRow({
+    name,
+    description: readSkillDescription(skillFile),
+    scope,
+    available: true,
+    builtIn,
+    agentIds,
+  });
+}
+
+function readSkillDescription(skillFile) {
+  let content = "";
+  try {
+    content = readFileSync(skillFile, "utf8");
+  } catch {
+    return "";
+  }
+  const frontmatter = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  const frontmatterDescription = frontmatter ? parseSkillFrontmatterDescription(frontmatter[1]) : "";
+  if (frontmatterDescription) return truncateSkillDescription(frontmatterDescription);
+
+  for (const line of content.split(/\r?\n/).slice(0, 80)) {
+    const text = line.trim();
+    if (!text || text === "---" || text.startsWith("#") || /^[a-zA-Z_-]+:\s*/.test(text)) continue;
+    return truncateSkillDescription(text);
+  }
+  return "";
+}
+
+function parseSkillFrontmatterDescription(frontmatter) {
+  const lines = String(frontmatter || "").split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^description\s*:\s*(.*)$/i.exec(lines[index]);
+    if (!match) continue;
+    const inlineValue = match[1].trim();
+    if (inlineValue === "|" || inlineValue === ">") {
+      const parts = [];
+      for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+        if (!/^\s+/.test(lines[nextIndex])) break;
+        parts.push(lines[nextIndex].trim());
+      }
+      return parts.join(" ").trim();
+    }
+    return stripYamlString(inlineValue);
+  }
+  return "";
+}
+
+function stripYamlString(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function truncateSkillDescription(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > SKILL_DESCRIPTION_MAX_CHARS
+    ? `${text.slice(0, SKILL_DESCRIPTION_MAX_CHARS - 3).trim()}...`
+    : text;
+}
+
+function walkSkillFiles(root, { maxDepth = 8 } = {}, output = [], depth = 0) {
+  if (depth > maxDepth) return output;
+  let entries = [];
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return output;
+  }
+  for (const entry of entries) {
+    if (SKILL_SCAN_SKIP_DIRS.has(entry.name)) continue;
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      walkSkillFiles(fullPath, { maxDepth }, output, depth + 1);
+    } else if (entry.isFile() && entry.name === "SKILL.md") {
+      output.push(fullPath);
+    }
+  }
+  return output;
 }
 
 function collectCodexDeviceState(deviceId, collectedAt) {
@@ -662,7 +833,14 @@ function collectCodexDeviceState(deviceId, collectedAt) {
         lastError: "Codex state is unreadable",
       },
     });
-    return { runtimes: [runtime], agents: [], tasks: [], diagnostics: diagnostics.items() };
+    const runtimeSkillProbe = collectCodexRuntimeSkillProbe({ codexRoot, collectedAt, deviceId, runtime });
+    return {
+      runtimes: [runtime],
+      agents: [],
+      tasks: [],
+      runtimeSkillProbes: runtimeSkillProbe ? [runtimeSkillProbe] : [],
+      diagnostics: diagnostics.items(),
+    };
   }
 
   const runtime = createProductRuntime({
@@ -675,6 +853,7 @@ function collectCodexDeviceState(deviceId, collectedAt) {
       paths: rootPath(codexRoot),
     },
   });
+  const runtimeSkillProbe = collectCodexRuntimeSkillProbe({ codexRoot, collectedAt, deviceId, runtime });
   const agent = {
     ...createProductAgent({
       runtimeId: runtime.id,
@@ -755,7 +934,45 @@ function collectCodexDeviceState(deviceId, collectedAt) {
     runtimes: [runtime],
     agents: [agent],
     tasks: orderOpenClawProductTasks(tasks),
+    runtimeSkillProbes: runtimeSkillProbe ? [runtimeSkillProbe] : [],
     diagnostics: diagnostics.items(),
+  };
+}
+
+function collectCodexRuntimeSkillProbe({ codexRoot, collectedAt, deviceId, runtime }) {
+  const rowsByKey = new Map();
+  for (const skillDir of listSkillDirectories(path.join(codexRoot, "skills", ".system"))) {
+    mergeCollectedRuntimeSkillRow(rowsByKey, skillRowFromDirectory(skillDir, {
+      scope: "runtime",
+      builtIn: true,
+    }));
+  }
+  for (const skillDir of listSkillDirectories(path.join(codexRoot, "skills"))) {
+    if (path.basename(skillDir) === ".system") continue;
+    mergeCollectedRuntimeSkillRow(rowsByKey, skillRowFromDirectory(skillDir, {
+      scope: "runtime",
+      builtIn: false,
+    }));
+  }
+  for (const skillFile of walkSkillFiles(path.join(codexRoot, "plugins", "cache"), { maxDepth: 8 })) {
+    const skillDir = path.dirname(skillFile);
+    if (path.basename(path.dirname(skillDir)) !== "skills") continue;
+    mergeCollectedRuntimeSkillRow(rowsByKey, skillRowFromDirectory(skillDir, {
+      scope: "runtime",
+      builtIn: true,
+    }));
+  }
+
+  const skills = sortRuntimeSkillRows(Array.from(rowsByKey.values()));
+  if (!skills.length) return null;
+  return {
+    deviceId,
+    runtimeId: runtime.id,
+    runtimeKind: runtime.kind,
+    status: "succeeded",
+    observedAt: collectedAt,
+    summary: createRuntimeSkillSummary(skills),
+    skills,
   };
 }
 
@@ -1034,12 +1251,89 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
     );
   }
 
+  const runtimeSkillProbes = collectSlockRuntimeSkillProbes({
+    collectedAt,
+    deviceId: device.id,
+    localProfiles,
+  });
+
   return {
     runtimes: Array.from(runtimesById.values()),
     agents: Array.from(agentsById.values()),
     tasks: orderSlockProductTasks(Array.from(tasksById.values())),
+    runtimeSkillProbes,
     diagnostics: diagnostics.items(),
   };
+}
+
+function collectSlockRuntimeSkillProbes({ collectedAt, deviceId, localProfiles }) {
+  const probesByRuntimeId = new Map();
+  for (const localProfile of localProfiles) {
+    const productAgent = localProfile.productAgent;
+    if (!productAgent) continue;
+    const agentIds = [productAgent.id];
+    const accumulator = ensureSlockRuntimeSkillProbeAccumulator(probesByRuntimeId, {
+      collectedAt,
+      deviceId,
+      productAgent,
+      runtimeKind: localProfile.runtimeKind,
+    });
+    const agentRoot = path.join(slockRoot(), "agents", sanitizeId(localProfile.profileId));
+    for (const skillDir of listSkillDirectories(path.join(agentRoot, ".agents", "skills"))) {
+      mergeCollectedRuntimeSkillRow(accumulator.rowsByKey, skillRowFromDirectory(skillDir, {
+        scope: "agent",
+        builtIn: false,
+        agentIds,
+      }));
+    }
+    for (const skillFile of walkSkillFiles(path.join(agentRoot, "repos"), { maxDepth: 14 })) {
+      if (!isSlockRepoAgentSkillFile(skillFile)) continue;
+      mergeCollectedRuntimeSkillRow(accumulator.rowsByKey, skillRowFromDirectory(path.dirname(skillFile), {
+        scope: "agent",
+        builtIn: false,
+        agentIds,
+      }));
+    }
+  }
+
+  return Array.from(probesByRuntimeId.values())
+    .map((entry) => {
+      const skills = sortRuntimeSkillRows(Array.from(entry.rowsByKey.values()));
+      if (!skills.length) return null;
+      return {
+        deviceId: entry.deviceId,
+        runtimeId: entry.runtimeId,
+        runtimeKind: entry.runtimeKind,
+        status: "succeeded",
+        observedAt: entry.observedAt,
+        summary: createRuntimeSkillSummary(skills),
+        skills,
+      };
+    })
+    .filter(Boolean);
+}
+
+function ensureSlockRuntimeSkillProbeAccumulator(probesByRuntimeId, { collectedAt, deviceId, productAgent, runtimeKind }) {
+  const runtimeId = productAgent.runtimeId;
+  if (!probesByRuntimeId.has(runtimeId)) {
+    probesByRuntimeId.set(runtimeId, {
+      deviceId,
+      runtimeId,
+      runtimeKind,
+      observedAt: collectedAt,
+      rowsByKey: new Map(),
+    });
+  }
+  return probesByRuntimeId.get(runtimeId);
+}
+
+function isSlockRepoAgentSkillFile(skillFile) {
+  if (path.basename(skillFile) !== "SKILL.md") return false;
+  const skillDir = path.dirname(skillFile);
+  const skillsDir = path.dirname(skillDir);
+  if (path.basename(skillsDir) !== "skills") return false;
+  const ownerDir = path.basename(path.dirname(skillsDir));
+  return ownerDir === ".agents" || ownerDir === ".cursor";
 }
 
 function collectSlockTasksFromChannel({
@@ -2968,7 +3262,7 @@ function mergeRuntimeCollections(collections) {
     for (const runtime of collection.runtimes || []) runtimesById.set(runtime.id, runtime);
     for (const agent of collection.agents || []) agentsById.set(agent.id, agent);
     for (const task of collection.tasks || []) tasksById.set(task.id, task);
-    for (const probe of collection.runtimeSkillProbes || []) runtimeSkillProbesById.set(probe.runtimeId, probe);
+    for (const probe of collection.runtimeSkillProbes || []) mergeRuntimeSkillProbe(runtimeSkillProbesById, probe);
     diagnostics.push(...(collection.diagnostics || []));
   }
   return {
@@ -2980,4 +3274,61 @@ function mergeRuntimeCollections(collections) {
     ),
     diagnostics: diagnostics.sort(compareDiagnostics),
   };
+}
+
+function mergeRuntimeSkillProbe(runtimeSkillProbesById, probe) {
+  const runtimeId = cleanText(probe?.runtimeId);
+  if (!runtimeId) return;
+  const incoming = normalizeRuntimeSkillProbeForMerge(probe);
+  const existing = runtimeSkillProbesById.get(runtimeId);
+  if (!existing) {
+    runtimeSkillProbesById.set(runtimeId, incoming);
+    return;
+  }
+
+  const rowsByKey = new Map();
+  for (const row of existing.skills || []) mergeCollectedRuntimeSkillRow(rowsByKey, row);
+  for (const row of incoming.skills || []) mergeCollectedRuntimeSkillRow(rowsByKey, row);
+  const skills = sortRuntimeSkillRows(Array.from(rowsByKey.values()));
+  const errorSummary = mergeRuntimeSkillProbeErrorSummary(existing.errorSummary, incoming.errorSummary);
+  runtimeSkillProbesById.set(runtimeId, {
+    ...existing,
+    ...incoming,
+    status: mergeRuntimeSkillProbeStatus(existing.status, incoming.status, skills),
+    observedAt: latestIsoTimestamp(existing.observedAt, incoming.observedAt),
+    skills,
+    summary: createRuntimeSkillSummary(skills),
+    ...(errorSummary ? { errorSummary } : {}),
+  });
+}
+
+function normalizeRuntimeSkillProbeForMerge(probe) {
+  const rowsByKey = new Map();
+  for (const row of Array.isArray(probe?.skills) ? probe.skills : []) {
+    mergeCollectedRuntimeSkillRow(rowsByKey, row);
+  }
+  const skills = sortRuntimeSkillRows(Array.from(rowsByKey.values()));
+  return {
+    deviceId: cleanText(probe?.deviceId),
+    runtimeId: cleanText(probe?.runtimeId),
+    runtimeKind: cleanText(probe?.runtimeKind),
+    status: cleanText(probe?.status) || (skills.length ? "succeeded" : "unknown"),
+    observedAt: cleanText(probe?.observedAt),
+    skills,
+    summary: createRuntimeSkillSummary(skills),
+    ...(cleanText(probe?.errorSummary) ? { errorSummary: cleanText(probe.errorSummary) } : {}),
+  };
+}
+
+function mergeRuntimeSkillProbeStatus(leftStatus, rightStatus, skills) {
+  if (skills.length) return "succeeded";
+  const statuses = new Set([leftStatus, rightStatus].map(cleanText).filter(Boolean));
+  if (statuses.has("failed")) return "failed";
+  if (statuses.has("unsupported")) return "unsupported";
+  if (statuses.has("unknown")) return "unknown";
+  return cleanText(rightStatus) || cleanText(leftStatus) || "unknown";
+}
+
+function mergeRuntimeSkillProbeErrorSummary(left, right) {
+  return uniqueSorted([left, right]).join("；");
 }

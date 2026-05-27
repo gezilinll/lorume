@@ -374,6 +374,165 @@ process.stdout.write("{}");
     ]));
   });
 
+  it("collects Codex runtime Skill metadata from current installed skill roots", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-codex-skills-"));
+    writeCodexFixtureHome(root);
+    writeSkill(path.join(root, ".codex", "skills", ".system", "imagegen"), "Generate images.");
+    writeSkill(path.join(root, ".codex", "skills", "cost-query"), "Query cost dashboards.");
+    writeSkill(
+      path.join(root, ".codex", "plugins", "cache", "openai-curated", "github", "603a6e80", "skills", "github"),
+      "Inspect GitHub repositories.",
+    );
+    writeSkill(path.join(root, ".codex", ".tmp", "plugins", "skills", "not-installed"), "Should not be reported.");
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "fixture-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "codex",
+      },
+    });
+
+    expect(output.runtimeSkillProbes).toEqual([
+      expect.objectContaining({
+        runtimeId: "fixture-device:runtime:codex",
+        runtimeKind: "codex",
+        status: "succeeded",
+        summary: expect.objectContaining({
+          total: 3,
+          runtimeScopeCount: 3,
+          agentScopeCount: 0,
+          availableCount: 3,
+          builtInCount: 2,
+        }),
+        skills: [
+          expect.objectContaining({
+            name: "cost-query",
+            description: "Query cost dashboards.",
+            scope: "runtime",
+            available: true,
+            builtIn: false,
+            agentIds: [],
+          }),
+          expect.objectContaining({
+            name: "github",
+            description: "Inspect GitHub repositories.",
+            scope: "runtime",
+            available: true,
+            builtIn: true,
+            agentIds: [],
+          }),
+          expect.objectContaining({
+            name: "imagegen",
+            description: "Generate images.",
+            scope: "runtime",
+            available: true,
+            builtIn: true,
+            agentIds: [],
+          }),
+        ],
+      }),
+    ]);
+    expect(output.runtimeSkillProbes[0].skills.map((skill: { name: string }) => skill.name)).not.toContain("not-installed");
+  });
+
+  it("merges Slock Agent Skills into the Codex Runtime Skill snapshot with Agent ownership", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-codex-slock-skills-"));
+    writeCodexFixtureHome(root);
+    writeSkill(path.join(root, ".codex", "skills", ".system", "imagegen"), "Generate images.");
+    writeSkill(path.join(root, ".slock", "agents", "agent-local-1", ".agents", "skills", "share-files"), "Share files.");
+    writeSkill(
+      path.join(root, ".slock", "agents", "agent-local-1", "repos", "project-a", ".agents", "skills", "commit"),
+      "Commit code.",
+    );
+    writeSkill(
+      path.join(root, ".slock", "agents", "agent-local-1", "repos", "project-a", ".cursor", "skills", "create-mr"),
+      "Create merge requests.",
+    );
+    writeSkill(
+      path.join(root, ".slock", "agents", "agent-local-1", "repos", "project-a", ".tmp", ".agents", "skills", "ignored-temp"),
+      "Should not be reported.",
+    );
+
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock,codex",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "0",
+        },
+      });
+
+      expect(output.runtimeSkillProbes).toHaveLength(1);
+      expect(output.runtimeSkillProbes[0]).toEqual(expect.objectContaining({
+        runtimeId: "fixture-device:runtime:codex",
+        runtimeKind: "codex",
+        status: "succeeded",
+        summary: expect.objectContaining({
+          total: 4,
+          runtimeScopeCount: 1,
+          agentScopeCount: 3,
+          availableCount: 4,
+          builtInCount: 1,
+        }),
+      }));
+      expect(output.runtimeSkillProbes[0].skills).toEqual([
+        expect.objectContaining({
+          name: "commit",
+          description: "Commit code.",
+          scope: "agent",
+          available: true,
+          builtIn: false,
+          agentIds: ["fixture-device:runtime:codex:agent:slock:agent-local-1"],
+        }),
+        expect.objectContaining({
+          name: "create-mr",
+          description: "Create merge requests.",
+          scope: "agent",
+          available: true,
+          builtIn: false,
+          agentIds: ["fixture-device:runtime:codex:agent:slock:agent-local-1"],
+        }),
+        expect.objectContaining({
+          name: "imagegen",
+          description: "Generate images.",
+          scope: "runtime",
+          available: true,
+          builtIn: true,
+          agentIds: [],
+        }),
+        expect.objectContaining({
+          name: "share-files",
+          description: "Share files.",
+          scope: "agent",
+          available: true,
+          builtIn: false,
+          agentIds: ["fixture-device:runtime:codex:agent:slock:agent-local-1"],
+        }),
+      ]);
+      expect(output.runtimeSkillProbes[0].skills.map((skill: { name: string }) => skill.name)).not.toContain("ignored-temp");
+      expect(output.runtimes.map((runtime: { kind: string }) => runtime.kind)).toEqual(["codex"]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("discovers Slock daemon credentials by default and collects local Slock tasks", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-daemon-discovery-"));
@@ -2465,6 +2624,16 @@ function writeOpenClawTrajectoryFile(
 function writeExecutable(filePath: string, content: string) {
   writeFileSync(filePath, content);
   chmodSync(filePath, 0o755);
+}
+
+function writeSkill(skillRoot: string, description: string) {
+  mkdirSync(skillRoot, { recursive: true });
+  writeFileSync(path.join(skillRoot, "SKILL.md"), `---
+description: ${JSON.stringify(description)}
+---
+
+# ${path.basename(skillRoot)}
+`);
 }
 
 async function startSlockFixtureServer(): Promise<{

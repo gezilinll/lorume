@@ -9,6 +9,10 @@ import {
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
 import {
+  normalizeRuntimeSkillProbeSnapshot,
+  type RuntimeSkillSnapshot,
+} from "../runtime/runtime-skill-probe";
+import {
   createDeviceStateSnapshot,
   createEmptyRuntimeFleetTaskSummary,
   createEmptyTaskStatusCounts,
@@ -67,6 +71,7 @@ export interface PostgresEntityCounts {
   agents: number;
   tasks: number;
   agentSkillProbeSnapshots: number;
+  runtimeSkillProbeSnapshots: number;
   collectorIngestions: number;
 }
 
@@ -172,6 +177,10 @@ export interface PostgresStore {
   upsertAgentSkillProbeSnapshot: (snapshot: AgentSkillProbeSnapshot) => Promise<AgentSkillProbeSnapshot>;
   /** Read the latest read-only Agent Skill probe snapshot for one Agent. */
   readAgentSkillProbeSnapshot: (agentId: string, scope?: PostgresOrganizationScope) => Promise<AgentSkillProbeSnapshot | null>;
+  /** Upsert the latest read-only Runtime Skill probe snapshot. */
+  upsertRuntimeSkillProbeSnapshot: (snapshot: unknown) => Promise<RuntimeSkillSnapshot>;
+  /** Read the latest read-only Runtime Skill probe snapshot for one Runtime. */
+  readRuntimeSkillProbeSnapshot: (runtimeId: string, scope?: PostgresOrganizationScope) => Promise<RuntimeSkillSnapshot | null>;
   /** List collector ingestion metadata for a device. */
   listCollectorIngestions: (deviceId: string, scope?: PostgresOrganizationScope) => Promise<PostgresCollectorIngestion[]>;
   /** Read product-level collection health for one device. */
@@ -303,6 +312,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           agents: await countTable(client, "agents"),
           collectorIngestions: await countTable(client, "collector_ingestions"),
           agentSkillProbeSnapshots: await countTable(client, "agent_skill_probe_snapshots"),
+          runtimeSkillProbeSnapshots: await countTable(client, "runtime_skill_probe_snapshots"),
           devices: await countTable(client, "devices"),
           runtimes: await countTable(client, "runtimes"),
           tasks: await countTable(client, "tasks"),
@@ -483,6 +493,61 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         LIMIT 1
       `, [agentId, organizationId]);
       return normalizeAgentSkillProbeSnapshot(result.rows[0]?.raw);
+    },
+    async upsertRuntimeSkillProbeSnapshot(snapshot) {
+      const normalized = normalizeRuntimeSkillProbeSnapshot(snapshot);
+      if (!normalized) throw new Error("invalid runtime skill probe snapshot");
+      await pool.query(`
+        INSERT INTO runtime_skill_probe_snapshots (
+          id,
+          device_id,
+          runtime_id,
+          runtime_kind,
+          status,
+          observed_at,
+          summary,
+          skills,
+          diagnostics,
+          raw,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, now())
+        ON CONFLICT (id) DO UPDATE SET
+          device_id = excluded.device_id,
+          runtime_id = excluded.runtime_id,
+          runtime_kind = excluded.runtime_kind,
+          status = excluded.status,
+          observed_at = excluded.observed_at,
+          summary = excluded.summary,
+          skills = excluded.skills,
+          diagnostics = excluded.diagnostics,
+          raw = excluded.raw,
+          updated_at = now()
+      `, [
+        runtimeSkillProbeSnapshotId(normalized.runtimeId),
+        normalized.deviceId,
+        normalized.runtimeId,
+        normalized.runtimeKind,
+        normalized.status,
+        normalized.observedAt ?? null,
+        JSON.stringify(normalized.summary),
+        JSON.stringify(normalized.skills),
+        JSON.stringify({}),
+        JSON.stringify(normalized),
+      ]);
+      return normalized;
+    },
+    async readRuntimeSkillProbeSnapshot(runtimeId, scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
+      const result = await pool.query<{ raw: unknown }>(`
+        SELECT s.raw
+        FROM runtime_skill_probe_snapshots s
+        LEFT JOIN devices d ON d.id = s.device_id
+        WHERE s.runtime_id = $1
+          AND ($2::text IS NULL OR d.organization_id = $2)
+        LIMIT 1
+      `, [runtimeId, organizationId]);
+      return normalizeRuntimeSkillProbeSnapshot(result.rows[0]?.raw);
     },
     listCollectorIngestions,
     async readDeviceCollectionHealth(deviceId, scope = {}) {
@@ -990,6 +1055,10 @@ function addTextFilter(
 
 function agentSkillProbeSnapshotId(agentId: string): string {
   return `agent-skill-probe:${agentId}`;
+}
+
+function runtimeSkillProbeSnapshotId(runtimeId: string): string {
+  return `runtime-skill-probe:${runtimeId}`;
 }
 
 function toDate(value: string | undefined): Date | null {

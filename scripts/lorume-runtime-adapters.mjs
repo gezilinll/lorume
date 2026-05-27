@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, opendirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, hostname, arch, platform, networkInterfaces, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
@@ -8,6 +8,9 @@ export const COLLECTOR_VERSION = "0.1.0";
 
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock,codex";
+const FNM_MULTISHELL_SEARCH_LIMIT = 64;
+const KNOWN_OPENCLAW_RUNTIME_SCOPE_SKILLS = new Set(["clawhub", "healthcheck", "weather"]);
+const executableCache = new Map();
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -47,7 +50,7 @@ function adapterEnabled(config, adapter) {
   return enabledRuntimeAdapters(config).has(adapter);
 }
 
-function commandSearchDirs() {
+function commandSearchDirs({ includeDynamicShimDirs = false } = {}) {
   const dirs = [];
   const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
   dirs.push(...pathDirs);
@@ -64,43 +67,132 @@ function commandSearchDirs() {
     // Ignore missing fnm installs.
   }
 
+  if (includeDynamicShimDirs) dirs.push(...recentFnmMultishellBinDirs());
+
   dirs.push("/opt/homebrew/bin");
   dirs.push("/usr/local/bin");
 
   return [...new Set(dirs)];
 }
 
-function candidateExecutables(command) {
-  return commandSearchDirs().map((dir) => path.join(dir, command));
+function candidateExecutables(command, options) {
+  return commandSearchDirs(options).map((dir) => path.join(dir, command));
+}
+
+function recentFnmMultishellBinDirs() {
+  const root = path.join(homeDir(), ".local", "state", "fnm_multishells");
+  const recentSessions = [];
+  let directory;
+  try {
+    directory = opendirSync(root);
+    let entry;
+    while ((entry = directory.readSync()) !== null) {
+      if (!entry.isDirectory()) continue;
+      pushRecentFnmSession(recentSessions, {
+        name: entry.name,
+        sortKey: fnmMultishellSortKey(entry.name),
+      });
+    }
+  } catch {
+    return [];
+  } finally {
+    try {
+      directory?.closeSync();
+    } catch {
+      // Ignore close failures for best-effort command discovery.
+    }
+  }
+
+  return recentSessions
+    .sort(compareFnmSessions)
+    .map((entry) => path.join(root, entry.name, "bin"))
+    .filter((binDir) => {
+      try {
+        return statSync(binDir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+}
+
+function fnmMultishellSortKey(session) {
+  const match = /(?:^|_)(\d{10,})$/.exec(String(session || ""));
+  return match ? Number(match[1]) : 0;
+}
+
+function pushRecentFnmSession(recentSessions, entry) {
+  recentSessions.push(entry);
+  recentSessions.sort(compareFnmSessions);
+  if (recentSessions.length > FNM_MULTISHELL_SEARCH_LIMIT) recentSessions.pop();
+}
+
+function compareFnmSessions(left, right) {
+  const keyDelta = right.sortKey - left.sortKey;
+  if (keyDelta !== 0) return keyDelta;
+  return right.name.localeCompare(left.name);
 }
 
 function probeEnv(executable) {
   const executableDir = path.dirname(executable);
   return {
     ...process.env,
-    PATH: [...new Set([executableDir, path.dirname(process.execPath), ...commandSearchDirs()])].join(path.delimiter),
+    PATH: [...new Set([
+      executableDir,
+      path.dirname(process.execPath),
+      ...(process.env.PATH || "").split(path.delimiter).filter(Boolean),
+      path.join(homeDir(), ".local", "bin"),
+      path.join(homeDir(), ".npm-global", "bin"),
+      path.join(homeDir(), ".volta", "bin"),
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+    ])].join(path.delimiter),
   };
 }
 
 function findExecutable(command) {
-  for (const candidate of candidateExecutables(command)) {
-    try {
-      if (statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Keep scanning.
-    }
+  if (executableCache.has(command)) return executableCache.get(command);
+  const stableExecutable = findExecutableInCandidates(candidateExecutables(command, { includeDynamicShimDirs: false }));
+  if (stableExecutable) {
+    executableCache.set(command, stableExecutable);
+    return stableExecutable;
+  }
+
+  const dynamicExecutable = findExecutableInCandidates(recentFnmMultishellBinDirs().map((dir) => path.join(dir, command)));
+  if (dynamicExecutable) {
+    executableCache.set(command, dynamicExecutable);
+    return dynamicExecutable;
   }
 
   try {
     const resolved = execFileSync("sh", ["-c", `command -v -- ${shellQuote(command)}`], {
       encoding: "utf8",
-      env: { ...process.env, PATH: commandSearchDirs().join(path.delimiter) },
+      env: { ...process.env, PATH: commandSearchDirs({ includeDynamicShimDirs: false }).join(path.delimiter) },
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    return resolved || null;
+    const executable = resolved || null;
+    executableCache.set(command, executable);
+    return executable;
   } catch {
+    executableCache.set(command, null);
     return null;
   }
+}
+
+function findExecutableInCandidates(candidates) {
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isFile()) {
+        return candidate;
+      }
+    } catch {
+      // Keep scanning.
+    }
+  }
+  return null;
 }
 
 function shellQuote(value) {
@@ -122,6 +214,41 @@ function runJson(command, args, timeoutMs = 10_000) {
     return JSON.parse(result.stdout);
   } catch {
     return null;
+  }
+}
+
+function runJsonWithFileBackedStdout(command, args, timeoutMs = 10_000) {
+  const executable = findExecutable(command);
+  if (!executable) return null;
+  const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-probe-"));
+  const outputPath = path.join(tempDir, "stdout.json");
+  let outputFd;
+  try {
+    outputFd = openSync(outputPath, "w", 0o600);
+    const result = spawnSync(executable, args, {
+      encoding: "utf8",
+      env: probeEnv(executable),
+      maxBuffer: DEFAULT_PROBE_MAX_BUFFER_BYTES,
+      timeout: timeoutMs,
+      stdio: ["ignore", outputFd, "pipe"],
+    });
+    if (result.error || result.status !== 0) return null;
+    return JSON.parse(readFileSync(outputPath, "utf8"));
+  } catch {
+    return null;
+  } finally {
+    if (outputFd !== undefined) {
+      try {
+        closeSync(outputFd);
+      } catch {
+        // Ignore cleanup failures.
+      }
+    }
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup failures.
+    }
   }
 }
 
@@ -365,8 +492,152 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
       },
     }),
   );
+  const runtimeSkillProbe = collectOpenClawRuntimeSkillProbe({
+    agents,
+    collectedAt,
+    deviceId,
+    runtime,
+    agentExternalIds: agentIds,
+  });
 
-  return { runtimes: [runtime], agents, tasks: trajectoryMapping.tasks, diagnostics: trajectoryMapping.diagnostics };
+  return {
+    runtimes: [runtime],
+    agents,
+    tasks: trajectoryMapping.tasks,
+    runtimeSkillProbes: runtimeSkillProbe ? [runtimeSkillProbe] : [],
+    diagnostics: trajectoryMapping.diagnostics,
+  };
+}
+
+function collectOpenClawRuntimeSkillProbe({ agents, collectedAt, deviceId, runtime, agentExternalIds }) {
+  const runtimeSkills = openClawSkillListFromOutput(openClawSkillsListJson([]));
+  const agentSkillViews = agentExternalIds.map((agentExternalId) => {
+    const productAgent = agents.find((agent) => agent.id === makeAgentId(runtime.id, agentExternalId));
+    const skills = openClawSkillListFromOutput(
+      openClawSkillsListJson(["--agent", agentExternalId]) ||
+      openClawSkillsListJson(["--agent-id", agentExternalId]),
+    );
+    return {
+      agentId: productAgent?.id || makeAgentId(runtime.id, agentExternalId),
+      skills,
+    };
+  }).filter((view) => view.skills.length > 0);
+  const rows = openClawRuntimeSkillRows({ runtimeSkills, agentSkillViews });
+  if (runtimeSkills.length === 0 && agentSkillViews.length === 0) return null;
+  return {
+    deviceId,
+    runtimeId: runtime.id,
+    runtimeKind: runtime.kind,
+    status: rows.length ? "succeeded" : "unsupported",
+    observedAt: collectedAt,
+    summary: createRuntimeSkillSummary(rows),
+    skills: rows,
+    ...(!rows.length ? { errorSummary: "未发现可归一化的 OpenClaw Skill metadata。" } : {}),
+  };
+}
+
+function openClawSkillsListJson(extraArgs) {
+  return runJsonWithFileBackedStdout("openclaw", ["skills", "list", "--json", ...extraArgs]);
+}
+
+function openClawSkillListFromOutput(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  for (const key of ["skills", "items", "data", "results"]) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [];
+}
+
+function openClawRuntimeSkillRows({ runtimeSkills, agentSkillViews }) {
+  const rowsByName = new Map();
+  for (const rawSkill of runtimeSkills) mergeRuntimeSkillRow(rowsByName, openClawSkillToRuntimeSkillRow(rawSkill));
+  for (const view of agentSkillViews) {
+    for (const rawSkill of view.skills) {
+      mergeRuntimeSkillRow(rowsByName, openClawSkillToRuntimeSkillRow(rawSkill, view.agentId));
+    }
+  }
+  return Array.from(rowsByName.values())
+    .map((row) => ({ ...row, agentIds: row.scope === "agent" ? uniqueSorted(row.agentIds) : [] }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function openClawSkillToRuntimeSkillRow(rawSkill, visibleAgentId) {
+  if (!rawSkill || typeof rawSkill !== "object") return null;
+  const name = cleanText(rawSkill.name || rawSkill.id || rawSkill.slug);
+  if (!name) return null;
+  const scope = openClawSkillScope(rawSkill);
+  if (!scope) return null;
+  return {
+    name,
+    description: cleanText(rawSkill.description || rawSkill.summary),
+    scope,
+    available: openClawSkillAvailable(rawSkill),
+    builtIn: rawSkill.bundled === true || cleanText(rawSkill.source) === "openclaw-bundled",
+    agentIds: scope === "agent" && visibleAgentId ? [visibleAgentId] : [],
+  };
+}
+
+function openClawSkillScope(rawSkill) {
+  const name = cleanText(rawSkill.name || rawSkill.id || rawSkill.slug);
+  if (KNOWN_OPENCLAW_RUNTIME_SCOPE_SKILLS.has(name)) return "runtime";
+  const source = cleanText(rawSkill.source);
+  if (rawSkill.bundled === true || source === "openclaw-bundled" || source === "openclaw-extra") return "runtime";
+  if (source === "openclaw-workspace" || source === "agents-skills-personal" || source === "agents-skills-project") return "agent";
+  return null;
+}
+
+function openClawSkillAvailable(rawSkill) {
+  return rawSkill.eligible === true &&
+    rawSkill.disabled !== true &&
+    rawSkill.blockedByAllowlist !== true &&
+    openClawMissingCount(rawSkill.missing) === 0;
+}
+
+function openClawMissingCount(value) {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") {
+    return Object.values(value).reduce((sum, item) => sum + openClawMissingCount(item), 0);
+  }
+  if (typeof value === "string") return value.trim() ? 1 : 0;
+  return 0;
+}
+
+function mergeRuntimeSkillRow(rowsByName, row) {
+  if (!row) return;
+  const existing = rowsByName.get(row.name);
+  if (!existing) {
+    rowsByName.set(row.name, { ...row, agentIds: uniqueSorted(row.agentIds) });
+    return;
+  }
+  const scope = existing.scope === "runtime" || row.scope === "runtime" ? "runtime" : "agent";
+  rowsByName.set(row.name, {
+    name: existing.name,
+    description: existing.description || row.description,
+    scope,
+    available: existing.available || row.available,
+    builtIn: existing.builtIn || row.builtIn,
+    agentIds: scope === "agent" ? uniqueSorted([...existing.agentIds, ...row.agentIds]) : [],
+  });
+}
+
+function createRuntimeSkillSummary(skills) {
+  return {
+    total: skills.length,
+    runtimeScopeCount: skills.filter((skill) => skill.scope === "runtime").length,
+    agentScopeCount: skills.filter((skill) => skill.scope === "agent").length,
+    availableCount: skills.filter((skill) => skill.available).length,
+    unavailableCount: skills.filter((skill) => !skill.available).length,
+    builtInCount: skills.filter((skill) => skill.builtIn).length,
+  };
+}
+
+function uniqueSorted(values) {
+  return Array.from(new Set(values.map((value) => cleanText(value)).filter(Boolean))).sort();
+}
+
+function cleanText(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function collectCodexDeviceState(deviceId, collectedAt) {
@@ -1967,7 +2238,31 @@ function applyDeviceOverrides(snapshot, config) {
       runtimeId: nextRuntimeId,
     };
   });
-  return { ...snapshot, device: nextDevice, runtimes, agents };
+  const runtimeSkillProbes = Array.isArray(snapshot.runtimeSkillProbes)
+    ? snapshot.runtimeSkillProbes.map((probe) => {
+      const nextRuntimeId = idReplacements.get(probe.runtimeId) || String(probe.runtimeId || "").replace(`${snapshot.device.id}:`, `${nextDevice.id}:`);
+      return {
+        ...probe,
+        deviceId: String(probe.deviceId || snapshot.device.id).replace(snapshot.device.id, nextDevice.id),
+        runtimeId: nextRuntimeId,
+        skills: Array.isArray(probe.skills)
+          ? probe.skills.map((skill) => ({
+            ...skill,
+            agentIds: Array.isArray(skill.agentIds)
+              ? skill.agentIds.map((agentId) => String(agentId).replace(`${snapshot.device.id}:`, `${nextDevice.id}:`))
+              : [],
+          }))
+          : [],
+      };
+    })
+    : undefined;
+  return {
+    ...snapshot,
+    device: nextDevice,
+    runtimes,
+    agents,
+    ...(runtimeSkillProbes ? { runtimeSkillProbes } : {}),
+  };
 }
 
 function toRecordArray(value) {
@@ -2658,6 +2953,7 @@ export function collectDeviceStateSnapshot(config = {}, args = {}) {
     runtimes: collected.runtimes,
     agents: collected.agents,
     tasks: collected.tasks,
+    ...(collected.runtimeSkillProbes.length ? { runtimeSkillProbes: collected.runtimeSkillProbes } : {}),
     ...(collected.diagnostics.length ? { diagnostics: { items: collected.diagnostics } } : {}),
   };
 }
@@ -2666,17 +2962,22 @@ function mergeRuntimeCollections(collections) {
   const runtimesById = new Map();
   const agentsById = new Map();
   const tasksById = new Map();
+  const runtimeSkillProbesById = new Map();
   const diagnostics = [];
   for (const collection of collections) {
     for (const runtime of collection.runtimes || []) runtimesById.set(runtime.id, runtime);
     for (const agent of collection.agents || []) agentsById.set(agent.id, agent);
     for (const task of collection.tasks || []) tasksById.set(task.id, task);
+    for (const probe of collection.runtimeSkillProbes || []) runtimeSkillProbesById.set(probe.runtimeId, probe);
     diagnostics.push(...(collection.diagnostics || []));
   }
   return {
     runtimes: Array.from(runtimesById.values()),
     agents: Array.from(agentsById.values()),
     tasks: Array.from(tasksById.values()).sort(compareOpenClawTasksByRecency),
+    runtimeSkillProbes: Array.from(runtimeSkillProbesById.values()).sort((left, right) =>
+      String(left.runtimeId).localeCompare(String(right.runtimeId)),
+    ),
     diagnostics: diagnostics.sort(compareDiagnostics),
   };
 }

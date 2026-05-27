@@ -36,6 +36,7 @@ describeDb("Postgres runtime store", () => {
           agents: 1,
           collectorIngestions: 2,
           devices: 1,
+          runtimeSkillProbeSnapshots: 0,
           runtimes: 1,
           tasks: 2,
         });
@@ -230,6 +231,7 @@ describeDb("Postgres runtime store", () => {
           agents: 1,
           collectorIngestions: 3,
           devices: 1,
+          runtimeSkillProbeSnapshots: 0,
           runtimes: 1,
           tasks: 2,
         });
@@ -452,6 +454,65 @@ describeDb("Postgres runtime store", () => {
         });
         await expect(store.readEntityCounts()).resolves.toMatchObject({
           agentSkillProbeSnapshots: 1,
+        });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("stores latest read-only Runtime Skill probe metadata", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        await store.upsertDeviceStateSnapshot({ ...createFixtureDeviceState(), tasks: [] });
+        const snapshot = {
+          deviceId: "fixture-mac",
+          runtimeId: "fixture-mac:runtime:openclaw",
+          runtimeKind: "openclaw",
+          status: "succeeded" as const,
+          observedAt: "2026-05-27T08:00:00.000Z",
+          skills: [{
+            name: "weather",
+            description: "Weather lookup",
+            scope: "runtime" as const,
+            available: true,
+            builtIn: true,
+            agentIds: ["should-not-survive"],
+          }, {
+            name: "argus-cost-provider-auth-refresh",
+            description: "Refresh cost provider auth",
+            scope: "agent" as const,
+            available: true,
+            builtIn: false,
+            agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
+          }],
+        };
+
+        await store.upsertRuntimeSkillProbeSnapshot(snapshot);
+
+        expect(await store.readRuntimeSkillProbeSnapshot(snapshot.runtimeId)).toMatchObject({
+          runtimeId: snapshot.runtimeId,
+          status: "succeeded",
+          summary: {
+            total: 2,
+            runtimeScopeCount: 1,
+            agentScopeCount: 1,
+            availableCount: 2,
+            unavailableCount: 0,
+            builtInCount: 1,
+          },
+          skills: [
+            expect.objectContaining({ name: "argus-cost-provider-auth-refresh", scope: "agent" }),
+            expect.objectContaining({ name: "weather", scope: "runtime", agentIds: [] }),
+          ],
+        });
+        await expect(store.readEntityCounts()).resolves.toMatchObject({
+          runtimeSkillProbeSnapshots: 1,
         });
       } finally {
         await store.close();

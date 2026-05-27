@@ -457,6 +457,79 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
     }
   });
 
+  it("posts runtime Skill snapshots separately from device metadata", async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-skill-probe-config-"));
+    const fakeCli = path.join(configDir, "lorume.mjs");
+    const configPath = path.join(configDir, "config.json");
+    const collectorServer = await startRecordingSnapshotServer({
+      expectedAuthorization: "Bearer device-token-test",
+    });
+    const snapshot = {
+      ...createMinimalSnapshot("skill-probe-device"),
+      runtimes: [{
+        collectionStatus: "online",
+        deviceId: "skill-probe-device",
+        id: "skill-probe-device:runtime:openclaw",
+        kind: "openclaw",
+        name: "OpenClaw Gateway",
+      }],
+      agents: [{
+        collectionStatus: "online",
+        id: "skill-probe-device:runtime:openclaw:agent:main",
+        name: "main",
+        runtimeId: "skill-probe-device:runtime:openclaw",
+      }],
+      runtimeSkillProbes: [{
+        deviceId: "skill-probe-device",
+        runtimeId: "skill-probe-device:runtime:openclaw",
+        runtimeKind: "openclaw",
+        status: "succeeded",
+        observedAt: "2026-05-27T08:00:00.000Z",
+        skills: [{
+          name: "weather",
+          description: "Weather lookup",
+          scope: "runtime",
+          available: true,
+          builtIn: true,
+          agentIds: [],
+        }],
+      }],
+    };
+    writeFileSync(fakeCli, `#!/usr/bin/env node
+console.log(JSON.stringify({
+  command: "collect.device-state",
+  ...${JSON.stringify(snapshot)}
+}));
+`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(configPath, JSON.stringify({
+      deviceToken: "device-token-test",
+      lorumeCliPath: fakeCli,
+      serverUrl: collectorServer.baseUrl,
+    }));
+
+    try {
+      await runNodeScript([
+        collectorScript,
+        "--once",
+        "--config",
+        configPath,
+      ]);
+
+      expect(collectorServer.snapshots()[0]).not.toHaveProperty("runtimeSkillProbes");
+      expect(collectorServer.runtimeSkillProbes()).toEqual([
+        expect.objectContaining({
+          deviceId: "skill-probe-device",
+          runtimeId: "skill-probe-device:runtime:openclaw",
+          status: "succeeded",
+        }),
+      ]);
+    } finally {
+      collectorServer.server.close();
+      rmSync(configDir, { force: true, recursive: true });
+    }
+  });
+
   it("posts Slock tasks through task batches instead of metadata snapshots", async () => {
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-slock-task-batch-config-"));
     const configPath = path.join(configDir, "config.json");
@@ -1238,14 +1311,20 @@ async function startControlAndSnapshotServer(): Promise<{
 
 async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{
   baseUrl: string;
+  runtimeSkillProbes: () => Array<Record<string, unknown>>;
   server: Server;
   snapshots: () => Array<Record<string, unknown>>;
   taskBatches: () => Array<Record<string, unknown>>;
 }> {
   const snapshots: Array<Record<string, unknown>> = [];
   const taskBatches: Array<Record<string, unknown>> = [];
+  const runtimeSkillProbes: Array<Record<string, unknown>> = [];
   const server = createServer((request, response) => {
-    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
+    if (
+      request.url !== "/api/device-state-snapshots" &&
+      request.url !== "/api/device-task-batches" &&
+      request.url !== "/api/runtime-skill-probe-snapshots"
+    ) {
       response.statusCode = 404;
       response.end("not found");
       return;
@@ -1263,6 +1342,7 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
     request.on("end", () => {
       const parsed = JSON.parse(body);
       if (request.url === "/api/device-state-snapshots") snapshots.push(parsed);
+      else if (request.url === "/api/runtime-skill-probe-snapshots") runtimeSkillProbes.push(parsed);
       else taskBatches.push(parsed);
       response.writeHead(201, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -1281,6 +1361,7 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
   if (!address || typeof address === "string") throw new Error("missing server address");
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
+    runtimeSkillProbes: () => [...runtimeSkillProbes],
     server,
     snapshots: () => [...snapshots],
     taskBatches: () => [...taskBatches],

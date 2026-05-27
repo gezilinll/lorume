@@ -4,6 +4,10 @@ import {
   normalizeAgentSkillProbeSnapshot,
   type AgentSkillProbeSnapshot,
 } from "../runtime/agent-skill-probe";
+import {
+  normalizeRuntimeSkillProbeSnapshot,
+  type RuntimeSkillSnapshot,
+} from "../runtime/runtime-skill-probe";
 
 export interface RuntimeDeviceStateSnapshot {
   collectedAt: string;
@@ -79,6 +83,10 @@ export interface RuntimeDeviceStateStore {
   readAgentSkillProbeSnapshot: (agentId: string) => AgentSkillProbeSnapshot | null;
   /** Validate and store the latest read-only Skill probe snapshot for one Agent. */
   writeAgentSkillProbeSnapshot: (snapshot: unknown) => AgentSkillProbeSnapshot;
+  /** Read the latest read-only Skill probe snapshot for one Runtime. */
+  readRuntimeSkillProbeSnapshot: (runtimeId: string) => RuntimeSkillSnapshot | null;
+  /** Validate and store the latest read-only Skill probe snapshot for one Runtime. */
+  writeRuntimeSkillProbeSnapshot: (snapshot: unknown) => RuntimeSkillSnapshot;
 }
 
 const defaultSnapshotPath = path.resolve(".lorume", "runtime-device-state", "latest.json");
@@ -94,6 +102,7 @@ export function createRuntimeDeviceStateStore(
   const staleAfterMs = options.staleAfterMs ?? defaultStaleAfterMs;
   const deviceConnections = new Map<string, RuntimeDeviceConnection>();
   const skillProbeSnapshots = new Map<string, AgentSkillProbeSnapshot>();
+  const runtimeSkillProbeSnapshots = new Map<string, RuntimeSkillSnapshot>();
 
   return {
     snapshotPath,
@@ -146,6 +155,16 @@ export function createRuntimeDeviceStateStore(
       const normalized = normalizeAgentSkillProbeSnapshot(snapshot);
       if (!normalized) throw new Error("invalid agent skill probe snapshot");
       skillProbeSnapshots.set(normalized.targetAgentId, cloneJson(normalized));
+      return cloneJson(normalized);
+    },
+    readRuntimeSkillProbeSnapshot(runtimeId) {
+      const snapshot = runtimeSkillProbeSnapshots.get(runtimeId);
+      return snapshot ? cloneJson(snapshot) : null;
+    },
+    writeRuntimeSkillProbeSnapshot(snapshot) {
+      const normalized = normalizeRuntimeSkillProbeSnapshot(snapshot);
+      if (!normalized) throw new Error("invalid runtime skill probe snapshot");
+      runtimeSkillProbeSnapshots.set(normalized.runtimeId, cloneJson(normalized));
       return cloneJson(normalized);
     },
   };

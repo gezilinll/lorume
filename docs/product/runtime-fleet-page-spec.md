@@ -40,7 +40,8 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - `GET /api/runtime-fleet`：正式 Runtime Fleet 查询 API，返回 Device、Runtime、Agent 和派生 Task 计数摘要，不返回 Task 明细数组。
 - `GET /api/runtime-tasks`：正式 Runs 会话任务查询 API，返回 Task 查询页、summary 和 channel facets。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，用于解释 `collectionStatus`，不渲染成独立健康区块，只返回 `device_state` 检查项。
-- `GET /api/agents/:agentId/skill-probe`：读取目标 Agent 最近一次已存储的只读 Skill metadata。
+- `GET /api/runtimes/:runtimeId/skill-probe`：读取目标 Runtime 最近一次已存储的只读 Skill metadata。Agent 视角后续从 Runtime snapshot 的 `agentIds` 过滤得到。
+- `GET /api/agents/:agentId/skill-probe`：前端迁移前的兼容读取接口，只读取已存储 metadata，不触发 Agent 级探测。
 
 没有后端数据或本地 backend 不可用时，页面只在非 production 模式允许使用明确标识的 fixture 做离线预览。Production 构建必须展示明确错误和空状态，不回退 fixture。
 

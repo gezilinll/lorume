@@ -64,6 +64,7 @@ flowchart LR
 - `agents`：Lorume 管理视角下的 Managed Agent。
 - `tasks`：Agent 承接的业务工作。Task 只通过 `agent_id` 关联 Agent，不直接保存 Runtime 或 Device 外键。
 - `collector_ingestions`：每次 collector 上报的结果、数量、耗时、结构化 diagnostics 和错误摘要。
+- `runtime_skill_probe_snapshots`：Runtime 级只读 Skill metadata 最新快照，含 `runtime / agent` scope、summary 和 Agent 归属索引。
 - `operations`：用户可见的异步动作状态。
 - `operation_jobs`：后端 runner 可 claim 和执行的任务单元。
 - `notification_events` / `notification_threads` / `notification_deliveries` / `notification_preferences`：公共通知事件、聚合、投递和偏好。
@@ -74,8 +75,9 @@ flowchart LR
 
 Collector 保持主动上报：
 
-- 当前正式写入路径分为两类：`device_state` metadata snapshot 包含 Device、Runtime、Agent 和 diagnostics；`task_batch` 包含变化 Task。
+- 当前正式写入路径分为三类：`device_state` metadata snapshot 包含 Device、Runtime、Agent 和 diagnostics；`runtime_skill_probe` snapshot 包含 Runtime Skill metadata；`task_batch` 包含变化 Task。
 - `POST /api/device-state-snapshots` 的 `tasks` 必须为空数组。后端按稳定 ID upsert Device、Runtime 和 Agent。
+- `POST /api/runtime-skill-probe-snapshots` 按 Runtime ID upsert 最新只读 Skill metadata snapshot。该路径不触发设备远端命令。
 - `POST /api/device-task-batches` 按稳定 Task ID upsert Task，并返回 ACK 列表；collector 只有在 ACK 中看到当前 `{ id, hash }` 后才推进本地 task sync cache。
 - Task 删除使用 soft tombstone 语义。后端不因普通 collector sync 物理删除 Task；只在认证后的 `task_batch.removedTaskIds` 被 ACK 后标记 stale，默认产品查询 API 过滤 stale rows。
 - Runtime / Agent / Device metadata 仍由 metadata snapshot 路径按当前快照 upsert 和收敛。
@@ -88,7 +90,7 @@ Collector 保持主动上报：
 - 设备 WebSocket 在线只表示控制面可达，不等于 `device_state` 采集成功。采集诊断只从 `collector_ingestions` 中最近一次 `device_state` 记录判断；没有记录就显示尚未收到当前采集结果，不回退旧采集类型。
 - 最近同步时间表达数据新鲜度，并作为 Device 四态诊断输入之一。用户可见 Device 状态只保留 `同步中`、`在线`、`离线`、`异常`；内部 stale / freshness reason code 只服务诊断，不作为额外 UI 状态。采集成功但存在 adapter `warning` diagnostic 时仍算成功，diagnostic 进入 ingestion、日志、通知或后续诊断入口。
 - 采集失败、adapter 异常、JSON 结构不可用、token 无效或数据库写入失败时，必须写结构化日志。日志字段至少包含 `service`、`event`、`level`、`time`、`errorCode` 和可读 `message`，并且不得包含 device token、session token、邀请 token、邮箱验证码或平台 API key。
-- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报、soft tombstone 和批量 ACK。Task cache 必须绑定 `schemaVersion`、规范化 `serverUrl`、`deviceId` 和 device token 前 12 位 `tokenPrefix`；注册作用域缺失或不一致时，collector 视为空 cache 并重新分批上报当前可见 Task。
+- 当前 Device / Runtime / Agent metadata 每轮按 snapshot upsert；Runtime Skill metadata 每轮按 Runtime snapshot upsert；Task 使用本地 `{ id, hash }` cache 做变化上报、soft tombstone 和批量 ACK。Task cache 必须绑定 `schemaVersion`、规范化 `serverUrl`、`deviceId` 和 device token 前 12 位 `tokenPrefix`；注册作用域缺失或不一致时，collector 视为空 cache 并重新分批上报当前可见 Task。
 
 建议节奏：
 
@@ -106,10 +108,11 @@ Collector 保持主动上报：
 - `GET /api/device-collector/install.sh`
 - `GET /api/device-collector/files/:fileName`
 - `POST /api/device-state-snapshots`
+- `POST /api/runtime-skill-probe-snapshots`
 - `POST /api/device-task-batches`
 - `WS /api/device-control/ws`
 
-Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 metadata snapshot 和 Task batch 进入后端。
+Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 进入后端。
 
 正式查询 API：
 
@@ -130,6 +133,10 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
   - `failed`：尚未收到记录、最近一次上报失败、payload 结构不可用或后端写入失败。
   - 该接口不再返回用户界面专用的 `warning`、`stale` 或 `unknown` 状态；Runtime Fleet 展示层只把 `failed` 折叠为对象 `异常`。
   - 该接口面向产品诊断，不返回外部平台密钥、原始 payload 或调试-only 字段。
+- `GET /api/runtimes/:runtimeId/skill-probe`
+  - 返回 Runtime 最近一次已存储 Skill metadata snapshot。
+  - 无数据时返回 `unknown`，不发起远端探测。
+  - 只返回产品字段：summary、`name`、`description`、`scope`、`available`、`builtIn` 和 `agentIds`。
 - `GET /api/operations`
   - 参数：`organizationId`、`status`、`resourceType`、`resourceId`、`targetType`、`targetId`、`limit`。
   - 需要当前用户属于该组织。

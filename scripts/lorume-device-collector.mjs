@@ -367,6 +367,11 @@ async function postTaskBatch(serverUrl, batch, deviceToken = "") {
   return postJsonWithRetry(url, batch, "Runtime task batch", deviceToken);
 }
 
+async function postRuntimeSkillProbeSnapshot(serverUrl, snapshot, deviceToken = "") {
+  const url = new URL("/api/runtime-skill-probe-snapshots", serverUrl);
+  return postJsonWithRetry(url, snapshot, "Runtime Skill probe snapshot", deviceToken);
+}
+
 async function postJsonWithRetry(url, payload, label, deviceToken = "") {
   let lastError;
   for (const [attempt, delayMs] of POST_RETRY_DELAYS_MS.entries()) {
@@ -397,10 +402,26 @@ function sleep(milliseconds) {
 }
 
 function metadataSnapshot(snapshot) {
+  const { runtimeSkillProbes: _runtimeSkillProbes, ...metadata } = snapshot;
   return {
-    ...snapshot,
+    ...metadata,
     tasks: [],
   };
+}
+
+async function postRuntimeSkillProbes(serverUrl, snapshot, deviceToken, logger) {
+  const runtimeSkillProbes = Array.isArray(snapshot.runtimeSkillProbes) ? snapshot.runtimeSkillProbes : [];
+  for (const runtimeSkillProbe of runtimeSkillProbes) {
+    await postRuntimeSkillProbeSnapshot(serverUrl, runtimeSkillProbe, deviceToken);
+  }
+  if (runtimeSkillProbes.length > 0) {
+    logger.info({
+      deviceId: snapshot.device.id,
+      event: "runtime_skill_probe_upload_succeeded",
+      runtimeSkillProbes: runtimeSkillProbes.length,
+    });
+  }
+  return { runtimeSkillProbeCount: runtimeSkillProbes.length };
 }
 
 async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger) {
@@ -755,6 +776,7 @@ async function runOnce(config, args, mode = "once") {
       runtimes: snapshot.runtimes?.length ?? 0,
       agents: snapshot.agents?.length ?? 0,
       tasks: snapshot.tasks?.length ?? 0,
+      runtimeSkillProbes: snapshot.runtimeSkillProbes?.length ?? 0,
     },
   });
   const serverUrl = args.serverUrl || config.serverUrl || "";
@@ -763,6 +785,7 @@ async function runOnce(config, args, mode = "once") {
     const metadataPostStartedAt = Date.now();
     await postSnapshot(serverUrl, metadataSnapshot(snapshot), deviceToken);
     metrics.metadataPostDurationMs = Date.now() - metadataPostStartedAt;
+    await postRuntimeSkillProbes(serverUrl, snapshot, deviceToken, logger);
     const taskBatchPostStartedAt = Date.now();
     const taskBatchStats = await postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger);
     metrics.taskBatchPostDurationMs = Date.now() - taskBatchPostStartedAt;

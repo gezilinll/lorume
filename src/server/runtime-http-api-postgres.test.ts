@@ -82,6 +82,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
           agents: 1,
           collectorIngestions: 2,
           devices: 1,
+          runtimeSkillProbeSnapshots: 0,
           runtimes: 1,
           tasks: 1,
         });

@@ -42,6 +42,7 @@ describeDb("database schema baseline", () => {
           "organization_invitations",
           "organization_members",
           "organizations",
+          "runtime_skill_probe_snapshots",
           "runtimes",
           "sessions",
           "tasks",
@@ -95,6 +96,20 @@ describeDb("database schema baseline", () => {
           "diagnostics",
           "error",
           "created_at",
+        ]);
+        await expect(listPublicColumnNames(client, "runtime_skill_probe_snapshots")).resolves.toEqual([
+          "id",
+          "device_id",
+          "runtime_id",
+          "runtime_kind",
+          "status",
+          "observed_at",
+          "summary",
+          "skills",
+          "diagnostics",
+          "raw",
+          "created_at",
+          "updated_at",
         ]);
       } finally {
         await client.end();

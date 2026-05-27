@@ -118,6 +118,169 @@ exit 91
     expect(existsSync(disabledCallsPath)).toBe(false);
   });
 
+  it("discovers OpenClaw skill metadata from fnm multishell command shims", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-openclaw-fnm-"));
+    const fnmRoot = path.join(root, ".local", "state", "fnm_multishells");
+    const sessionBase = 1779878173000;
+    for (let index = 0; index < 120; index += 1) {
+      mkdirSync(path.join(fnmRoot, `${index}_${sessionBase + index}`, "bin"), { recursive: true });
+    }
+    const fnmBinDir = path.join(root, ".local", "state", "fnm_multishells", `999_${sessionBase + 999}`, "bin");
+    mkdirSync(fnmBinDir, { recursive: true });
+    writeExecutable(path.join(fnmBinDir, "openclaw"), `#!/bin/sh
+if [ "$1" = "health" ]; then
+  printf '{"ok":true,"agents":[{"agentId":"main"}]}\\n'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  printf '{"gateway":{"reachable":true,"self":{"version":"openclaw 1.0.0"}},"agents":{"agents":[{"agentId":"main"}]}}\\n'
+  exit 0
+fi
+if [ "$1" = "skills" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = "--agent" ]; then
+  printf '{"skills":[{"name":"agent-note","description":"Agent-only note skill","source":"agents-skills-personal","eligible":true,"disabled":false,"blockedByAllowlist":false,"missing":[]}]}\\n'
+  exit 0
+fi
+if [ "$1" = "skills" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '{"skills":[{"name":"healthcheck","description":"Runtime health check","source":"openclaw-bundled","eligible":true,"disabled":false,"blockedByAllowlist":false,"missing":[]}]}\\n'
+  exit 0
+fi
+printf '{}\\n'
+`);
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: path.join(root, "empty-bin"),
+      },
+    });
+
+    expect(output.runtimeSkillProbes).toEqual([
+      expect.objectContaining({
+        runtimeId: "test-device:runtime:openclaw",
+        summary: expect.objectContaining({
+          total: 2,
+          runtimeScopeCount: 1,
+          agentScopeCount: 1,
+        }),
+        skills: expect.arrayContaining([
+          expect.objectContaining({
+            name: "healthcheck",
+            scope: "runtime",
+            agentIds: [],
+          }),
+          expect.objectContaining({
+            name: "agent-note",
+            scope: "agent",
+            agentIds: ["test-device:runtime:openclaw:agent:main"],
+          }),
+        ]),
+      }),
+    ]);
+  });
+
+  it("prefers stable fnm OpenClaw installs before dynamic multishell shims", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-openclaw-fnm-stable-"));
+    const stableBinDir = path.join(root, ".local", "share", "fnm", "node-versions", "v22.22.1", "installation", "bin");
+    const fnmRoot = path.join(root, ".local", "state", "fnm_multishells");
+    mkdirSync(stableBinDir, { recursive: true });
+    for (let index = 0; index < 160; index += 1) {
+      const dynamicBinDir = path.join(fnmRoot, `${index}_${1779878173000 + index}`, "bin");
+      mkdirSync(dynamicBinDir, { recursive: true });
+      writeExecutable(path.join(dynamicBinDir, "openclaw"), `#!/bin/sh
+printf '{"skills":[{"name":"dynamic-poison","source":"openclaw-bundled","eligible":true,"disabled":false,"blockedByAllowlist":false,"missing":[]}]}\\n'
+`);
+    }
+    writeExecutable(path.join(stableBinDir, "openclaw"), `#!/bin/sh
+if [ "$1" = "health" ]; then
+  printf '{"ok":true,"agents":[{"agentId":"main"}]}\\n'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  printf '{"gateway":{"reachable":true,"self":{"version":"openclaw 1.0.0"}},"agents":{"agents":[{"agentId":"main"}]}}\\n'
+  exit 0
+fi
+if [ "$1" = "skills" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '{"skills":[{"name":"stable-healthcheck","source":"openclaw-bundled","eligible":true,"disabled":false,"blockedByAllowlist":false,"missing":[]}]}\\n'
+  exit 0
+fi
+printf '{}\\n'
+`);
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: path.join(root, "empty-bin"),
+      },
+    });
+
+    expect(output.runtimeSkillProbes?.[0]?.skills).toEqual([
+      expect.objectContaining({
+        name: "stable-healthcheck",
+        scope: "runtime",
+      }),
+    ]);
+  });
+
+  it("reads OpenClaw skill JSON from file-backed stdout when pipe output is truncated", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-openclaw-skill-file-"));
+    const binDir = path.join(root, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeExecutable(path.join(binDir, "openclaw"), `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "health") {
+  process.stdout.write(JSON.stringify({ ok: true, agents: [{ agentId: "main" }] }));
+  process.exit(0);
+}
+if (args[0] === "status") {
+  process.stdout.write(JSON.stringify({ gateway: { reachable: true, self: { version: "openclaw 1.0.0" } }, agents: { agents: [{ agentId: "main" }] } }));
+  process.exit(0);
+}
+if (args[0] === "skills" && args[1] === "list" && args[2] === "--json") {
+  const payload = JSON.stringify({ skills: [{ name: "pipe-sensitive-skill", description: "Only complete when stdout is a file", source: "openclaw-bundled", eligible: true, disabled: false, blockedByAllowlist: false, missing: { bins: [], anyBins: [], env: [], config: [], os: [] } }] });
+  process.stdout.write(fs.fstatSync(1).isFile() ? payload : payload.slice(0, Math.floor(payload.length / 2)));
+  process.exit(0);
+}
+process.stdout.write("{}");
+`);
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.runtimeSkillProbes?.[0]?.skills).toEqual([
+      expect.objectContaining({
+        name: "pipe-sensitive-skill",
+        scope: "runtime",
+        available: true,
+      }),
+    ]);
+  });
+
   it("collects native Codex tasks while skipping Slock and Multica-owned Codex sessions", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-codex-fixture-"));
     writeCodexFixtureHome(root);

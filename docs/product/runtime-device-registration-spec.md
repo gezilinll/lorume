@@ -2,14 +2,14 @@
 
 版本：TinySpec v0.9
 
-Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw、Slock 和 Codex；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过；Codex adapter 只采集 Codex 原生或其他未被平台 adapter 归属的本机会话，Slock-owned 和 Multica-owned 的 Codex 会话只进入 diagnostics。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
+Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据、Runtime Skill metadata 和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw、Slock 和 Codex；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过；Codex adapter 只采集 Codex 原生或其他未被平台 adapter 归属的本机会话，Slock-owned 和 Multica-owned 的 Codex 会话只进入 diagnostics。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
 ## 目标
 
 - 通过一条本地安装命令在设备上安装 Lorume Device Collector。
 - Collector 作为设备侧常驻 Device Agent 运行，设备主动连接 Lorume。
 - Collector 只读采集本机事实和已启用 adapter 覆盖的运行资产。
-- 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
+- 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot、Runtime Skill probe snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
 - Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
 - WebSocket 控制面只支持设备主动 `hello`、`heartbeat` 和连接健康判定；不下发采集、探测、调度或任意命令。
 
@@ -238,7 +238,7 @@ Runtime 和 Agent 的 `collectionStatus` 只表达采集可用性，不表达工
 
 ## 上报 Envelope
 
-CLI 在设备本地生成一份统一 `DeviceStateSnapshot`。它是 collector 内部传输 envelope，不是产品实体。Collector 对后端上报时必须拆成两类请求：metadata snapshot 和 Task batch。
+CLI 在设备本地生成一份统一 `DeviceStateSnapshot`。它是 collector 内部传输 envelope，不是产品实体。Collector 对后端上报时必须拆成三类请求：metadata snapshot、Runtime Skill probe snapshot 和 Task batch。
 
 ```ts
 export interface DeviceStateSnapshot {
@@ -247,6 +247,7 @@ export interface DeviceStateSnapshot {
   runtimes: Runtime[];
   agents: Agent[];
   tasks: Task[];
+  runtimeSkillProbes?: RuntimeSkillSnapshot[];
   diagnostics?: {
     items: CollectionDiagnosticItem[];
   };
@@ -269,6 +270,7 @@ export interface CollectionDiagnosticItem {
 HTTP 上报规则：
 
 - `POST /api/device-state-snapshots` 只接收 Device、Runtime、Agent 和 diagnostics；`tasks` 必须为空数组。
+- `POST /api/runtime-skill-probe-snapshots` 接收 Runtime 级只读 Skill metadata，包含 `runtime / agent` scope、`available`、`builtIn` 和 `agentIds`。
 - `POST /api/device-task-batches` 接收 Task 批次，每条 Task 带 collector 计算出的稳定 hash，也可以包含 `removedTaskIds`。
 - Metadata snapshot 只按稳定 ID upsert Device、Runtime 和 Agent。由于 collector 允许按 adapter allowlist 做局部采集，后端不得把某个 metadata snapshot 里缺席的 Runtime 或 Agent 解释为删除；Runtime / Agent 下线或 tombstone 规则必须有独立 spec 和 harness 后再引入。
 - `removedTaskIds` 表示这些 Task 曾经在当前 collector cache scope 中被后端 ACK，但本轮已启用且本轮实际覆盖的 adapter snapshot 已不再出现。局部 adapter 采集不得移除其他 adapter 曾经 ACK 的 Task。
@@ -295,7 +297,9 @@ HTTP 上报规则：
 - `GET /api/device-collector/install.sh`：返回无密钥远程安装入口脚本。
 - `GET /api/device-collector/files/:fileName`：只允许下载白名单设备包文件。
 - `POST /api/device-state-snapshots`：Collector 上报 Device / Runtime / Agent metadata snapshot，使用 device token 鉴权；`tasks` 必须为空。
+- `POST /api/runtime-skill-probe-snapshots`：Collector 上报 Runtime 级只读 Skill metadata snapshot，使用 device token 鉴权。
 - `POST /api/device-task-batches`：Collector 上报变化 Task 批次，使用 device token 鉴权；后端返回 ACK 列表供本地 cache 推进。
+- `GET /api/runtimes/:runtimeId/skill-probe`：读取 Runtime 最近一次已存储 Skill metadata snapshot；无数据时返回 `unknown`。
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
 - `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`statusScope`、可重复 `channelKind`、兼容逗号分隔 `channelKinds`、`startAt`、`endAt`、`limit`、`cursor`。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
@@ -399,7 +403,7 @@ Collector 的采集 subprocess 不能阻塞控制通道 heartbeat。即使 `devi
 - 默认采集 allowlist 执行 OpenClaw、Slock 和 Codex adapter；Slock/Codex 缺少本机可读证据时不生成对象；不执行 Multica adapter。
 - Collector 必须跨进程单飞；重叠采集只记录 skip，不重复执行 CLI、不写重复 Task batch。
 - Collector 必须记录采集与上传阶段耗时指标，并支持本地配置 interval 和 CLI timeout。
-- Collector 将本地 snapshot 拆成 metadata snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Task。
+- Collector 将本地 snapshot 拆成 metadata snapshot、Runtime Skill probe snapshot 和 Task batches；后端能分别接收 `POST /api/device-state-snapshots`、`POST /api/runtime-skill-probe-snapshots` 与 `POST /api/device-task-batches`，并写入 Device、Runtime、Agent、Runtime Skill snapshot、Task。
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs 会话任务页消费 `taskType=conversation` 的 Task 查询页、summary 和 channel facets，并按 `Task.status` 分组。
 - Installer harness 必须验证安装目录文件完整性，并验证已安装 CLI 能执行 `collector uninstall`。

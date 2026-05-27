@@ -275,7 +275,7 @@ Operation 集成 API：
 
 业务集成：
 
-- 设备上报的 Agent Skill probe snapshot 失败或不支持事件进入 runtime notification；重复失败按 dedupe/cooldown 聚合。当前不创建后端触发式探测请求通知。
+- 设备上报的 Runtime Skill probe snapshot 失败或不支持事件进入 runtime notification；重复失败按 dedupe/cooldown 聚合。当前不创建后端触发式探测请求通知。
 - 认证后的 Collector `device_state` 上报失败会聚合为 runtime warning 通知，并按 `30min` 邮件冷却投递给组织 owner / admin。
 - Device 离线持续发生时只按阈值升级通知。
 - Approval 待处理会通知审批人，通过或拒绝会通知申请人。

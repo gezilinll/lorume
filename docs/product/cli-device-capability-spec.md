@@ -9,7 +9,7 @@
 - 提供一个本地 `lorume` CLI 入口，用于暴露设备侧确定性能力。
 - 输出稳定 JSON，方便 collector、backend、frontend query model 和 harness 消费。
 - 允许读取本机设备事实。
-- 允许 live-first 采集 Device / Runtime / Agent / Task device-state 和 Agent Skill metadata。
+- 允许 live-first 采集 Device / Runtime / Agent / Task device-state 和 Runtime Skill metadata（含 Agent 归属索引）。
 - 允许从标准 `device_state` snapshot 列出已知 Runtime 和 Agent，用于测试和离线诊断。
 - 允许在显式传入的本地或测试授权 context 中查询 connector / device 在线状态。
 - 允许复制明确传入的本地文件或目录，并拒绝路径穿越和未授权目标路径。
@@ -55,6 +55,7 @@
 - `runtimes`
 - `agents`
 - `tasks`
+- `runtimeSkillProbes`（可选，Runtime 级只读 Skill metadata snapshot）
 - `diagnostics`
 
 当前默认 runtime adapter allowlist 启用 OpenClaw、Slock 和 Codex adapter。Slock 只有在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时才执行，否则不生成对象。Codex 只有在本机 `~/.codex/state_5.sqlite` 可读时才生成对象；没有 Codex state 时安静跳过。被禁用的 adapter 不得执行命令、读取目录或生成对象。可通过本地配置或环境变量显式设置：
@@ -63,7 +64,11 @@
 LORUME_ENABLED_RUNTIME_ADAPTERS=openclaw,slock,codex
 ```
 
-`DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot 和 Task batch。OpenClaw Task 采集必须输出所有符合产品标准的 Task，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，必须带 `adapter.kind`，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
+Runtime adapter 命令发现必须适配 collector / launchd / systemd 这类非登录环境。除当前 `PATH` 外，CLI-owned adapter 可以查找常见用户级工具目录和 fnm 稳定安装目录；最近的 fnm shim 目录只能作为稳定路径失效后的 fallback。历史 shim 目录可能很多，adapter 不得全量 stat 历史目录，也不得把全部候选目录无界拼入子进程环境。查找结果只作为 adapter 内部依赖解析，不得暴露第三方工具路径到产品 API / UI。
+
+如果第三方命令在 pipe stdout 下不能稳定输出完整 JSON，adapter 可以把 stdout 绑定到本地临时文件再读取解析。临时文件只能用于本轮只读采集，必须自动清理，不能改变 `DeviceStateSnapshot` 的产品模型，也不能把第三方原始路径或原始 JSON 作为产品字段上报。
+
+`DeviceStateSnapshot` 是 CLI 本地采集 envelope；collector 上报后端时必须拆成 Device / Runtime / Agent metadata snapshot、Runtime Skill probe snapshot 和 Task batch。OpenClaw Task 采集必须输出所有符合产品标准的 Task，collector 再按大小和数量预算分批上传。Task 只允许通过 `agentId` 关联 Agent，必须带 `adapter.kind`，不直接携带 `runtimeId`，不返回 `title`、`description`、`toolCalls` 或 `lastSeenAt`。Runtime 不返回 `endpoint`、`capabilities` 或 `sourceRefs`；Agent 不返回 `origin`、`sourceRefs` 或 `load`。
 
 Collector 调用该命令时必须使用本地单飞锁保护，避免常驻服务和手动 `--once` 同时执行完整采集。Collector 可以通过配置或环境变量设置 CLI subprocess timeout；timeout 只限制 collector 子进程等待时间，不改变 CLI 输出模型。
 
@@ -77,7 +82,7 @@ Collector 调用该命令时必须使用本地单飞锁保护，避免常驻服�
 
 ### `lorume agent skill-probe --json --agent-id <id>`
 
-返回一个 Agent 的只读 Skill metadata snapshot。该命令只列出 Skill root、entry path、Markdown 文件名和非 Markdown 文件名；不能返回 Skill 文件内容、token、安装建议、编辑建议或迁移计划。
+返回一个 Agent 的只读 Skill metadata snapshot。该命令是前端迁移前的兼容命令；新的 Runtime Skill metadata 由 `collect device-state` 中的 Runtime adapter 产物上报。该命令只列出 Skill root、entry path、Markdown 文件名和非 Markdown 文件名；不能返回 Skill 文件内容、token、安装建议、编辑建议或迁移计划。
 
 ### `lorume runtime list --json --snapshot <path>`
 

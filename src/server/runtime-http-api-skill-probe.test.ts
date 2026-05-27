@@ -15,6 +15,63 @@ afterEach(async () => {
 });
 
 describe("runtime HTTP API agent Skill probing", () => {
+  it("stores and returns runtime-level Skill snapshots", async () => {
+    const { baseUrl } = await startRuntimeApi();
+    const snapshot = createRuntimeProbeSnapshot({ status: "succeeded" });
+
+    const postResponse = await postJson(`${baseUrl}/api/runtime-skill-probe-snapshots`, snapshot);
+    const getResponse = await fetch(`${baseUrl}/api/runtimes/${encodeURIComponent(snapshot.runtimeId)}/skill-probe`);
+
+    expect(postResponse.status).toBe(201);
+    await expect(postResponse.json()).resolves.toMatchObject({
+      ok: true,
+      deviceId: snapshot.deviceId,
+      runtimeId: snapshot.runtimeId,
+      status: "succeeded",
+    });
+    await expect(getResponse.json()).resolves.toMatchObject({
+      deviceId: snapshot.deviceId,
+      runtimeId: snapshot.runtimeId,
+      runtimeKind: "openclaw",
+      status: "succeeded",
+      summary: {
+        total: 2,
+        runtimeScopeCount: 1,
+        agentScopeCount: 1,
+        availableCount: 2,
+        unavailableCount: 0,
+        builtInCount: 1,
+      },
+      skills: [
+        expect.objectContaining({
+          name: "argus-cost-provider-auth-refresh",
+          scope: "agent",
+          agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
+        }),
+        expect.objectContaining({
+          name: "weather",
+          scope: "runtime",
+          agentIds: [],
+        }),
+      ],
+    });
+  });
+
+  it("returns an unknown runtime Skill snapshot when no runtime snapshot has been reported", async () => {
+    const { baseUrl } = await startRuntimeApi();
+
+    const response = await fetch(`${baseUrl}/api/runtimes/${encodeURIComponent("fixture-mac:runtime:openclaw")}/skill-probe`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      deviceId: "fixture-mac",
+      runtimeId: "fixture-mac:runtime:openclaw",
+      runtimeKind: "openclaw",
+      status: "unknown",
+      skills: [],
+    });
+  });
+
   it("stores and returns read-only probe snapshots", async () => {
     const { baseUrl } = await startRuntimeApi();
     const snapshot = createProbeSnapshot({ status: "succeeded" });
@@ -113,6 +170,32 @@ function createProbeSnapshot(overrides: Record<string, unknown> = {}) {
         relativePath: "scripts/probe.sh",
         content: "not exposed",
       }],
+    }],
+    ...overrides,
+  };
+}
+
+function createRuntimeProbeSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    deviceId: "fixture-mac",
+    runtimeId: "fixture-mac:runtime:openclaw",
+    runtimeKind: "openclaw",
+    status: "succeeded",
+    observedAt: "2026-05-27T08:00:00.000Z",
+    skills: [{
+      name: "weather",
+      description: "Weather lookup",
+      scope: "runtime",
+      available: true,
+      builtIn: true,
+      agentIds: ["should-not-survive"],
+    }, {
+      name: "argus-cost-provider-auth-refresh",
+      description: "Refresh cost provider auth",
+      scope: "agent",
+      available: true,
+      builtIn: false,
+      agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
     }],
     ...overrides,
   };

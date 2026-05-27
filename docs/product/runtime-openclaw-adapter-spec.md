@@ -2,7 +2,7 @@
 
 版本：TinySpec v1.2
 
-本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent` 和 `Task`。OpenClaw adapter 当前默认启用；其他 adapter 是否默认启用由各自 spec 和 harness 决定。
+本文定义当前 OpenClaw adapter 如何把平台侧只读证据转换成 Lorume 正式模型中的 `Runtime`、`Agent`、`Task` 和 Runtime Skill metadata snapshot。OpenClaw adapter 当前默认启用；其他 adapter 是否默认启用由各自 spec 和 harness 决定。
 
 ## 模型边界
 
@@ -78,13 +78,14 @@ Adapter 负责生成归一化 `Task.status`，但不得覆盖 OpenClaw 原始状
 
 ## OpenClaw Adapter
 
-OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`agents`、`tasks`；collector 再拆分为 metadata snapshot 和 Task batch 上报。
+OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`agents`、`tasks` 和 `runtimeSkillProbes`；collector 再拆分为 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 上报。
 
 | Lorume 对象 | OpenClaw 来源 | 规则 |
 |---|---|---|
 | Runtime | OpenClaw config、health/status 只读结果 | 生成一个 OpenClaw Runtime，kind 为 `openclaw`。 |
 | Agent | OpenClaw agent 配置或 health/status 中可识别的 agent | 每个真实 agent 生成一个 Lorume Agent。 |
 | Task | OpenClaw session JSONL、trajectory JSONL、DingTalk state | 只生成能明确归属到 Agent 的 `conversation` 或 `scheduled` 任务；无法唯一归属时跳过并写 `warning` diagnostic。 |
+| Runtime Skill snapshot | `openclaw skills list --json` 和 Agent 视角 skills list | 生成 Runtime 级只读 Skill metadata，按 `runtime / agent` scope 归一化，并记录 agent-scope Skill 的 `agentIds`。 |
 
 稳定 ID：
 
@@ -106,6 +107,38 @@ OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`a
 | 定时任务 | cron session JSONL 和 trajectory JSONL | 一次 cron 执行生成一个 `taskType="scheduled"` 的 Task。 |
 | ToolCall | session JSONL 中 assistant `toolCall` 和后续 `toolResult` | 当前不入库、不上报；仅允许 adapter 内部用于失败摘要判断。 |
 | Diagnostics | `openclaw tasks list --json` | 只能保存为结构化 diagnostics，不作为产品 Task 来源。 |
+
+OpenClaw 命令发现必须适配 collector 的非登录服务环境：adapter 先查找当前 `PATH` 和常见 Node / fnm 稳定安装目录，包括 `~/.local/share/fnm/node-versions/*/installation/bin`；只有稳定路径找不到命令时，才 fallback 到最近的 `~/.local/state/fnm_multishells/*/bin`。fnm multishell 历史目录可能无限增长，adapter 不得为了命令发现全量 stat 历史目录，也不得把所有候选目录拼进子进程 `PATH`；执行子进程时只保留命中的 executable 目录和稳定基础路径，避免环境变量过大。找不到 `openclaw` 命令时，adapter 可以继续使用 `~/.openclaw/openclaw.json` 和本地只读文件证据生成 Runtime / Agent / Task，但不得伪造 Runtime Skill snapshot。
+
+### OpenClaw Skill 映射
+
+OpenClaw adapter 在 Runtime 级探测 Skill metadata，不为每个 Agent 单独上传 snapshot。Agent 视角只用于生成 `scope="agent"` Skill 的 `agentIds` 归属索引。
+
+`openclaw skills list --json` 的 stdout 在部分真实设备上通过 pipe 读取时可能截断，但重定向到文件可以得到完整 JSON。Adapter 调用 Skill list 时必须使用文件承载 stdout，再读取并解析临时 JSON 文件；临时文件只用于本轮只读探测，必须在命令结束后清理，不得把路径或原始 JSON 暴露到产品 API / UI。
+
+| OpenClaw source | Lorume scope |
+|---|---|
+| `openclaw-bundled` 或 `bundled=true` | `runtime` |
+| `openclaw-extra` | `runtime` |
+| `openclaw-workspace` | `agent` |
+| `agents-skills-personal` | `agent` |
+| `agents-skills-project` | `agent` |
+
+已知 runtime-scope 示例包括 `clawhub`、`healthcheck` 和 `weather`。已知 agent-scope 示例包括 `argus-cost-provider-auth-refresh` 和 `share-files`。
+
+`available` 使用以下规则：
+
+```ts
+available =
+  raw.eligible === true &&
+  raw.disabled !== true &&
+  raw.blockedByAllowlist !== true &&
+  missingCount(raw.missing) === 0
+```
+
+`missingCount` 必须把 OpenClaw 的依赖缺口对象按叶子值递归计算；例如 `{ bins: [], anyBins: [], env: [], config: [], os: [] }` 表示没有缺口，不能因为对象有 key 就判定不可用。`{ bins: ["op"], ... }` 才表示缺少依赖。
+
+`active=false` 不等于不可用；`modelVisible` 和 `commandVisible` 不参与 Lorume `scope` 或 `available` 判断。Agent 归属以该 Skill 是否出现在对应 `openclaw skills list --json --agent <id>` 结果中为准；真实 OpenClaw 样本中 `blockedByAgentFilter` 在 agent 视角下仍可能保持 `true`，因此它不能作为清空 `agentIds` 的可靠依据。
 
 ### OpenClaw Task Snapshot 窗口
 

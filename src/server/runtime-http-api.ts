@@ -10,6 +10,10 @@ import {
   type AgentSkillProbeSnapshot,
   type AgentSkillProbeStatus,
 } from "../runtime/agent-skill-probe";
+import {
+  type RuntimeSkillProbeStatus,
+  type RuntimeSkillSnapshot,
+} from "../runtime/runtime-skill-probe";
 import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
 import { normalizeRuntimeTaskBatch } from "../runtime/runtime-task-sync";
 import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
@@ -148,6 +152,36 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
+    const runtimeSkillProbeMatch = requestUrl.pathname.match(/^\/api\/runtimes\/([^/]+)\/skill-probe$/);
+    if (request.method === "GET" && runtimeSkillProbeMatch) {
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
+      const runtimeId = decodeURIComponent(runtimeSkillProbeMatch[1] ?? "");
+      const snapshot = await readRuntimeSkillProbeSnapshot(options, runtimeId, organizationId);
+      sendJson(response, 200, snapshot);
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/runtime-skill-probe-snapshots") {
+      const deviceAuth = await authorizeDeviceWrite(options, request, response);
+      if (deviceAuth === null) return;
+      try {
+        const body = await readJsonBody(request);
+        const snapshot = await persistRuntimeSkillProbeSnapshot(options, body);
+        sendJson(response, 201, {
+          ok: true,
+          deviceId: snapshot.deviceId,
+          runtimeId: snapshot.runtimeId,
+          status: snapshot.status,
+        });
+      } catch (error) {
+        sendJson(response, statusCodeForWriteError(error), {
+          error: error instanceof Error ? error.message : "invalid runtime skill probe snapshot",
+        });
+      }
+      return;
+    }
+
     if (request.method === "POST" && requestUrl.pathname === "/api/device-state-snapshots") {
       const deviceAuth = await authorizeDeviceWrite(options, request, response);
       if (deviceAuth === null) return;
@@ -269,6 +303,12 @@ interface AgentSkillProbeSnapshotContext {
   runtimeName?: string;
 }
 
+interface RuntimeSkillProbeSnapshotContext {
+  deviceId: string;
+  runtimeId: string;
+  runtimeKind: string;
+}
+
 async function readAgentSkillProbeSnapshot(
   options: RuntimeHttpApiHandlerOptions,
   agentId: string,
@@ -288,6 +328,38 @@ async function readAgentSkillProbeSnapshot(
       runtimeId: "unknown",
       status: "unknown",
       observedAt: null,
+      skills: [],
+    };
+  }
+}
+
+async function readRuntimeSkillProbeSnapshot(
+  options: RuntimeHttpApiHandlerOptions,
+  runtimeId: string,
+  organizationId?: string,
+): Promise<RuntimeSkillSnapshot> {
+  const postgresSnapshot = await options.postgresStore?.readRuntimeSkillProbeSnapshot(runtimeId, { organizationId }).catch(() => null);
+  const storeSnapshot = options.store.readRuntimeSkillProbeSnapshot(runtimeId);
+  if (postgresSnapshot) return postgresSnapshot;
+  if (storeSnapshot && (!organizationId || !options.postgresStore)) return storeSnapshot;
+  try {
+    const context = await resolveRuntimeSkillProbeSnapshotContext(options, runtimeId, organizationId);
+    return createRuntimeSkillProbeSnapshot(context, "unknown");
+  } catch {
+    return {
+      deviceId: "unknown",
+      runtimeId,
+      runtimeKind: "unknown",
+      status: "unknown",
+      observedAt: null,
+      summary: {
+        total: 0,
+        runtimeScopeCount: 0,
+        agentScopeCount: 0,
+        availableCount: 0,
+        unavailableCount: 0,
+        builtInCount: 0,
+      },
       skills: [],
     };
   }
@@ -315,9 +387,26 @@ async function resolveAgentSkillProbeSnapshotContext(
   };
 }
 
+async function resolveRuntimeSkillProbeSnapshotContext(
+  options: RuntimeHttpApiHandlerOptions,
+  runtimeId: string,
+  organizationId?: string,
+): Promise<RuntimeSkillProbeSnapshotContext> {
+  const fleet = await readRuntimeFleetForProbe(options, organizationId);
+  const runtime = fleet.runtimes.find((candidate) => candidate.id === runtimeId);
+  const device = fleet.devices.find((candidate) => candidate.id === runtime?.deviceId);
+  if (!runtime) throw new Error("runtime is required for skill probe");
+  if (!device) throw new Error("device is required for skill probe");
+  return {
+    deviceId: device.id,
+    runtimeId,
+    runtimeKind: runtime.kind,
+  };
+}
+
 async function readRuntimeFleetForProbe(options: RuntimeHttpApiHandlerOptions, organizationId?: string): Promise<{
   devices: Array<{ id: string }>;
-  runtimes: Array<{ id: string; deviceId: string; name?: string }>;
+  runtimes: Array<{ id: string; deviceId: string; kind: string; name?: string }>;
   agents: Array<{ id: string; name?: string; runtimeId: string }>;
 }> {
   const postgresFleet = await options.postgresStore?.readRuntimeFleet({ organizationId }).catch(() => null);
@@ -347,12 +436,43 @@ function createAgentSkillProbeSnapshot(
   };
 }
 
+function createRuntimeSkillProbeSnapshot(
+  context: RuntimeSkillProbeSnapshotContext,
+  status: RuntimeSkillProbeStatus,
+): RuntimeSkillSnapshot {
+  return {
+    deviceId: context.deviceId,
+    runtimeId: context.runtimeId,
+    runtimeKind: context.runtimeKind,
+    status,
+    observedAt: status === "unknown" ? null : new Date().toISOString(),
+    summary: {
+      total: 0,
+      runtimeScopeCount: 0,
+      agentScopeCount: 0,
+      availableCount: 0,
+      unavailableCount: 0,
+      builtInCount: 0,
+    },
+    skills: [],
+  };
+}
+
 async function persistAgentSkillProbeSnapshot(
   options: RuntimeHttpApiHandlerOptions,
   value: unknown,
 ): Promise<AgentSkillProbeSnapshot> {
   const snapshot = options.store.writeAgentSkillProbeSnapshot(value);
   await options.postgresStore?.upsertAgentSkillProbeSnapshot(snapshot).catch(() => undefined);
+  return snapshot;
+}
+
+async function persistRuntimeSkillProbeSnapshot(
+  options: RuntimeHttpApiHandlerOptions,
+  value: unknown,
+): Promise<RuntimeSkillSnapshot> {
+  const snapshot = options.store.writeRuntimeSkillProbeSnapshot(value);
+  await options.postgresStore?.upsertRuntimeSkillProbeSnapshot(snapshot).catch(() => undefined);
   return snapshot;
 }
 

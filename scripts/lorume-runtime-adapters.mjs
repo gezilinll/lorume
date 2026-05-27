@@ -1219,6 +1219,13 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
       collectedAt,
     });
   }
+  const skillProfiles = collectSlockSkillProfiles({
+    collectedAt,
+    deviceId: device.id,
+    localProfiles,
+    runtimesById,
+    agentsById,
+  });
 
   const discoveredTargets = new Map();
   for (const localProfile of localProfiles) {
@@ -1254,7 +1261,7 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   const runtimeSkillProbes = collectSlockRuntimeSkillProbes({
     collectedAt,
     deviceId: device.id,
-    localProfiles,
+    skillProfiles,
   });
 
   return {
@@ -1266,9 +1273,34 @@ function collectSlockDeviceState(device, collectedAt, config = {}) {
   };
 }
 
-function collectSlockRuntimeSkillProbes({ collectedAt, deviceId, localProfiles }) {
+function collectSlockSkillProfiles({ collectedAt, deviceId, localProfiles, runtimesById, agentsById }) {
+  const profiles = [...localProfiles];
+  const knownProfileIds = new Set(localProfiles.map((profile) => sanitizeId(profile.profileId)));
+  for (const profileId of readSlockWorkspaceAgentDirectoryIds()) {
+    if (knownProfileIds.has(sanitizeId(profileId))) continue;
+    const agentRoot = path.join(slockRoot(), "agents", sanitizeId(profileId));
+    if (!slockAgentRootHasSkillFiles(agentRoot)) continue;
+    const runtime = ensureSlockRuntime(runtimesById, {
+      deviceId,
+      kind: "codex",
+      collectedAt,
+    });
+    profiles.push({
+      profileId,
+      runtimeKind: "codex",
+      productAgent: ensureSlockSkillWorkspaceAgent(agentsById, {
+        runtimeId: runtime.id,
+        profileId,
+        collectedAt,
+      }),
+    });
+  }
+  return profiles;
+}
+
+function collectSlockRuntimeSkillProbes({ collectedAt, deviceId, skillProfiles }) {
   const probesByRuntimeId = new Map();
-  for (const localProfile of localProfiles) {
+  for (const localProfile of skillProfiles) {
     const productAgent = localProfile.productAgent;
     if (!productAgent) continue;
     const agentIds = [productAgent.id];
@@ -1313,6 +1345,24 @@ function collectSlockRuntimeSkillProbes({ collectedAt, deviceId, localProfiles }
     .filter(Boolean);
 }
 
+function readSlockWorkspaceAgentDirectoryIds() {
+  const agentsRoot = path.join(slockRoot(), "agents");
+  try {
+    return readdirSync(agentsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter(Boolean)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function slockAgentRootHasSkillFiles(agentRoot) {
+  if (listSkillDirectories(path.join(agentRoot, ".agents", "skills")).length > 0) return true;
+  return walkSkillFiles(path.join(agentRoot, "repos"), { maxDepth: 14 }).some(isSlockRepoAgentSkillFile);
+}
+
 function ensureSlockRuntimeSkillProbeAccumulator(probesByRuntimeId, { collectedAt, deviceId, productAgent, runtimeKind }) {
   const runtimeId = productAgent.runtimeId;
   if (!probesByRuntimeId.has(runtimeId)) {
@@ -1325,6 +1375,38 @@ function ensureSlockRuntimeSkillProbeAccumulator(probesByRuntimeId, { collectedA
     });
   }
   return probesByRuntimeId.get(runtimeId);
+}
+
+function ensureSlockSkillWorkspaceAgent(agentsById, { runtimeId, profileId, collectedAt }) {
+  const agent = {
+    ...createProductAgent({
+      runtimeId,
+      externalId: profileId,
+      name: slockSkillWorkspaceDisplayName(profileId),
+      collectionStatus: "offline",
+      lastSeenAt: undefined,
+      diagnostics: {
+        paths: slockAgentRootPaths(profileId),
+      },
+    }),
+    id: `${runtimeId}:agent:slock:${sanitizeId(profileId)}`,
+  };
+  if (!agentsById.has(agent.id)) agentsById.set(agent.id, agent);
+  return agentsById.get(agent.id);
+}
+
+function slockSkillWorkspaceDisplayName(profileId) {
+  const memoryPath = path.join(slockRoot(), "agents", sanitizeId(profileId), "MEMORY.md");
+  try {
+    for (const line of readFileSync(memoryPath, "utf8").split(/\r?\n/).slice(0, 20)) {
+      const match = /^#\s+(.+)$/.exec(line.trim());
+      const name = cleanText(match?.[1]);
+      if (name) return name.slice(0, 80);
+    }
+  } catch {
+    // Fall back to the stable local profile id.
+  }
+  return cleanText(profileId) || "Slock Agent";
 }
 
 function isSlockRepoAgentSkillFile(skillFile) {

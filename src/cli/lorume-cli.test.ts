@@ -533,6 +533,70 @@ process.stdout.write("{}");
     }
   });
 
+  it("collects Skill-only Slock workspaces under Codex when daemon discovery is narrowed to another active agent", async () => {
+    const server = await startSlockFixtureServer();
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-skill-workspace-"));
+    writeCodexFixtureHome(root);
+    mkdirSync(path.join(root, ".slock", "agents", "agent-local-1"), { recursive: true });
+    mkdirSync(path.join(root, ".slock", "agents", "agent-skill-only-1"), { recursive: true });
+    writeFileSync(path.join(root, ".slock", "agents", "agent-skill-only-1", "MEMORY.md"), "# PMO\n\nLocal skill workspace.");
+    writeSkill(path.join(root, ".slock", "agents", "agent-skill-only-1", ".agents", "skills", "share-files"), "Share files.");
+    writeSkill(
+      path.join(root, ".slock", "agents", "agent-skill-only-1", "repos", "project-a", ".agents", "skills", "commit"),
+      "Commit code.",
+    );
+
+    try {
+      const output = await runCliAsync([
+        "collect",
+        "device-state",
+        "--json",
+        "--device-id",
+        "fixture-device",
+      ], {
+        env: {
+          LORUME_COLLECTOR_HOME: root,
+          LORUME_ENABLED_RUNTIME_ADAPTERS: "slock,codex",
+          LORUME_SLOCK_SERVER_URL: server.baseUrl,
+          LORUME_SLOCK_AUTH_TOKEN: "fixture-token",
+          LORUME_SLOCK_AGENT_IDS: "agent-local-1",
+          LORUME_SLOCK_COMPUTER_HOSTNAME: "fixture-device.local",
+          LORUME_SLOCK_MAX_REPLY_THREAD_READS_PER_RUN: "0",
+        },
+      });
+
+      expect(output.agents).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: "fixture-device:runtime:codex:agent:slock:agent-skill-only-1",
+          name: "PMO",
+          runtimeId: "fixture-device:runtime:codex",
+          collectionStatus: "offline",
+        }),
+      ]));
+      expect(output.runtimeSkillProbes).toHaveLength(1);
+      expect(output.runtimeSkillProbes[0].summary).toEqual(expect.objectContaining({
+        total: 2,
+        runtimeScopeCount: 0,
+        agentScopeCount: 2,
+        availableCount: 2,
+      }));
+      expect(output.runtimeSkillProbes[0].skills).toEqual([
+        expect.objectContaining({
+          name: "commit",
+          scope: "agent",
+          agentIds: ["fixture-device:runtime:codex:agent:slock:agent-skill-only-1"],
+        }),
+        expect.objectContaining({
+          name: "share-files",
+          scope: "agent",
+          agentIds: ["fixture-device:runtime:codex:agent:slock:agent-skill-only-1"],
+        }),
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("discovers Slock daemon credentials by default and collects local Slock tasks", async () => {
     const server = await startSlockFixtureServer();
     const root = mkdtempSync(path.join(tmpdir(), "lorume-slock-daemon-discovery-"));

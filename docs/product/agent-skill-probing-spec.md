@@ -112,7 +112,7 @@ Codex global Skill sources map to runtime-scope rows:
 
 Codex probing must not treat `.codex/.tmp`, `.codex/sessions`, `.codex/log`, `.codex/vendor_imports`, marketplace clones, or other temporary candidate directories as current runtime Skills.
 
-Slock Agent Skill sources map to agent-scope rows when the Slock profile is active, local to the current Device, and its `runtime` is an implemented Lorume Runtime kind:
+Slock Agent Skill sources map to agent-scope rows when the owning Agent is either an active local Slock profile with an implemented `runtime`, or a local Slock workspace that contains Skill files but is not the currently active daemon profile. Skill-only local workspaces are attached to the Codex Runtime with an offline Slock Agent row so `agentIds` remains filterable; this fallback is for Skill inventory only and must not expand Slock Task collection.
 
 | Slock source | Lorume scope | `builtIn` |
 |---|---|---:|

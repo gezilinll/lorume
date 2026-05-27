@@ -188,7 +188,7 @@ Slock Agent 工作区 Skill 归入 `scope="agent"`，并写入对应 Lorume Agen
 | `~/.slock/agents/<agentId>/repos/**/.agents/skills/<name>/SKILL.md` | `agent` | false | 当前 Slock Agent |
 | `~/.slock/agents/<agentId>/repos/**/.cursor/skills/<name>/SKILL.md` | `agent` | false | 当前 Slock Agent |
 
-Slock Agent 必须同时满足：
+Slock Task 采集仍只使用同时满足以下条件的 profile：
 
 - profile 可读。
 - profile `status` / `state` 为 `active`。
@@ -196,7 +196,7 @@ Slock Agent 必须同时满足：
 - profile 主机信息为空或匹配当前 Device hostname / id。
 - 本地存在对应 `~/.slock/agents/<agentId>` 工作区。
 
-Inactive profile 的 Skill 不进入当前 `available=true` 的 agent-scope snapshot。后续若需要展示 inactive Agent 历史能力，应作为单独产品需求定义，不混入当前可用能力。
+Slock Skill inventory 还会额外扫描本地存在 Skill 文件的 Slock workspace。若该 workspace 不是当前 daemon active profile，但本地有 `.agents/skills`、repo `.agents/skills` 或 repo `.cursor/skills`，collector 会在 Codex Runtime 下创建一个 `collectionStatus="offline"` 的 Slock Agent 归属行，并将这些 Skill 写入该 Agent 的 `agentIds`。这个 fallback 只用于 Skill inventory，不扩大 Task 采集范围。
 
 ## Agent Ownership
 
@@ -208,8 +208,8 @@ ${runtimeId}:agent:slock:${sanitizeId(profile.id)}
 
 对每条 Slock agent-scope Skill：
 
-- 找到 `agentId` 所属 Slock profile。
-- 通过 profile runtime 生成或复用 Codex Runtime id。
+- 优先找到 `agentId` 所属 Slock profile。
+- 通过 profile runtime 生成或复用 Codex Runtime id；Skill-only 本地 workspace fallback 使用 Codex Runtime。
 - 通过 Runtime id + Slock profile id 生成 Lorume Agent id。
 - 将该 Lorume Agent id 写入 `SkillDisplayRow.agentIds`。
 

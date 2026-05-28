@@ -4,7 +4,7 @@ Runtime Skill probing is Lorume's read-only view of Skill metadata already disco
 
 ## Boundaries
 
-- Lorume may store device-reported Runtime Skill probe snapshots and display the latest read-only status through Runtime Fleet.
+- Lorume may store device-reported Runtime Skill probe snapshots and display the latest read-only status through Runtime Fleet and the read-only Skill 仓库 page.
 - Skill probing runs on the device side through the Runtime adapter during collection. The backend stores reported metadata; it does not ask a connected device to execute a probe.
 - Device is not a Skill scope. Device-level probing capability belongs in adapter diagnostics and is not exposed as a user-facing Device Skill list.
 - Runtime remains the source of truth for local Skill metadata and Agent-specific visibility.
@@ -22,6 +22,24 @@ Lorume exposes only two Skill scopes:
 | `agent` | Capability visible to, enabled for, or owned by one or more Agents in the Runtime. |
 
 Runtime adapters may keep platform-specific raw fields in diagnostics or raw storage, but product APIs must not expose OpenClaw `personal / workspace / bundled / modelVisible / commandVisible / active` as top-level product fields.
+
+## Skill 仓库
+
+`/skills` is a read-only inventory page over already-collected Runtime Skill snapshots. It is not centralized Skill management and must not introduce create/edit/import/install/publish/sync/assignment/migration controls.
+
+The page aggregates:
+
+- `GET /api/runtime-fleet` for current Device / Runtime / Agent ownership.
+- `GET /api/runtimes/:runtimeId/skill-probe` for each visible Runtime's latest stored Skill snapshot.
+
+Display rules:
+
+- The directory table splits `Scope` (`Runtime` / `Agent`) from source (`系统自带` / `自定义`).
+- `scope="runtime"` rows keep `agentIds: []` in stored metadata. For UI display, the page derives `availableAgentIds` from active, non-`invisible` Agents under the same Runtime when the Skill is `available=true`.
+- `scope="agent"` rows use stored `agentIds` as ownership/visibility. Agent deep links show both runtime-scope Skills available to that Agent and agent-scope Skills whose `agentIds` include that Agent.
+- Runtime Fleet deep links into `/skills?runtimeId=...` or `/skills?runtimeId=...&agentId=...`; the Skill 仓库 filter menu starts with those filters selected.
+- The detail inspector keeps raw source paths, command names, hidden adapter fields, and Skill file contents out of the UI. It shows basic metadata, derived available Agents, and same-name Skill occurrences.
+- Empty or failed Runtime snapshots produce empty/error UI states; the frontend must not invent Skill rows.
 
 ## Runtime Snapshot
 
@@ -136,6 +154,6 @@ Agent-level compatibility APIs must not trigger a new Agent-specific probe. Afte
 
 ## Runtime Fleet Display
 
-Runtime Fleet may expose the latest stored Skill probe status near Runtime or Agent rows/inspectors. It must not add a primary navigation item, `/skills` route, organization Skill store, import button, editor, assignment control, migration action, or backend-triggered probe button.
+Runtime Fleet exposes compact Runtime and Agent row actions that deep-link into the read-only Skill 仓库 with the appropriate filters. These actions do not trigger a new probe and must not show import, edit, assignment, migration, or backend-triggered probe controls.
 
-Runtime-level display can show the summary and full normalized row list. Agent-level display should show only `scope="agent"` rows whose `agentIds` contain that Agent id, plus relevant runtime-scope context if the product explicitly chooses to show it later.
+Runtime-level Skill display is the filtered Skill 仓库 inventory for that Runtime. Agent-level display is the same inventory additionally filtered by Agent, so it includes runtime-scope common Skills the Agent can use and agent-scope rows whose `agentIds` contain that Agent id.

@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Bell, Bot, ClipboardList, KeyRound, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, Bell, Bot, ClipboardList, KeyRound, Layers3, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
 
 import { LorumeLogo } from "@/components/brand/LorumeLogo";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,12 @@ const capabilityCards = [
     title: "Runs",
   },
   {
+    description: "聚合 Runtime 与 Agent 上报的 Skill 元数据，按 Scope、来源、状态和归属筛选。",
+    href: "/skills",
+    icon: Layers3,
+    title: "Skill 仓库",
+  },
+  {
     description: "管理当前组织上下文、成员邀请、设备 token 和 collector 安装入口。",
     href: "/settings",
     icon: Settings2,
@@ -28,7 +34,7 @@ const capabilityCards = [
 
 const operatingSignals = [
   { icon: RadioTower, label: "Device collector", value: "采集 Device / Runtime / Agent / Task" },
-  { icon: Bot, label: "Agent Skill probing", value: "只读探测目标本地 Skill 元数据" },
+  { icon: Bot, label: "Skill warehouse", value: "只读汇总 Runtime 与 Agent Skill 元数据" },
   { icon: ClipboardList, label: "Operations", value: "异步任务状态和 Job 明细" },
   { icon: Bell, label: "Notifications", value: "采集、同步和恢复提醒线程" },
 ] as const;
@@ -46,6 +52,9 @@ export function HomePage() {
           </Button>
           <Button variant="ghost" size="sm" asChild>
             <a href="/runs">Runs</a>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
+            <a href="/skills">Skill 仓库</a>
           </Button>
           <Button variant="ghost" size="sm" asChild>
             <a href="/settings">组织设置</a>
@@ -120,7 +129,7 @@ export function HomePage() {
       </section>
 
       <section aria-label="当前已实现能力" className="border-t bg-muted/30">
-        <div className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-12 sm:px-6 md:grid-cols-3 lg:px-8">
+        <div className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-4 lg:px-8">
           {capabilityCards.map((capability) => {
             const Icon = capability.icon;
             return (

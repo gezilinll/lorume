@@ -4,7 +4,7 @@ Page specs define the visual, content, and interaction boundaries for current su
 
 ## Home
 
-Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, Organization Settings, and utility drawer capabilities.
+Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, Skill 仓库, Organization Settings, and utility drawer capabilities.
 
 Rules:
 
@@ -71,7 +71,7 @@ Rules:
 - The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
 - The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
-- Agent Skill probing appears as a compact row-level action with read-only metadata; it does not become a standalone page, editor, import flow, or migration wizard.
+- Runtime and Agent Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
 - Copying an object ID uses toast feedback; the detail panel should not grow a temporary copied row.
 - Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
@@ -95,6 +95,21 @@ Rules:
 - Long text wraps or clamps without body-level horizontal scroll.
 - Raw IDs, `cid...`, phone numbers, and opaque conversation IDs are not used as conversation names.
 - Wide screens use the board as the main surface; there is no persistent selected inspector on the right.
+
+## Skill 仓库
+
+Purpose: Aggregate already-collected Runtime and Agent Skill metadata into a read-only inventory with filters and an inspector.
+
+Rules:
+
+- The page uses the `data-dense` Console layout tier, the shared top workbar, a compact search/filter surface, a directory table, and a sticky detail inspector.
+- It does not render a hero, repeated summary metric cards, or a page-owned title block. Counts live in the top workbar.
+- The list follows the Runtime Fleet Agent directory rhythm: avatar, left accent stripe, primary Skill name, short description, Runtime ownership, `Scope`, source, status, Agent count/avatars, and latest collection time.
+- `Scope` and source are separate columns. `Runtime`/`Agent` explains capability layer; `系统自带`/`自定义` explains provenance.
+- Runtime-scope Skill rows derive their available Agent list from active Agents under the same Runtime. Agent-scope rows use stored Agent ownership. Agent deep links show Runtime common Skills usable by that Agent plus that Agent's own Skills.
+- The filter menu follows the Runs compact menu treatment: a single filter button, submenu groups, selected counts, and a reset-all action when any non-search filter is active. Search is a separate first-level input.
+- The detail inspector shows basic metadata, derived available Agents, and same-name rows. It must not show raw file paths, command names, hidden adapter fields, or Skill file contents.
+- The page is read-only. No create, import, edit, publish, install, assign, migrate, sync, execute, or backend-triggered probe controls are allowed.
 
 ## Operations Utility Drawer
 

@@ -282,7 +282,7 @@ Acceptance:
 
 - Desktop sidebar is fixed and visually matches the 220px Taskflow target.
 - Topbar is about 56px high with search on the left and utility buttons on the right.
-- Navigation exposes only Runtime Fleet, Runs, and 组织设置.
+- Navigation exposes only currently implemented pages. At the time of this landing phase that was Runtime Fleet, Runs, and 组织设置; current Console navigation is defined by `docs/product/ui-design.md` and now also includes the read-only Skill 仓库.
 - Operations and Notifications remain utility drawer entry points.
 - Mobile sidebar still opens and closes correctly.
 
@@ -345,7 +345,7 @@ Acceptance:
 - All `最近活跃` values come from Task activity aggregates.
 - `暂无活跃` appears when no Task activity exists.
 - Sync and health evidence remains available in details, but list activity does not equal sync.
-- Agent Skill probe remains a read-only row-level action.
+- Runtime / Agent Skill row actions remain read-only and deep-link to Skill 仓库 with matching filters.
 - Detail inspector remains sticky on desktop and usable on mobile.
 
 Focused checks:
@@ -407,7 +407,7 @@ Acceptance:
 | `src/components/ui/shadcn-smoke.test.tsx` | Primitive rendering after token/style updates |
 | `src/runtime/RuntimeTaskCard.test.tsx` | Taskflow card hierarchy and no raw IDs |
 | `src/runtime/RuntimeTaskDetailDialog.test.tsx` | Same limited Task fields after restyle |
-| `src/runtime/RuntimeFleetPage.skill-probe.test.tsx` | Skill probe action survives directory redesign |
+| `src/runtime/RuntimeFleetPage.skill-probe.test.tsx` | Runtime / Agent Skill actions deep-link to Skill 仓库 |
 | `src/console/ConsoleUtilityDrawer.test.tsx` | Drawer content still works after style polish |
 | `src/settings/OrganizationSettingsPage.test.tsx` | Permission and token behavior unchanged |
 | `e2e/runtime-work-board.spec.ts` | Five visible lanes, cancelled lane hidden, Taskflow board layout, filters, detail dialog, responsive overflow |

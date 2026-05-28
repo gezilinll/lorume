@@ -17,11 +17,11 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 
 - 展示设备的 device id、hostname、OS、架构、Task 派生的最近活跃、本地 / 出口 IP 和 collector 元信息。
 - 展示设备上的 Runtime；Runtime kind 候选项来自后端真实返回的数据。
-- 展示 Runtime 下的 Agent、归属 Runtime、采集状态、Task 派生的最近活跃和派生 Task 数量。
+- 展示 Runtime 下的 Agent、归属 Runtime、采集状态、Task 派生的最近活跃、派生 Task 数量和只读 Skill 仓库入口。
 - Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面顶部工作栏展示全局数量，页面主体展示全量 Device、Runtime 和 Agent。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
 - 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
-- Agent 行级 Skill 探测仍是只读能力；它展示已存储 metadata，不请求设备执行远端探测。
+- Runtime / Agent 行级 Skill 入口仍是只读能力；点击后跳转到 Skill 仓库并带上 Runtime / Agent 筛选，不请求设备执行远端探测。
 - 页面自动轮询后端已有数据，不下发远端采集命令。
 
 ## 非目标
@@ -40,8 +40,8 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - `GET /api/runtime-fleet`：正式 Runtime Fleet 查询 API，返回 Device、Runtime、Agent 和派生 Task 计数摘要，不返回 Task 明细数组。
 - `GET /api/runtime-tasks`：正式 Runs 会话任务查询 API，返回 Task 查询页、summary 和 channel facets。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，用于解释 `collectionStatus`，不渲染成独立健康区块，只返回 `device_state` 检查项。
-- `GET /api/runtimes/:runtimeId/skill-probe`：读取目标 Runtime 最近一次已存储的只读 Skill metadata。Agent 视角后续从 Runtime snapshot 的 `agentIds` 过滤得到。
-- `GET /api/agents/:agentId/skill-probe`：前端迁移前的兼容读取接口，只读取已存储 metadata，不触发 Agent 级探测。
+- `GET /api/runtimes/:runtimeId/skill-probe`：读取目标 Runtime 最近一次已存储的只读 Skill metadata。Skill 仓库通过 Runtime Fleet 结果和 Runtime snapshot 聚合目录。
+- `GET /api/agents/:agentId/skill-probe`：兼容读取接口，只读取已存储 metadata，不触发 Agent 级探测；当前 Runtime Fleet UI 不再直接消费该接口。
 
 没有后端数据或本地 backend 不可用时，页面只在非 production 模式允许使用明确标识的 fixture 做离线预览。Production 构建必须展示明确错误和空状态，不回退 fixture。
 
@@ -110,7 +110,7 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-v
 
 ### Runtime
 
-- 列表使用 `users.html` 的成员目录节奏展示 Runtime 名称、版本、所属设备、collection status、最近活跃和 Task 计数。Runtime kind 不作为独立表格列或重复 badge 展示；需要识别 kind 时优先在详情或后端诊断语境中呈现。
+- 列表使用 `users.html` 的成员目录节奏展示 Runtime 名称、版本、所属设备、collection status、最近活跃、Task 计数和只读 Skill 入口。Runtime kind 不作为独立表格列或重复 badge 展示；需要识别 kind 时优先在详情或后端诊断语境中呈现。
 - 详情展示基础信息、归属关系、diagnostics paths 和 lastError。
 - 本地路径只展示 Runtime 根目录；adapter 内部文件、状态库、sessions 子目录等不作为默认详情字段展示。
 - 不展示 `endpoint`、`capabilities`、`sourceRefs`。
@@ -119,7 +119,7 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-v
 
 - 列表使用 `users.html` 的成员目录节奏展示 Agent 名称、归属 Runtime、collection status、最近活跃、Task 计数和只读 Skill 入口。
 - Agent 来源通过 `agent.runtimeId -> runtime.kind` 派生，不显示 `origin` 字段。
-- 详情展示基础信息、归属关系、diagnostics paths、Task 计数和 Skill metadata 状态。
+- 详情展示基础信息、归属关系、diagnostics paths 和 Task 计数；Skill metadata 通过行级入口进入 Skill 仓库查看。
 - 本地路径只在 adapter 能证明存在本机目录时展示；没有本机目录时显示 `不适用`，不能留空造成漏采集错觉。
 - 不展示 `sourceRefs` 或 `load`。
 
@@ -157,7 +157,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
 - Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。`不可见` badge hover/focus 时展示解释：`该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。`
-- `不可见` Agent 的行级 Skill 探测入口禁用，避免对最新清单中已缺失的 Agent 发起只读探测。
+- Runtime 行级 Skill 入口跳转到 `/skills?runtimeId=...`；Agent 行级 Skill 入口跳转到 `/skills?runtimeId=...&agentId=...`。
+- `不可见` Agent 的行级 Skill 仓库入口禁用，避免把最新清单中已缺失的 Agent 作为当前可用 Agent 过滤目标。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。
 - Agent 任务数量由 `Task.agentId` 聚合。
 - Runtime 任务数量通过 `Task.agentId -> Agent.runtimeId` 聚合。

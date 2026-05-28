@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Bell, Check, ChevronDown, ListChecks, LogOut, Play, Plus, RefreshCw, Server, Settings } from "lucide-react";
+import { Bell, Check, ChevronDown, Layers3, ListChecks, LogOut, Play, Plus, RefreshCw, Server, Settings } from "lucide-react";
 import type { AuthOrganizationMembership } from "@/auth/auth-store";
 import { InitialAvatar, initialFromText } from "@/components/data/InitialAvatar";
 import { ConsoleWorkbarContext, type ConsoleWorkbarState } from "@/components/layout/ConsoleWorkbar";
@@ -32,25 +32,28 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type ConsolePageKey = "runtime" | "runs" | "settings";
+export type ConsolePageKey = "runtime" | "runs" | "skills" | "settings";
 export type ConsoleUtilityKey = "notifications" | "operations";
 type ConsoleLayoutTier = "workspace" | "data-dense" | "standard";
 
 const navItems = [
   { icon: Server, label: "Runtime Fleet", page: "runtime" },
   { icon: Play, label: "Runs", page: "runs" },
+  { icon: Layers3, label: "Skill 仓库", page: "skills" },
   { icon: Settings, label: "组织设置", page: "settings" },
 ] as const;
 
 const pageTitles: Record<ConsolePageKey, string> = {
   runtime: "运行资产",
   runs: "Runs",
+  skills: "Skill 仓库",
   settings: "组织设置",
 };
 
 const layoutTierByPage: Record<ConsolePageKey, ConsoleLayoutTier> = {
   runtime: "data-dense",
   runs: "workspace",
+  skills: "data-dense",
   settings: "standard",
 };
 

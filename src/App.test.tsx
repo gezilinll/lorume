@@ -10,6 +10,7 @@ const originalFetch = globalThis.fetch;
 const originalPath = window.location.pathname;
 const fleetSnapshot = fleetFixture as RuntimeFleetSnapshot;
 const defaultAgentId = fleetSnapshot.agents[0].id;
+const defaultRuntimeId = fleetSnapshot.runtimes[0].id;
 const rawDingTalkCid = "cid-private-raw-123";
 
 afterEach(() => {
@@ -166,6 +167,67 @@ function installRuntimeFleetFetch(snapshot = fleetSnapshot) {
   }) as unknown as typeof fetch;
 }
 
+function installSkillWarehouseFetch(snapshot = fleetSnapshot) {
+  globalThis.fetch = vi.fn(async (input) => {
+    const url = requestUrl(input);
+    if (url.includes("/api/runtime-fleet")) return jsonResponse(runtimeFleetQueryResponse(snapshot));
+    if (url.includes(`/api/runtimes/${encodeURIComponent(snapshot.runtimes[0].id)}/skill-probe`)) {
+      return jsonResponse(runtimeSkillProbeResponse(snapshot));
+    }
+    if (url.includes(`/api/devices/${snapshot.devices[0].id}/collection-health`)) {
+      return jsonResponse(collectionHealthResponse(snapshot));
+    }
+    if (url.includes(`/api/devices/${snapshot.devices[0].id}/diagnostics`)) {
+      return jsonResponse(deviceDiagnosticsResponse(snapshot));
+    }
+    return jsonResponse({ error: "unexpected request" }, 500);
+  }) as unknown as typeof fetch;
+}
+
+function runtimeSkillProbeResponse(snapshot = fleetSnapshot) {
+  return {
+    deviceId: snapshot.devices[0].id,
+    observedAt: "2026-05-21T10:05:00.000Z",
+    runtimeId: snapshot.runtimes[0].id,
+    runtimeKind: snapshot.runtimes[0].kind,
+    status: "succeeded",
+    summary: {
+      agentScopeCount: 2,
+      availableCount: 2,
+      builtInCount: 1,
+      runtimeScopeCount: 1,
+      total: 3,
+      unavailableCount: 1,
+    },
+    skills: [
+      {
+        agentIds: [],
+        available: true,
+        builtIn: true,
+        description: "Runtime common browser automation.",
+        name: "browser",
+        scope: "runtime",
+      },
+      {
+        agentIds: [snapshot.agents[0].id],
+        available: true,
+        builtIn: false,
+        description: "Review pull requests.",
+        name: "code-review",
+        scope: "agent",
+      },
+      {
+        agentIds: [`${snapshot.runtimes[0].id}:agent:other`],
+        available: false,
+        builtIn: false,
+        description: "Other Agent only.",
+        name: "other-agent-skill",
+        scope: "agent",
+      },
+    ],
+  };
+}
+
 describe("Console shell", () => {
   it("renders a public home entry at the root without probing auth", () => {
     const fetchSpy = vi.fn();
@@ -180,6 +242,7 @@ describe("Console shell", () => {
     expect(capabilities).toBeInTheDocument();
     expect(within(capabilities).getByText("Runtime Fleet")).toBeInTheDocument();
     expect(within(capabilities).getByText("Runs")).toBeInTheDocument();
+    expect(within(capabilities).getByText("Skill 仓库")).toBeInTheDocument();
     expect(within(capabilities).getByText("组织设置")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Agent Studio/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -194,9 +257,11 @@ describe("Console shell", () => {
     expect(within(homeNav).getByRole("link", { name: "登录" })).toHaveAttribute("href", "/login");
     expect(within(homeNav).getByRole("link", { name: "Runtime Fleet" })).toHaveAttribute("href", "/runtime");
     expect(within(homeNav).getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/runs");
+    expect(within(homeNav).getByRole("link", { name: "Skill 仓库" })).toHaveAttribute("href", "/skills");
     expect(within(homeNav).getByRole("link", { name: "组织设置" })).toHaveAttribute("href", "/settings");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runtime Fleet" })).toHaveAttribute("href", "/runtime");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runs" })).toHaveAttribute("href", "/runs");
+    expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Skill 仓库" })).toHaveAttribute("href", "/skills");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 组织设置" })).toHaveAttribute("href", "/settings");
     expect(screen.getByText("Operations 与 Notifications 串联异步状态和提醒线程。")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "对象目录" })).not.toBeInTheDocument();
@@ -225,6 +290,7 @@ describe("Console shell", () => {
     }
     expect(within(nav).getByRole("button", { name: "Runtime Fleet" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Runs" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Skill 仓库" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "组织设置" })).toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "任务中心" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
@@ -287,6 +353,42 @@ describe("Console shell", () => {
     expect(window.location.pathname).toBe("/settings");
     expect(screen.getByRole("heading", { name: "组织设置" })).toBeInTheDocument();
     expect(screen.getAllByText("精选AI").length).toBeGreaterThan(0);
+  });
+
+  it("opens the Skill warehouse from URL filters and shows Runtime common Skills for the selected Agent", async () => {
+    installSkillWarehouseFetch();
+    window.history.pushState(
+      {},
+      "",
+      `/skills?runtimeId=${encodeURIComponent(defaultRuntimeId)}&agentId=${encodeURIComponent(defaultAgentId)}`,
+    );
+
+    render(<App runtimeMode="agent" />);
+
+    expect(screen.getByRole("heading", { name: "Skill 仓库" })).toBeInTheDocument();
+    const skillTable = await screen.findByRole("table", { name: "Skill 列表" });
+    expect(screen.getByRole("button", { name: /2 个筛选/ })).toBeInTheDocument();
+    expect(within(skillTable).getByText("browser")).toBeInTheDocument();
+    expect(within(skillTable).getByText("code-review")).toBeInTheDocument();
+    expect(within(skillTable).queryByText("other-agent-skill")).not.toBeInTheDocument();
+    expect(screen.getByText("可用 Agent")).toBeInTheDocument();
+    expect(screen.getAllByText("main").length).toBeGreaterThan(0);
+  });
+
+  it("deep-links Runtime Fleet Skill actions into the Skill warehouse", async () => {
+    const user = userEvent.setup();
+    installSkillWarehouseFetch();
+    window.history.pushState({}, "", "/runtime");
+
+    render(<App runtimeMode="agent" />);
+
+    const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
+    await user.click(within(runtimeTable).getByRole("button", { name: "OpenClaw Gateway Skill" }));
+
+    expect(window.location.pathname).toBe("/skills");
+    expect(window.location.search).toContain(`runtimeId=${encodeURIComponent(defaultRuntimeId)}`);
+    expect(await screen.findByRole("table", { name: "Skill 列表" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1 个筛选/ })).toBeInTheDocument();
   });
 
   it("defaults unknown Console routes to Runtime Fleet", () => {
@@ -744,8 +846,9 @@ describe("Console shell", () => {
     const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
     expect(within(runtimeTable).queryByText("OpenClaw")).not.toBeInTheDocument();
 
-    const skillHeader = screen.getByRole("columnheader", { name: "Skill" });
-    const skillCell = screen.getByRole("button", { name: "main Skill 探测" }).closest("td");
+    const agentTable = screen.getByRole("table", { name: "Agent 列表" });
+    const skillHeader = within(agentTable).getByRole("columnheader", { name: "Skill" });
+    const skillCell = within(agentTable).getByRole("button", { name: "main Skill" }).closest("td");
     expect(skillHeader).toHaveClass("w-20", "text-right");
     expect(skillCell).toHaveClass("w-20", "text-right");
   });
@@ -827,7 +930,7 @@ describe("Console shell", () => {
     const agentRow = within(agentTable).getByRole("row", { name: /main/ });
     expect(within(agentRow).getByText("不可见")).toBeInTheDocument();
     expect(within(agentRow).queryByText("离线")).not.toBeInTheDocument();
-    expect(within(agentRow).getByRole("button", { name: "main Skill 探测" })).toBeDisabled();
+    expect(within(agentRow).getByRole("button", { name: "main Skill" })).toBeDisabled();
 
     await userEvent.hover(within(agentRow).getByLabelText(/不可见：/));
     expect((await screen.findAllByText("该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。")).length).toBeGreaterThan(0);

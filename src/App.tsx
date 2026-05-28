@@ -8,10 +8,12 @@ import {
   type ConsoleUtilityView,
 } from "./console/ConsoleUtilityDrawer";
 import { HomePage } from "./HomePage";
+import { SkillWarehousePage } from "./runtime/SkillWarehousePage";
 import { RuntimeFleetPage } from "./runtime/RuntimeFleetPage";
 import { RuntimeWorkBoardPage } from "./runtime/RuntimeWorkBoardPage";
 import { OrganizationSettingsPage } from "./settings/OrganizationSettingsPage";
 import type { AuthOrganizationMembership } from "./auth/auth-store";
+import type { RuntimeSkillInventoryFilters } from "./runtime/runtime-skill-inventory";
 
 type PageKey = ConsolePageKey;
 type UtilityKey = ConsoleUtilityKey;
@@ -20,6 +22,7 @@ const emptyOrganizations: AuthOrganizationMembership[] = [];
 const pagePathByKey: Record<PageKey, string> = {
   runtime: "/runtime",
   runs: "/runs",
+  skills: "/skills",
   settings: "/settings",
 };
 
@@ -48,6 +51,7 @@ export function App({
 function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
   const auth = useOptionalAuthSession();
   const [activePage, setActivePage] = useState<PageKey>(() => pageFromPath(getCurrentPath()) ?? "runtime");
+  const [routeSearch, setRouteSearch] = useState(() => getCurrentSearch());
   const [utilityView, setUtilityView] = useState<ConsoleUtilityView | null>(() => utilityViewFromPath(getCurrentPath()));
   const [utilityReturnPath, setUtilityReturnPath] = useState(() => pagePathByKey[pageFromPath(getCurrentPath()) ?? "runtime"]);
   const organizations = auth?.session.organizations ?? emptyOrganizations;
@@ -76,6 +80,7 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       const nextUtilityView = utilityViewFromPath(path);
       if (nextPage) {
         setActivePage(nextPage);
+        setRouteSearch(getCurrentSearch());
         setUtilityView(null);
         setUtilityReturnPath(pagePathByKey[nextPage]);
         return;
@@ -97,6 +102,7 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
     if (getCurrentPath() !== nextPath) {
       window.history.pushState({}, "", nextPath);
     }
+    setRouteSearch("");
     setActivePage(page);
     setUtilityView(null);
     setUtilityReturnPath(nextPath);
@@ -111,6 +117,19 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       window.history.pushState({}, "", nextPath);
     }
     setUtilityView(view);
+  };
+
+  const openSkillWarehouse = (filters: { runtimeId?: string; agentId?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (filters.runtimeId) searchParams.set("runtimeId", filters.runtimeId);
+    if (filters.agentId) searchParams.set("agentId", filters.agentId);
+    const search = searchParams.toString() ? `?${searchParams.toString()}` : "";
+    const nextPath = `${pagePathByKey.skills}${search}`;
+    window.history.pushState({}, "", nextPath);
+    setRouteSearch(search);
+    setActivePage("skills");
+    setUtilityView(null);
+    setUtilityReturnPath(nextPath);
   };
 
   const closeUtility = () => {
@@ -146,9 +165,15 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       )}
     >
       {activePage === "runtime" ? (
-        <RuntimeFleetPage organizationId={runtimeOrganizationId} />
+        <RuntimeFleetPage organizationId={runtimeOrganizationId} onOpenSkillWarehouse={openSkillWarehouse} />
       ) : activePage === "runs" ? (
         <RuntimeWorkBoardPage organizationId={runtimeOrganizationId} />
+      ) : activePage === "skills" ? (
+        <SkillWarehousePage
+          initialFilters={skillFiltersFromSearch(routeSearch)}
+          key={routeSearch}
+          organizationId={runtimeOrganizationId}
+        />
       ) : (
         <OrganizationSettingsPage organization={currentOrganization} session={auth?.session} />
       )}
@@ -167,9 +192,14 @@ function getCurrentPath(): string {
   return typeof window === "undefined" ? "/" : window.location.pathname;
 }
 
+function getCurrentSearch(): string {
+  return typeof window === "undefined" ? "" : window.location.search;
+}
+
 function pageFromPath(path: string): PageKey | null {
   if (path === "/runtime") return "runtime";
   if (path === "/runs") return "runs";
+  if (path === "/skills") return "skills";
   if (path === "/settings") return "settings";
   return null;
 }
@@ -198,6 +228,14 @@ function writeStoredActiveOrganizationId(userId: string | undefined, organizatio
   } catch {
     // Persistence is a convenience; the in-memory active organization remains authoritative.
   }
+}
+
+function skillFiltersFromSearch(search: string): RuntimeSkillInventoryFilters {
+  const params = new URLSearchParams(search);
+  return {
+    ...(params.get("runtimeId") ? { runtimeId: params.get("runtimeId") ?? undefined } : {}),
+    ...(params.get("agentId") ? { agentId: params.get("agentId") ?? undefined } : {}),
+  };
 }
 
 function createAgentAuthContext(): AuthContextValue {

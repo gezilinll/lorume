@@ -39,11 +39,6 @@ import { createEmptyRuntimeFleetTaskSummary, type Agent, type Runtime } from "./
 import { isFixtureFallbackAllowed } from "./runtime-data-source";
 import { type CollectionHealthCheck, type DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
-import {
-  normalizeAgentSkillProbeSnapshot,
-  type AgentSkillProbeSnapshot,
-  type AgentSkillProbeStatus,
-} from "./agent-skill-probe";
 
 const fixtureRuntimeSnapshot = runtimeFleetSnapshotFromQueryResponse(fixtureSnapshot) ?? createEmptyRuntimeInventorySnapshot();
 const autoRefreshIntervalMs = 30_000;
@@ -53,20 +48,6 @@ type RuntimeFleetSelection = {
   id: string;
 };
 
-type AgentSkillProbeViewState = {
-  agentId: string;
-  errorMessage?: string;
-  isVisible: boolean;
-  snapshot: AgentSkillProbeSnapshot | null;
-  status: "idle" | "loading" | "ready" | "error";
-};
-
-const agentSkillProbeStatusLabels: Record<AgentSkillProbeStatus, string> = {
-  unknown: "未探测",
-  succeeded: "探测完成",
-  unsupported: "不支持探测",
-  failed: "探测失败",
-};
 const invisibleAgentDescription = "该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。";
 
 function createRuntimeFleetUrl(pathname: string, organizationId?: string): URL {
@@ -76,7 +57,13 @@ function createRuntimeFleetUrl(pathname: string, organizationId?: string): URL {
 }
 
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and collection state. */
-export function RuntimeFleetPage({ organizationId }: { organizationId?: string }) {
+export function RuntimeFleetPage({
+  organizationId,
+  onOpenSkillWarehouse,
+}: {
+  organizationId?: string;
+  onOpenSkillWarehouse?: (filters: { runtimeId?: string; agentId?: string }) => void;
+}) {
   const allowFixtureFallback = isFixtureFallbackAllowed();
   const [snapshot, setSnapshot] = useState<RuntimeFleetSnapshot>(
     allowFixtureFallback ? fixtureRuntimeSnapshot : createEmptyRuntimeInventorySnapshot(),
@@ -87,12 +74,6 @@ export function RuntimeFleetPage({ organizationId }: { organizationId?: string }
   const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [selection, setSelection] = useState<RuntimeFleetSelection | null>(null);
-  const [agentSkillProbeState, setAgentSkillProbeState] = useState<AgentSkillProbeViewState>({
-    agentId: "",
-    isVisible: false,
-    snapshot: null,
-    status: "idle",
-  });
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   async function fetchLatestSnapshot(): Promise<RuntimeFleetSnapshot | null> {
@@ -244,40 +225,6 @@ export function RuntimeFleetPage({ organizationId }: { organizationId?: string }
     snapshot.summary.runtimeCount,
   ]);
 
-  async function fetchAgentSkillProbe(agentId: string): Promise<AgentSkillProbeSnapshot> {
-    const response = await fetch(createRuntimeFleetUrl(`/api/agents/${encodeURIComponent(agentId)}/skill-probe`, organizationId));
-    if (!response.ok) throw new Error(formatHttpError(response.status, "读取 Skill 探测失败"));
-    const snapshot = normalizeAgentSkillProbeSnapshot(await response.json());
-    if (!snapshot) throw new Error("Skill 探测返回了无效数据");
-    return snapshot;
-  }
-
-  async function handleShowAgentSkillProbe(agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) {
-    setAgentSkillProbeState({
-      agentId: agentDetail.id,
-      isVisible: true,
-      snapshot: null,
-      status: "loading",
-    });
-    try {
-      const snapshot = await fetchAgentSkillProbe(agentDetail.id);
-      setAgentSkillProbeState({
-        agentId: agentDetail.id,
-        isVisible: true,
-        snapshot,
-        status: "ready",
-      });
-    } catch (error) {
-      setAgentSkillProbeState({
-        agentId: agentDetail.id,
-        isVisible: true,
-        snapshot: null,
-        status: "error",
-        errorMessage: formatRuntimeFleetError(error, "读取 Skill 探测失败"),
-      });
-    }
-  }
-
   return (
     <section className="min-w-0">
       {hasConsoleWorkbar ? null : (
@@ -321,6 +268,10 @@ export function RuntimeFleetPage({ organizationId }: { organizationId?: string }
               runtimes={snapshot.runtimes}
               selectedId={selection?.kind === "runtime" ? selection.id : undefined}
               onSelect={(runtime) => setSelection({ kind: "runtime", id: runtime.id })}
+              onOpenSkillWarehouse={(runtime) => {
+                setSelection({ kind: "runtime", id: runtime.id });
+                onOpenSkillWarehouse?.({ runtimeId: runtime.id });
+              }}
             />
             <AgentTable
               agents={snapshot.agents}
@@ -329,26 +280,13 @@ export function RuntimeFleetPage({ organizationId }: { organizationId?: string }
               snapshot={snapshot}
               selectedId={selection?.kind === "agent" ? selection.id : undefined}
               onSelect={(agent) => setSelection({ kind: "agent", id: agent.id })}
-              onShowSkillProbe={(agent) => {
+              onOpenSkillWarehouse={(agent) => {
                 setSelection({ kind: "agent", id: agent.id });
-                const agentDetail = getRuntimeFleetDetail(
-                  snapshot,
-                  "agent",
-                  agent.id,
-                  collectionHealthByDeviceId,
-                  deviceDiagnosticsByDeviceId,
-                );
-                if (agentDetail?.kind === "agent") void handleShowAgentSkillProbe(agentDetail);
+                onOpenSkillWarehouse?.({ agentId: agent.id, runtimeId: agent.runtimeId });
               }}
             />
           </div>
-          <RuntimeDetail
-            detail={detail}
-            skillProbeState={agentSkillProbeState}
-            onRefreshSkillProbe={(agentDetail) => {
-              void handleShowAgentSkillProbe(agentDetail);
-            }}
-          />
+          <RuntimeDetail detail={detail} />
         </section>
       )}
     </section>
@@ -364,26 +302,6 @@ function createEmptyRuntimeInventorySnapshot(): RuntimeFleetSnapshot {
     taskSummary: createEmptyRuntimeFleetTaskSummary(),
     summary: { agentCount: 0, deviceCount: 0, runtimeCount: 0, taskCount: 0 },
   };
-}
-
-function formatRuntimeFleetError(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message) return fallback;
-  return formatBackendErrorMessage(error.message, fallback);
-}
-
-function formatHttpError(status: number, fallback: string): string {
-  if (status === 401 || status === 403) return "当前会话无权读取该信息。";
-  if (status === 404) return "没有找到对应的运行资产。";
-  if (status === 502 || status === 503 || status === 504) return "本地后端暂不可用，请稍后重试。";
-  return `${fallback}，请稍后重试。`;
-}
-
-function formatBackendErrorMessage(message: string, fallback: string): string {
-  if (message.includes("HTTP 502") || message.includes("HTTP 503") || message.includes("HTTP 504")) {
-    return "本地后端暂不可用，请稍后重试。";
-  }
-  if (/^[a-z0-9_:-]+$/i.test(message)) return fallback;
-  return message;
 }
 
 function deviceCollectionHealthFromResponse(value: unknown): DeviceCollectionHealth | null {
@@ -555,12 +473,14 @@ function RuntimeTable({
   snapshot,
   runtimes,
   selectedId,
+  onOpenSkillWarehouse,
   onSelect,
 }: {
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   snapshot: RuntimeFleetSnapshot;
   runtimes: Runtime[];
   selectedId?: string;
+  onOpenSkillWarehouse: (runtime: Runtime) => void;
   onSelect: (runtime: Runtime) => void;
 }) {
   const deviceById = new Map(snapshot.devices.map((device) => [device.id, device]));
@@ -585,6 +505,7 @@ function RuntimeTable({
                 <TableHead>状态</TableHead>
                 <TableHead>Task</TableHead>
                 <TableHead className="text-right">最近活跃</TableHead>
+                <TableHead className="w-20 text-right">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -625,6 +546,20 @@ function RuntimeTable({
                     <TableCell className="text-right text-muted-foreground">
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
+                    <TableCell className="w-20 text-right">
+                      <Button
+                        aria-label={`${runtime.name} Skill`}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenSkillWarehouse(runtime);
+                        }}
+                      >
+                        查看
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -642,16 +577,16 @@ function AgentTable({
   runtimes,
   snapshot,
   selectedId,
+  onOpenSkillWarehouse,
   onSelect,
-  onShowSkillProbe,
 }: {
   agents: Agent[];
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   runtimes: Runtime[];
   snapshot: RuntimeFleetSnapshot;
   selectedId?: string;
+  onOpenSkillWarehouse: (agent: Agent) => void;
   onSelect: (agent: Agent) => void;
-  onShowSkillProbe: (agent: Agent) => void;
 }) {
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
@@ -729,14 +664,14 @@ function AgentTable({
                             onClick={(event) => event.stopPropagation()}
                           >
                             <Button
-                              aria-label={`${agent.name} Skill 探测`}
+                              aria-label={`${agent.name} Skill`}
                               disabled={skillProbeDisabled}
                               size="sm"
                               type="button"
                               variant="outline"
                               onClick={() => {
                                 if (skillProbeDisabled) return;
-                                onShowSkillProbe(agent);
+                                onOpenSkillWarehouse(agent);
                               }}
                             >
                               查看
@@ -763,12 +698,8 @@ function AgentTable({
 
 function RuntimeDetail({
   detail,
-  skillProbeState,
-  onRefreshSkillProbe,
 }: {
   detail: RuntimeFleetDetail | null;
-  skillProbeState: AgentSkillProbeViewState;
-  onRefreshSkillProbe: (agentDetail: Extract<RuntimeFleetDetail, { kind: "agent" }>) => void;
 }) {
   if (!detail) {
     return (
@@ -819,13 +750,6 @@ function RuntimeDetail({
           {safeSections.map((section) => (
             <DetailList key={section.title} title={section.title} items={section.items} />
           ))}
-          {detail.kind === "agent" && skillProbeState.agentId === detail.id && skillProbeState.isVisible ? (
-            <AgentSkillProbePanel
-              detail={detail}
-              state={skillProbeState}
-              onRefresh={() => onRefreshSkillProbe(detail)}
-            />
-          ) : null}
         </CardContent>
       </Card>
     </aside>
@@ -855,96 +779,6 @@ function copyTextWithTextarea(value: string): boolean {
   } finally {
     document.body.removeChild(textArea);
   }
-}
-
-function AgentSkillProbePanel({
-  detail,
-  state,
-  onRefresh,
-}: {
-  detail: Extract<RuntimeFleetDetail, { kind: "agent" }>;
-  state: AgentSkillProbeViewState;
-  onRefresh: () => void;
-}) {
-  const snapshot = state.snapshot ?? null;
-  const status = snapshot?.status ?? "unknown";
-
-  return (
-    <section className="border-t border-border pt-3" aria-label="Skill 探测">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-medium">Skill 探测</h3>
-        <Button
-          size="sm"
-          type="button"
-          variant="outline"
-          disabled={state.status === "loading"}
-          onClick={onRefresh}
-        >
-          刷新
-        </Button>
-      </div>
-      <div className="mt-3">
-        <SkillStatusBadge label={agentSkillProbeStatusLabels[status]} status={status} />
-      </div>
-      <div className="mt-3 space-y-3 text-sm">
-        {state.status === "loading" ? <p>正在读取 Skill 探测</p> : null}
-        {state.status === "error" ? <p className="text-destructive">{state.errorMessage}</p> : null}
-        {snapshot ? <AgentSkillProbeSnapshotView snapshot={snapshot} /> : null}
-        {!snapshot && state.status !== "loading" && state.status !== "error" ? <p>尚未探测 Skill</p> : null}
-        <p className="text-muted-foreground">目标 Agent: {detail.title}</p>
-      </div>
-    </section>
-  );
-}
-
-function AgentSkillProbeSnapshotView({ snapshot }: { snapshot: AgentSkillProbeSnapshot }) {
-  if (snapshot.status === "unknown") {
-    return <p>尚未探测 Skill</p>;
-  }
-  if (snapshot.status === "unsupported") {
-    return <p className="text-destructive">{snapshot.errorSummary || "当前目标不支持本地 Skill 探测"}</p>;
-  }
-  if (snapshot.status === "failed") {
-    return <p className="text-destructive">{snapshot.errorSummary || "Skill 探测失败"}</p>;
-  }
-  if (snapshot.skills.length === 0) {
-    return <p>未发现本地 Skill。</p>;
-  }
-  return (
-    <div className="space-y-3">
-      {snapshot.skills.map((skill) => (
-        <article className="border-t border-border pt-3 first:border-t-0 first:pt-0" key={`${skill.rootPath}:${skill.entryPath}`}>
-          <h4 className="font-medium">{skill.name}</h4>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            <SkillProbeFileGroup title="Markdown" files={skill.markdownFiles} />
-            <SkillProbeFileGroup title="非 Markdown" files={skill.nonMarkdownFiles} />
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function SkillProbeFileGroup({
-  title,
-  files,
-}: {
-  title: string;
-  files: AgentSkillProbeSnapshot["skills"][number]["markdownFiles"];
-}) {
-  if (files.length === 0) return <p>{title}: 暂无</p>;
-  return (
-    <div className="space-y-1">
-      <strong className="text-xs text-muted-foreground">{title}</strong>
-      <ul className="space-y-1">
-        {files.map((file) => (
-          <li className="break-all rounded-[6px] bg-muted px-2 py-1 text-xs" key={`${title}:${file.path}`}>
-            {file.relativePath}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }
 
 function DetailBlock({ title, children }: { title: string; children: string }) {
@@ -1023,20 +857,9 @@ function FleetStatusBadge({ label, status }: { label: string; status: RuntimeFle
   );
 }
 
-function SkillStatusBadge({ label, status }: { label: string; status: AgentSkillProbeStatus }) {
-  return <AppStatusBadge tone={skillStatusTone(status)}>{label}</AppStatusBadge>;
-}
-
 function fleetStatusTone(status: RuntimeFleetObjectStatus): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "online") return "success";
   if (status === "offline" || status === "invisible") return "neutral";
   if (status === "error") return "danger";
   return "info";
-}
-
-function skillStatusTone(status: AgentSkillProbeStatus): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (status === "succeeded") return "success";
-  if (status === "failed") return "danger";
-  if (status === "unsupported") return "warning";
-  return "neutral";
 }

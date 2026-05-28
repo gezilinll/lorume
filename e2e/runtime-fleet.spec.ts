@@ -32,37 +32,39 @@ test.describe("Runtime Fleet", () => {
 
   test("opens agent details and stays responsive without a filter toolbar", async ({ page, request }) => {
     await seedRuntimeFleetData(request);
-    const skillProbeResponse = await request.post("/api/agent-skill-probe-snapshots", {
+    const skillProbeResponse = await request.post("/api/runtime-skill-probe-snapshots", {
       data: {
-        targetAgentId: "fixture-mac:runtime:openclaw:agent:main",
-        targetAgentName: "main",
         deviceId: "fixture-mac",
         runtimeId: "fixture-mac:runtime:openclaw",
-        runtimeName: "OpenClaw Gateway",
+        runtimeKind: "openclaw",
         status: "succeeded",
         observedAt: "2026-05-18T10:00:00.000Z",
-        skills: [{
-          name: "reviewer",
-          rootPath: "/Users/example/.codex/skills/reviewer",
-          entryPath: "/Users/example/.codex/skills/reviewer/SKILL.md",
-          markdownFiles: [
-            {
-              name: "SKILL.md",
-              path: "/Users/example/.codex/skills/reviewer/SKILL.md",
-              relativePath: "SKILL.md",
-            },
-            {
-              name: "guide.md",
-              path: "/Users/example/.codex/skills/reviewer/references/guide.md",
-              relativePath: "references/guide.md",
-            },
-          ],
-          nonMarkdownFiles: [{
-            name: "probe.sh",
-            path: "/Users/example/.codex/skills/reviewer/scripts/probe.sh",
-            relativePath: "scripts/probe.sh",
-          }],
-        }],
+        skills: [
+          {
+            name: "browser",
+            description: "Browser automation for local targets.",
+            scope: "runtime",
+            available: true,
+            builtIn: true,
+            agentIds: [],
+          },
+          {
+            name: "reviewer",
+            description: "Review local metadata without exposing file paths.",
+            scope: "agent",
+            available: true,
+            builtIn: false,
+            agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
+          },
+          {
+            name: "weather",
+            description: "Runtime-level weather query.",
+            scope: "runtime",
+            available: false,
+            builtIn: false,
+            agentIds: [],
+          },
+        ],
       },
     });
     expect(skillProbeResponse.ok()).toBe(true);
@@ -101,12 +103,27 @@ test.describe("Runtime Fleet", () => {
     await expect(detail).toContainText("全部任务: 2");
     await expect(detail).not.toContainText("关联渠道");
     await expect(detail).toContainText("最近活跃:");
-    await page.getByRole("button", { name: "main Skill 探测" }).click();
-    await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("reviewer");
-    await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("references/guide.md");
-    await expect(detail.getByRole("region", { name: "Skill 探测" })).toContainText("scripts/probe.sh");
-    await expect(detail.getByRole("link", { name: "scripts/probe.sh" })).toHaveCount(0);
-    await expect(detail.getByRole("region", { name: "Skill 探测" })).not.toContainText("/Users/example/.codex/skills/reviewer");
+    await page.getByRole("button", { name: "main Skill" }).click();
+    await expect(page).toHaveURL(/\/skills\?runtimeId=fixture-mac%3Aruntime%3Aopenclaw&agentId=fixture-mac%3Aruntime%3Aopenclaw%3Aagent%3Amain/);
+    await expect(page.getByRole("heading", { name: "Skill 仓库" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "2 个筛选" })).toBeVisible();
+    const skillTable = page.getByRole("table", { name: "Skill 列表" });
+    await expect(skillTable).toContainText("browser");
+    await expect(skillTable).toContainText("reviewer");
+    await expect(skillTable).toContainText("Runtime");
+    await expect(skillTable).toContainText("Agent");
+    await expect(skillTable).not.toContainText("weather");
+    const skillDetail = page.getByRole("complementary", { name: "Skill 详情" });
+    await expect(skillDetail).toContainText("可用 Agent");
+    await expect(skillDetail).toContainText("main");
+    await expect(skillDetail).not.toContainText("/Users/example/.codex/skills/reviewer");
+    const skillPageOverflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    );
+    expect(skillPageOverflows).toBe(false);
+
+    await page.getByRole("button", { name: "Runtime Fleet" }).click();
+    await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
 
     const sideNavPosition = await page
       .getByRole("navigation", { name: "主导航" })

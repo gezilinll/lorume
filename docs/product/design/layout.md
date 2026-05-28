@@ -22,7 +22,7 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 - Topbar is about `56px` tall and contains page identity, compact metadata, utility buttons, and refresh actions. Do not add a fake global search unless the search behavior is implemented.
 - Content uses shared responsive padding around `18px` to `30px` and one of three width tiers:
   - `workspace`: full available width with guarded page padding for boards and operational canvases such as Runs.
-  - `data-dense`: about `1680px` max width for directory/table pages such as Runtime Fleet.
+  - `data-dense`: about `1680px` max width for directory/table pages such as Runtime Fleet and Skill 仓库.
   - `standard`: about `1280px` max width for forms/settings pages such as Organization Settings.
 - Sidebar nav rows are about `32px` tall with `7px` radius and a muted active background.
 - Main pages use summary rail + primary workspace + detail inspector when the data model supports it.
@@ -49,6 +49,7 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 - Identity surfaces focus one form task and a compact operations preview.
 - Console surfaces reduce decoration and emphasize lists, metrics, filters, lanes, and inspectors.
 - Runtime Fleet uses Device activity-list rhythm plus Runtime/Agent directory-table rhythm.
+- Skill 仓库 uses a directory-table rhythm plus a sticky detail inspector; counts stay in the topbar rather than body metric cards.
 - Runs uses a Kanban board rhythm: five visible lanes, `235px` minimum lane width, about `14px` lane gaps, `44px` lane headers, `11px` task-card radius, and a thin left status stripe.
 
 ## Responsive

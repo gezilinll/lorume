@@ -67,6 +67,7 @@ Rules:
 - The layout exposes counts in the top workbar, then Device, Runtime, and Agent lists plus a sticky detail inspector. It does not repeat body-level metric cards, page explanations, or secondary title blocks.
 - Device uses the `users.html` team-activity rhythm: icon/dot, object title, compact metadata, recent activity, and status badge.
 - Runtime and Agent use the `users.html` member-directory rhythm: compact avatar, primary label, secondary metadata, status, Task count, and recent activity. Runtime does not use a separate kind column or repeated kind badge in the directory table.
+- Runtime and Agent directory columns are left-aligned. Tail columns such as `Task`, `最近活跃`, and row-level `Skill` actions use stable fixed widths, but headers, numbers, timestamps, and buttons all start from the same left edge within their column.
 - `最近活跃` is derived from active Task activity aggregates. It must not fall back to collector sync time.
 - The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
 - The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
@@ -104,11 +105,11 @@ Rules:
 
 - The page uses the `data-dense` Console layout tier, the shared top workbar, a compact search/filter surface, a directory table, and a sticky detail inspector.
 - It does not render a hero, repeated summary metric cards, or a page-owned title block. Counts live in the top workbar.
-- The list follows the Runtime Fleet Agent directory rhythm: avatar, left accent stripe, primary Skill name, short description, Runtime ownership, `Scope`, source, status, Agent count/avatars, and latest collection time.
+- The list follows the Runtime Fleet Agent directory rhythm: avatar, left accent stripe, primary Skill name, short description, Runtime ownership, `Scope`, source, status, compact Agent avatars/count, and latest collection time.
 - `Scope` and source are separate columns. `Runtime`/`Agent` explains capability layer; `系统自带`/`自定义` explains provenance.
 - Runtime-scope Skill rows derive their available Agent list from active Agents under the same Runtime. Agent-scope rows use stored Agent ownership. Agent deep links show Runtime common Skills usable by that Agent plus that Agent's own Skills.
 - The filter menu follows the Runs compact menu treatment: a single filter button, submenu groups, selected counts, and a reset-all action when any non-search filter is active. Search is a separate first-level input.
-- The detail inspector shows basic metadata, derived available Agents, and same-name rows. It must not show raw file paths, command names, hidden adapter fields, or Skill file contents.
+- The detail inspector shows basic metadata and derived available Agents. Runtime fields display the Runtime name only, because the field label already provides the semantic context. It must not show raw file paths, command names, hidden adapter fields, same-name diagnostics, or Skill file contents.
 - The page is read-only. No create, import, edit, publish, install, assign, migrate, sync, execute, or backend-triggered probe controls are allowed.
 
 ## Operations Utility Drawer

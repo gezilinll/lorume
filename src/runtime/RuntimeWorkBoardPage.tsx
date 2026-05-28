@@ -22,6 +22,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  filterMenuCheckboxItemClass,
+  filterMenuContentClass,
+  filterMenuItemClass,
+  filterMenuLabelClass,
+  filterMenuSeparatorClass,
+  filterMenuSubTriggerClass,
+} from "@/components/data/filter-menu-styles";
 import { cn } from "@/lib/utils";
 import { RuntimeTaskCard } from "./RuntimeTaskCard";
 import { RuntimeTaskDetailDialog } from "./RuntimeTaskDetailDialog";
@@ -353,12 +361,12 @@ export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: stri
           <DropdownMenuContent
             align="end"
             aria-label="筛选"
-            className="w-[206px] border-border bg-card p-2 text-card-foreground shadow-[var(--menu-shadow)]"
+            className={cn("w-[206px]", filterMenuContentClass)}
           >
-            <DropdownMenuLabel className="px-2 py-1.5 text-[13px] font-bold text-foreground">筛选</DropdownMenuLabel>
-            <DropdownMenuSeparator className="my-1" />
+            <DropdownMenuLabel className={filterMenuLabelClass}>筛选</DropdownMenuLabel>
+            <DropdownMenuSeparator className={filterMenuSeparatorClass} />
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="h-9 rounded-[9px] px-2 text-[13px] font-medium focus:bg-[var(--menu-selection)] data-open:bg-[var(--menu-selection)]">
+              <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
                 <span className="min-w-0 flex-1 truncate">渠道</span>
                 <span className="mr-1 text-xs text-muted-foreground">
                   {activeFilterCount || ""}
@@ -367,13 +375,13 @@ export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: stri
               <DropdownMenuSubContent
                 aria-label="渠道筛选"
                 sideOffset={8}
-                className="w-[238px] border-border bg-card p-2 text-card-foreground shadow-[var(--menu-shadow)]"
+                className={cn("w-[238px]", filterMenuContentClass)}
               >
-                <DropdownMenuLabel className="px-2 py-1.5 text-[13px] font-bold text-foreground">渠道</DropdownMenuLabel>
-                <DropdownMenuSeparator className="my-1" />
+                <DropdownMenuLabel className={filterMenuLabelClass}>渠道</DropdownMenuLabel>
+                <DropdownMenuSeparator className={filterMenuSeparatorClass} />
                 <DropdownMenuCheckboxItem
                   checked={selectedChannelKinds.length === 0}
-                  className={channelFilterItemClass(selectedChannelKinds.length === 0)}
+                  className={filterMenuCheckboxItemClass(selectedChannelKinds.length === 0)}
                   onCheckedChange={() => setSelectedChannelKinds([])}
                   onSelect={(event) => event.preventDefault()}
                 >
@@ -382,7 +390,7 @@ export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: stri
                 {channelOptions.map((option) => (
                   <DropdownMenuCheckboxItem
                     checked={selectedChannelKinds.includes(option.value)}
-                    className={channelFilterItemClass(selectedChannelKinds.includes(option.value))}
+                    className={filterMenuCheckboxItemClass(selectedChannelKinds.includes(option.value))}
                     key={option.value}
                     onCheckedChange={(checked) => {
                       setSelectedChannelKinds((current) => toggleSelectedChannel(current, option.value, Boolean(checked)));
@@ -397,9 +405,9 @@ export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: stri
             </DropdownMenuSub>
             {activeFilterCount ? (
               <>
-                <DropdownMenuSeparator className="my-1" />
+                <DropdownMenuSeparator className={filterMenuSeparatorClass} />
                 <DropdownMenuItem
-                  className="h-9 rounded-[9px] px-2 text-[13px] font-medium"
+                  className={filterMenuItemClass}
                   onSelect={() => {
                     setSelectedChannelKinds([]);
                     setIsFilterOpen(false);
@@ -449,26 +457,6 @@ export function RuntimeWorkBoardPage({ organizationId }: { organizationId?: stri
         }}
       />
     </section>
-  );
-}
-
-function channelFilterItemClass(isChecked: boolean): string {
-  return cn(
-    "h-9 rounded-[9px] py-1 pl-8 pr-2 text-[13px] font-medium",
-    "focus:bg-[var(--menu-selection)]",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:right-auto",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:left-2",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:size-5",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:rounded-[6px]",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border-transparent",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:text-white",
-    "[&_[data-slot=dropdown-menu-checkbox-item-indicator]_svg]:size-3.5",
-    isChecked && [
-      "bg-[var(--menu-selection)]",
-      "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border-foreground",
-      "[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:bg-foreground",
-    ],
   );
 }
 

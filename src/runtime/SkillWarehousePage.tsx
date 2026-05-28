@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bot,
-  Check,
   CircleDot,
   Filter,
   Layers3,
@@ -38,6 +37,14 @@ import {
 import { InitialAvatar, type AccentTone, accentToneFromText } from "@/components/data/InitialAvatar";
 import { Pill } from "@/components/data/Pill";
 import { StatusBadge } from "@/components/data/StatusBadge";
+import {
+  filterMenuCheckboxItemClass,
+  filterMenuContentClass,
+  filterMenuItemClass,
+  filterMenuLabelClass,
+  filterMenuSeparatorClass,
+  filterMenuSubTriggerClass,
+} from "@/components/data/filter-menu-styles";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
 import { cn } from "@/lib/utils";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
@@ -116,7 +123,6 @@ export function SkillWarehousePage({
     [filters, inventory.rows],
   );
   const selectedRow = visibleRows.find((row) => row.id === selectedRowId) ?? visibleRows[0] ?? null;
-  const sameNameRows = selectedRow ? inventory.rows.filter((row) => row.name === selectedRow.name && row.id !== selectedRow.id) : [];
   const activeFilterCount = countActiveFilters(filters);
 
   useConsoleWorkbar({
@@ -174,7 +180,7 @@ export function SkillWarehousePage({
             selectedRowId={selectedRow?.id}
             onSelect={setSelectedRowId}
           />
-          <SkillDetailCard row={selectedRow} sameNameRows={sameNameRows} />
+          <SkillDetailCard row={selectedRow} />
         </section>
       )}
     </section>
@@ -222,24 +228,25 @@ function SkillFilterMenu({
       <DropdownMenuContent
         aria-label="Skill 筛选"
         align="end"
-        className="w-[236px] rounded-[14px] border-border bg-card p-2 text-card-foreground shadow-[var(--menu-shadow)]"
+        className={cn("w-[236px] rounded-[14px]", filterMenuContentClass)}
         sideOffset={8}
       >
-        <DropdownMenuLabel className="px-2 pb-2 pt-1 text-sm font-bold text-foreground">筛选</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuLabel className={filterMenuLabelClass}>筛选</DropdownMenuLabel>
+        <DropdownMenuSeparator className={filterMenuSeparatorClass} />
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-[10px] px-2 text-[13px]">
+          <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
             <Server className="size-4" aria-hidden="true" />
             Runtime
             {filters.runtimeId ? <span className="ml-auto text-xs font-semibold text-muted-foreground">1</span> : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Runtime" className="w-[260px] rounded-[14px] p-2 shadow-[var(--menu-shadow)]">
-            <DropdownMenuCheckboxItem checked={!filters.runtimeId} onCheckedChange={() => clearFilter("runtimeId")}>
+          <DropdownMenuSubContent aria-label="Runtime" className={cn("w-[260px] rounded-[14px]", filterMenuContentClass)}>
+            <DropdownMenuCheckboxItem checked={!filters.runtimeId} className={filterMenuCheckboxItemClass(!filters.runtimeId)} onCheckedChange={() => clearFilter("runtimeId")}>
               全部 Runtime
             </DropdownMenuCheckboxItem>
             {inventory.runtimes.map((runtime) => (
               <DropdownMenuCheckboxItem
                 checked={filters.runtimeId === runtime.id}
+                className={filterMenuCheckboxItemClass(filters.runtimeId === runtime.id)}
                 key={runtime.id}
                 onCheckedChange={() => updateFilter({ runtimeId: runtime.id })}
               >
@@ -252,18 +259,19 @@ function SkillFilterMenu({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-[10px] px-2 text-[13px]">
+          <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
             <Bot className="size-4" aria-hidden="true" />
             Agent
             {filters.agentId ? <span className="ml-auto text-xs font-semibold text-muted-foreground">1</span> : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Agent" className="w-[260px] rounded-[14px] p-2 shadow-[var(--menu-shadow)]">
-            <DropdownMenuCheckboxItem checked={!filters.agentId} onCheckedChange={() => clearFilter("agentId")}>
+          <DropdownMenuSubContent aria-label="Agent" className={cn("w-[260px] rounded-[14px]", filterMenuContentClass)}>
+            <DropdownMenuCheckboxItem checked={!filters.agentId} className={filterMenuCheckboxItemClass(!filters.agentId)} onCheckedChange={() => clearFilter("agentId")}>
               全部 Agent
             </DropdownMenuCheckboxItem>
             {inventory.agents.map((agent) => (
               <DropdownMenuCheckboxItem
                 checked={filters.agentId === agent.id}
+                className={filterMenuCheckboxItemClass(filters.agentId === agent.id)}
                 key={agent.id}
                 onCheckedChange={() => updateFilter({ agentId: agent.id, runtimeId: agent.runtimeId })}
               >
@@ -276,18 +284,19 @@ function SkillFilterMenu({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-[10px] px-2 text-[13px]">
+          <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
             <Layers3 className="size-4" aria-hidden="true" />
             Scope
             {filters.scope ? <span className="ml-auto text-xs font-semibold text-muted-foreground">1</span> : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="Scope" className="w-[180px] rounded-[14px] p-2 shadow-[var(--menu-shadow)]">
-            <DropdownMenuCheckboxItem checked={!filters.scope} onCheckedChange={() => clearFilter("scope")}>
+          <DropdownMenuSubContent aria-label="Scope" className={cn("w-[180px] rounded-[14px]", filterMenuContentClass)}>
+            <DropdownMenuCheckboxItem checked={!filters.scope} className={filterMenuCheckboxItemClass(!filters.scope)} onCheckedChange={() => clearFilter("scope")}>
               全部 Scope
             </DropdownMenuCheckboxItem>
             {(["runtime", "agent"] as const).map((scope) => (
               <DropdownMenuCheckboxItem
                 checked={filters.scope === scope}
+                className={filterMenuCheckboxItemClass(filters.scope === scope)}
                 key={scope}
                 onCheckedChange={() => updateFilter({ scope })}
               >
@@ -297,45 +306,45 @@ function SkillFilterMenu({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-[10px] px-2 text-[13px]">
+          <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
             <Sparkles className="size-4" aria-hidden="true" />
             来源
             {typeof filters.builtIn === "boolean" ? <span className="ml-auto text-xs font-semibold text-muted-foreground">1</span> : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="来源" className="w-[180px] rounded-[14px] p-2 shadow-[var(--menu-shadow)]">
-            <DropdownMenuCheckboxItem checked={typeof filters.builtIn !== "boolean"} onCheckedChange={() => clearFilter("builtIn")}>
+          <DropdownMenuSubContent aria-label="来源" className={cn("w-[180px] rounded-[14px]", filterMenuContentClass)}>
+            <DropdownMenuCheckboxItem checked={typeof filters.builtIn !== "boolean"} className={filterMenuCheckboxItemClass(typeof filters.builtIn !== "boolean")} onCheckedChange={() => clearFilter("builtIn")}>
               全部来源
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={filters.builtIn === true} onCheckedChange={() => updateFilter({ builtIn: true })}>
+            <DropdownMenuCheckboxItem checked={filters.builtIn === true} className={filterMenuCheckboxItemClass(filters.builtIn === true)} onCheckedChange={() => updateFilter({ builtIn: true })}>
               系统自带
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={filters.builtIn === false} onCheckedChange={() => updateFilter({ builtIn: false })}>
+            <DropdownMenuCheckboxItem checked={filters.builtIn === false} className={filterMenuCheckboxItemClass(filters.builtIn === false)} onCheckedChange={() => updateFilter({ builtIn: false })}>
               自定义
             </DropdownMenuCheckboxItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-[10px] px-2 text-[13px]">
+          <DropdownMenuSubTrigger className={filterMenuSubTriggerClass}>
             <CircleDot className="size-4" aria-hidden="true" />
             状态
             {typeof filters.available === "boolean" ? <span className="ml-auto text-xs font-semibold text-muted-foreground">1</span> : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent aria-label="状态" className="w-[180px] rounded-[14px] p-2 shadow-[var(--menu-shadow)]">
-            <DropdownMenuCheckboxItem checked={typeof filters.available !== "boolean"} onCheckedChange={() => clearFilter("available")}>
+          <DropdownMenuSubContent aria-label="状态" className={cn("w-[180px] rounded-[14px]", filterMenuContentClass)}>
+            <DropdownMenuCheckboxItem checked={typeof filters.available !== "boolean"} className={filterMenuCheckboxItemClass(typeof filters.available !== "boolean")} onCheckedChange={() => clearFilter("available")}>
               全部状态
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={filters.available === true} onCheckedChange={() => updateFilter({ available: true })}>
+            <DropdownMenuCheckboxItem checked={filters.available === true} className={filterMenuCheckboxItemClass(filters.available === true)} onCheckedChange={() => updateFilter({ available: true })}>
               可用
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={filters.available === false} onCheckedChange={() => updateFilter({ available: false })}>
+            <DropdownMenuCheckboxItem checked={filters.available === false} className={filterMenuCheckboxItemClass(filters.available === false)} onCheckedChange={() => updateFilter({ available: false })}>
               不可用
             </DropdownMenuCheckboxItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {activeFilterCount > 0 ? (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="h-9 rounded-[10px] px-2 text-[13px] font-medium" onSelect={resetAll}>
+            <DropdownMenuSeparator className={filterMenuSeparatorClass} />
+            <DropdownMenuItem className={filterMenuItemClass} onSelect={resetAll}>
               重置全部筛选
             </DropdownMenuItem>
           </>
@@ -406,8 +415,7 @@ function SkillInventoryTable({
                     </div>
                   </TableCell>
                   <TableCell className="whitespace-normal">
-                    <span className="block text-[13px] font-medium">{row.runtimeKindLabel}</span>
-                    <span className="block truncate text-[11.5px] text-muted-foreground">{row.runtimeName}</span>
+                    <span className="block truncate text-[13px] font-medium">{row.runtimeName}</span>
                   </TableCell>
                   <TableCell>
                     <Pill tone={row.scope === "runtime" ? "brand" : "cyan"}>{runtimeSkillScopeLabels[row.scope]}</Pill>
@@ -436,10 +444,8 @@ function SkillInventoryTable({
 
 function SkillDetailCard({
   row,
-  sameNameRows,
 }: {
   row: RuntimeSkillInventoryRow | null;
-  sameNameRows: RuntimeSkillInventoryRow[];
 }) {
   if (!row) {
     return (
@@ -478,7 +484,7 @@ function SkillDetailCard({
         <CardContent className="space-y-4">
           <DetailGrid
             items={[
-              ["Runtime", `${row.runtimeKindLabel} · ${row.runtimeName}`],
+              ["Runtime", row.runtimeName],
               ["Scope", runtimeSkillScopeLabels[row.scope]],
               ["来源", row.builtIn ? "系统自带" : "自定义"],
               ["状态", row.available ? "可用" : "不可用"],
@@ -487,7 +493,6 @@ function SkillDetailCard({
             ]}
           />
           <AgentAvailabilityList row={row} />
-          <SameNameSkillList rows={sameNameRows} />
         </CardContent>
       </Card>
     </aside>
@@ -524,7 +529,6 @@ function AgentAvailabilityList({ row }: { row: RuntimeSkillInventoryRow }) {
                 <strong className="block truncate text-[13px]">{agent.name}</strong>
                 <span className="block truncate text-[11.5px] text-muted-foreground">{agent.runtimeId}</span>
               </span>
-              <Check className="size-4 text-[var(--green)]" aria-hidden="true" />
             </div>
           ))}
         </div>
@@ -535,40 +539,25 @@ function AgentAvailabilityList({ row }: { row: RuntimeSkillInventoryRow }) {
   );
 }
 
-function SameNameSkillList({ rows }: { rows: RuntimeSkillInventoryRow[] }) {
-  return (
-    <section className="border-t border-border pt-3">
-      <h3 className="text-sm font-medium">同名 Skill</h3>
-      {rows.length ? (
-        <div className="mt-2 space-y-2">
-          {rows.map((row) => (
-            <div className="rounded-[10px] border border-border bg-[var(--surface-soft)] px-3 py-2" key={row.id}>
-              <strong className="block truncate text-[13px]">{row.runtimeKindLabel}</strong>
-              <span className="block truncate text-[11.5px] text-muted-foreground">{row.runtimeName}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-2 text-sm text-muted-foreground">当前 Runtime 视图中没有同名 Skill。</p>
-      )}
-    </section>
-  );
-}
-
 function AgentStack({ row }: { row: RuntimeSkillInventoryRow }) {
   const agents = row.scope === "runtime" ? row.availableAgents : row.ownerAgents;
-  const label = row.scope === "runtime" ? `${row.availableAgentIds.length} Agents` : `${row.ownerAgentIds.length} Agents`;
-  if (agents.length === 0) {
-    return <Pill tone="muted">{label}</Pill>;
+  const agentCount = row.scope === "runtime" ? row.availableAgentIds.length : row.ownerAgentIds.length;
+  if (agentCount === 0) {
+    return <Pill tone="muted">0 Agents</Pill>;
   }
+  const visibleAgents = agents.slice(0, 2);
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center">
       <span className="flex -space-x-1.5">
-        {agents.slice(0, 3).map((agent) => (
+        {visibleAgents.map((agent) => (
           <InitialAvatar className="ring-2 ring-card" key={agent.id} size="sm" text={agent.name} variant="solid" />
         ))}
+        {agentCount > 2 ? (
+          <span className="z-10 flex size-6 items-center justify-center rounded-full border border-border bg-[var(--surface-soft)] text-[11px] font-semibold text-muted-foreground ring-2 ring-card">
+            {agentCount}
+          </span>
+        ) : null}
       </span>
-      <span className="text-[12px] font-medium text-muted-foreground">{label}</span>
     </div>
   );
 }

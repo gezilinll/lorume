@@ -497,15 +497,15 @@ function RuntimeTable({
         {runtimes.length === 0 ? (
           <EmptyAsset message="暂无 Runtime" />
         ) : (
-          <Table aria-label="Runtime 列表">
+          <Table aria-label="Runtime 列表" className="table-fixed">
             <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>所属设备</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead className="text-right">最近活跃</TableHead>
-                <TableHead className="w-20 text-right">Skill</TableHead>
+                <TableHead className="w-[32%]">名称</TableHead>
+                <TableHead className="w-[23%]">所属设备</TableHead>
+                <TableHead className="w-[13%]">状态</TableHead>
+                <TableHead className="w-[9%]">Task</TableHead>
+                <TableHead className="w-[15%]">最近活跃</TableHead>
+                <TableHead className="w-[8%]">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -542,11 +542,11 @@ function RuntimeTable({
                     <TableCell>
                       <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{taskTotal}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    <TableCell className="text-muted-foreground tabular-nums">{taskTotal}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
-                    <TableCell className="w-20 text-right">
+                    <TableCell>
                       <Button
                         aria-label={`${runtime.name} Skill`}
                         size="sm"
@@ -603,15 +603,15 @@ function AgentTable({
         {agents.length === 0 ? (
           <EmptyAsset message="暂无 Agent" />
         ) : (
-          <Table aria-label="Agent 列表">
+          <Table aria-label="Agent 列表" className="table-fixed">
             <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>归属 Runtime</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>最近活跃</TableHead>
-                <TableHead className="w-20 text-right">Skill</TableHead>
+                <TableHead className="w-[30%]">名称</TableHead>
+                <TableHead className="w-[22%]">归属 Runtime</TableHead>
+                <TableHead className="w-[12%]">状态</TableHead>
+                <TableHead className="w-[9%]">Task</TableHead>
+                <TableHead className="w-[17%]">最近活跃</TableHead>
+                <TableHead className="w-[10%]">Skill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -651,15 +651,15 @@ function AgentTable({
                     <TableCell>
                       <FleetStatusBadge label={runtimeFleetObjectStatusLabels[status]} status={status} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{taskTotal}</TableCell>
+                    <TableCell className="text-muted-foreground tabular-nums">{taskTotal}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
-                    <TableCell className="w-20 text-right">
+                    <TableCell>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span
-                            className="inline-flex justify-end"
+                            className="inline-flex"
                             data-skill-probe-disabled={skillProbeDisabled ? "true" : undefined}
                             onClick={(event) => event.stopPropagation()}
                           >

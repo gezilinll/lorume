@@ -371,7 +371,11 @@ describe("Console shell", () => {
     expect(within(skillTable).getByText("browser")).toBeInTheDocument();
     expect(within(skillTable).getByText("code-review")).toBeInTheDocument();
     expect(within(skillTable).queryByText("other-agent-skill")).not.toBeInTheDocument();
-    expect(screen.getByText("可用 Agent")).toBeInTheDocument();
+    const detail = screen.getByRole("complementary", { name: "Skill 详情" });
+    expect(within(detail).getByText("可用 Agent")).toBeInTheDocument();
+    expect(within(detail).getByText("OpenClaw Gateway")).toBeInTheDocument();
+    expect(within(detail).queryByText("OpenClaw · OpenClaw Gateway")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("同名 Skill")).not.toBeInTheDocument();
     expect(screen.getAllByText("main").length).toBeGreaterThan(0);
   });
 
@@ -437,8 +441,11 @@ describe("Console shell", () => {
     channelSubTrigger.focus();
     await user.keyboard("{ArrowRight}");
     const channelMenu = await screen.findByRole("menu", { name: /渠道/ });
-    expect(within(channelMenu).getByRole("menuitemcheckbox", { name: "全部" })).toHaveAttribute("aria-checked", "true");
-    expect(within(channelMenu).getByRole("menuitemcheckbox", { name: /DingTalk/ })).toBeInTheDocument();
+    const allChannelsItem = within(channelMenu).getByRole("menuitemcheckbox", { name: "全部" });
+    expect(allChannelsItem).toHaveAttribute("aria-checked", "true");
+    const dingtalkItem = within(channelMenu).getByRole("menuitemcheckbox", { name: /DingTalk/ });
+    expect(dingtalkItem).toBeInTheDocument();
+    expect(dingtalkItem).toHaveClass("[&_[data-slot=dropdown-menu-checkbox-item-indicator]]:border-border");
     await user.keyboard("{Escape}");
 
     await user.type(screen.getByPlaceholderText("搜索任务、消息、发起人、Agent 或会话/群组"), "PMO");
@@ -847,10 +854,15 @@ describe("Console shell", () => {
     expect(within(runtimeTable).queryByText("OpenClaw")).not.toBeInTheDocument();
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
+    const taskHeader = within(agentTable).getByRole("columnheader", { name: "Task" });
+    const activeHeader = within(agentTable).getByRole("columnheader", { name: "最近活跃" });
     const skillHeader = within(agentTable).getByRole("columnheader", { name: "Skill" });
     const skillCell = within(agentTable).getByRole("button", { name: "main Skill" }).closest("td");
-    expect(skillHeader).toHaveClass("w-20", "text-right");
-    expect(skillCell).toHaveClass("w-20", "text-right");
+    expect(taskHeader).toHaveClass("w-[9%]");
+    expect(activeHeader).toHaveClass("w-[17%]");
+    expect(skillHeader).toHaveClass("w-[10%]");
+    expect(skillHeader).not.toHaveClass("text-right");
+    expect(skillCell).not.toHaveClass("text-right");
   });
 
   it("loads Runtime Fleet from the backend query API when available", async () => {

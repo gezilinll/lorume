@@ -74,7 +74,7 @@ App-owned wrappers:
 - Compact Console menus use `bg-card`, `border-border`, `--menu-shadow`, 36px-ish rows, and 12-13px text. Avoid large profile-panel spacing inside Sidebar account menus.
 - Filter triggers have two visible states: inactive outline (`Filter` icon + `筛选`) and active solid blue (`Filter` icon + `N 个筛选` + inline clear `x`).
 - Filter menu dimensions should fit the available options. A single-dimension menu should not reserve large blank vertical space.
-- Multi-select submenu rows use a left checkbox treatment: selected rows show a black square with a white check and a `--menu-selection` background; unselected rows reserve the same left column so text does not shift.
+- Multi-select submenu rows use a left checkbox treatment: selected rows show a black square with a white check and a `--menu-selection` background; unselected rows reserve the same left column with a visible border/background so the checkbox target does not disappear into the menu surface.
 - `全部` in a multi-select filter represents zero selected concrete options. It is not checked together with specific options.
 
 ## Detail Panels

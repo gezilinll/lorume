@@ -15,12 +15,15 @@ describe("runtime Skill probe metadata", () => {
       skills: [{
         name: "weather",
         description: "Weather lookup",
+        body: "# Weather\n\nUse weather data.",
+        localPath: "~/.openclaw/skills/weather/SKILL.md",
         scope: "runtime",
         available: true,
         builtIn: true,
         agentIds: ["should-not-survive"],
         active: false,
         modelVisible: false,
+        sourcePath: "/private/raw/weather/SKILL.md",
       }, {
         name: "argus-cost-provider-auth-refresh",
         description: "Refresh cost provider auth",
@@ -58,6 +61,8 @@ describe("runtime Skill probe metadata", () => {
       {
         name: "weather",
         description: "Weather lookup",
+        body: "# Weather\n\nUse weather data.",
+        localPath: "~/.openclaw/skills/weather/SKILL.md",
         scope: "runtime",
         available: true,
         builtIn: true,
@@ -66,6 +71,7 @@ describe("runtime Skill probe metadata", () => {
     ]);
     expect(snapshot?.skills[0]).not.toHaveProperty("source");
     expect(snapshot?.skills[1]).not.toHaveProperty("active");
+    expect(snapshot?.skills[1]).not.toHaveProperty("sourcePath");
     expect(normalizeRuntimeSkillProbeSnapshot({ status: "installed" })).toBeNull();
   });
 
@@ -77,6 +83,8 @@ describe("runtime Skill probe metadata", () => {
       runtimeSkills: [{
         name: "clawhub",
         description: "Discover OpenClaw skills",
+        body: "# ClawHub\n\nDiscover and install skills.",
+        localPath: "~/.openclaw/skills/clawhub/SKILL.md",
         source: "openclaw-bundled",
         bundled: true,
         eligible: true,
@@ -150,7 +158,15 @@ describe("runtime Skill probe metadata", () => {
         builtIn: false,
         agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
       }),
-      expect.objectContaining({ name: "clawhub", scope: "runtime", available: true, builtIn: true, agentIds: [] }),
+      expect.objectContaining({
+        name: "clawhub",
+        body: "# ClawHub\n\nDiscover and install skills.",
+        localPath: "~/.openclaw/skills/clawhub/SKILL.md",
+        scope: "runtime",
+        available: true,
+        builtIn: true,
+        agentIds: [],
+      }),
       expect.objectContaining({ name: "healthcheck", scope: "runtime", available: true, agentIds: [] }),
       expect.objectContaining({
         name: "share-files",

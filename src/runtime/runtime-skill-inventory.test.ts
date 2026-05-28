@@ -33,8 +33,10 @@ describe("runtime Skill inventory", () => {
           {
             agentIds: [],
             available: true,
+            body: "# Browser\n\nBrowser body.",
             builtIn: true,
             description: "Runtime common browser automation.",
+            localPath: "~/.codex/skills/.system/browser/SKILL.md",
             name: "browser",
             scope: "runtime",
           },
@@ -59,6 +61,8 @@ describe("runtime Skill inventory", () => {
     });
     expect(inventory.rows.find((row) => row.name === "browser")).toMatchObject({
       availableAgentIds: [mainAgentId, pmoAgentId],
+      body: "# Browser\n\nBrowser body.",
+      localPath: "~/.codex/skills/.system/browser/SKILL.md",
       ownerAgentIds: [],
       runtimeId,
       scope: "runtime",

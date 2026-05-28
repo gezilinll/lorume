@@ -109,7 +109,9 @@ Rules:
 - `Scope` and source are separate columns. `Runtime`/`Agent` explains capability layer; `系统自带`/`自定义` explains provenance.
 - Runtime-scope Skill rows derive their available Agent list from active Agents under the same Runtime. Agent-scope rows use stored Agent ownership. Agent deep links show Runtime common Skills usable by that Agent plus that Agent's own Skills.
 - The filter menu follows the Runs compact menu treatment: a single filter button, submenu groups, selected counts, and a reset-all action when any non-search filter is active. Search is a separate first-level input.
-- The detail inspector shows basic metadata and derived available Agents. Runtime fields display the Runtime name only, because the field label already provides the semantic context. It must not show raw file paths, command names, hidden adapter fields, same-name diagnostics, or Skill file contents.
+- The detail inspector shows basic metadata, derived available Agents, and a compact `查看` action for the selected Skill. Runtime fields display the Runtime name only, because the field label already provides the semantic context.
+- The `查看` action opens a read-only detail card. The detail card header shows the Skill name and chips only; it does not repeat the short description. The card shows valuable metadata, `本地路径` when collected, available Agents, and `Skill 正文` as the final section.
+- Skill 仓库 must not show raw adapter source-path evidence, command names, hidden adapter fields, same-name diagnostics as primary content, edit/import/install/assignment controls, or auxiliary Skill files.
 - The page is read-only. No create, import, edit, publish, install, assign, migrate, sync, execute, or backend-triggered probe controls are allowed.
 
 ## Operations Utility Drawer

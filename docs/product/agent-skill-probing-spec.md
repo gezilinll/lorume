@@ -8,9 +8,9 @@ Runtime Skill probing is Lorume's read-only view of Skill metadata already disco
 - Skill probing runs on the device side through the Runtime adapter during collection. The backend stores reported metadata; it does not ask a connected device to execute a probe.
 - Device is not a Skill scope. Device-level probing capability belongs in adapter diagnostics and is not exposed as a user-facing Device Skill list.
 - Runtime remains the source of truth for local Skill metadata and Agent-specific visibility.
-- Lorume does not import, edit, publish, assign, sync, migrate, install, execute, or analyze Skill content.
+- Lorume does not import, edit, publish, assign, sync, migrate, install, execute, or analyze Skill content. It may display already-collected `SKILL.md` text as read-only detail content.
 - Runtime adapters must translate platform-specific Skill facts into Lorume-owned `runtime` / `agent` scope before backend storage.
-- Backend snapshots must not require or expose full Skill file contents, private paths, tokens, full logs, or external private payloads.
+- Backend snapshots may expose a user-facing target-local `localPath` and read-only `SKILL.md` body when the adapter can collect them. They must not expose raw source-path evidence, command names, tokens, full logs, auxiliary file contents, or external private payloads.
 
 ## Product Scope
 
@@ -38,7 +38,7 @@ Display rules:
 - `scope="runtime"` rows keep `agentIds: []` in stored metadata. For UI display, the page derives `availableAgentIds` from active, non-`invisible` Agents under the same Runtime when the Skill is `available=true`.
 - `scope="agent"` rows use stored `agentIds` as ownership/visibility. Agent deep links show both runtime-scope Skills available to that Agent and agent-scope Skills whose `agentIds` include that Agent.
 - Runtime Fleet deep links into `/skills?runtimeId=...` or `/skills?runtimeId=...&agentId=...`; the Skill 仓库 filter menu starts with those filters selected.
-- The detail inspector keeps raw source paths, command names, hidden adapter fields, and Skill file contents out of the UI. It shows basic metadata, derived available Agents, and same-name Skill occurrences.
+- The detail inspector keeps raw source-path evidence, command names, and hidden adapter fields out of the UI. It shows basic metadata and derived available Agents. A row-level `查看` action opens the read-only Skill detail card, where `localPath` appears as `本地路径` and the collected `SKILL.md` body appears at the bottom as `Skill 正文`.
 - Empty or failed Runtime snapshots produce empty/error UI states; the frontend must not invent Skill rows.
 
 ## Runtime Snapshot
@@ -59,6 +59,8 @@ Product-facing row fields are:
 |---|---|
 | `name` | Stable display name. |
 | `description` | Short description. Missing descriptions are empty strings. |
+| `body` | Optional read-only `SKILL.md` body collected from the target Runtime. Missing or oversized bodies are omitted as empty. |
+| `localPath` | Optional user-facing target-local path to the collected `SKILL.md`. This is not a raw adapter `sourcePath` field. |
 | `scope` | Only `runtime` or `agent`. |
 | `available` | Whether the Skill is currently usable from the Runtime view. |
 | `builtIn` | Whether the Skill is system-provided. |

@@ -203,8 +203,10 @@ function runtimeSkillProbeResponse(snapshot = fleetSnapshot) {
       {
         agentIds: [],
         available: true,
+        body: "# Browser\n\nUse browser automation for screenshots and inspection.",
         builtIn: true,
         description: "Runtime common browser automation.",
+        localPath: "~/.codex/skills/.system/browser/SKILL.md",
         name: "browser",
         scope: "runtime",
       },
@@ -356,6 +358,7 @@ describe("Console shell", () => {
   });
 
   it("opens the Skill warehouse from URL filters and shows Runtime common Skills for the selected Agent", async () => {
+    const user = userEvent.setup();
     installSkillWarehouseFetch();
     window.history.pushState(
       {},
@@ -377,6 +380,13 @@ describe("Console shell", () => {
     expect(within(detail).queryByText("OpenClaw · OpenClaw Gateway")).not.toBeInTheDocument();
     expect(within(detail).queryByText("同名 Skill")).not.toBeInTheDocument();
     expect(screen.getAllByText("main").length).toBeGreaterThan(0);
+
+    await user.click(within(detail).getByRole("button", { name: "查看 browser 详情" }));
+    const fullDetail = await screen.findByRole("dialog", { name: "browser" });
+    expect(within(fullDetail).getByText("本地路径")).toBeInTheDocument();
+    expect(within(fullDetail).getByText("~/.codex/skills/.system/browser/SKILL.md")).toBeInTheDocument();
+    expect(within(fullDetail).getByText("Skill 正文")).toBeInTheDocument();
+    expect(within(fullDetail).getByText(/Use browser automation for screenshots and inspection/)).toBeInTheDocument();
   });
 
   it("deep-links Runtime Fleet Skill actions into the Skill warehouse", async () => {

@@ -164,6 +164,7 @@
   --runs-lane-cancelled: color-mix(in oklch, var(--muted) 24%, var(--card));
   --console-page-padding-x: clamp(18px, 1.6vw, 30px);
   --console-page-padding-y: clamp(18px, 1.7vw, 28px);
+  --console-workbar-height: 3.5rem;
   --console-content-max-standard: 1280px;
   --console-content-max-data: 1680px;
   --runs-lane-min-width: 235px;

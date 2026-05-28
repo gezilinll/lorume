@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bot,
   CircleDot,
+  Copy,
+  Eye,
   Filter,
   Layers3,
   Search,
@@ -46,6 +48,8 @@ import {
   filterMenuSubTriggerClass,
 } from "@/components/data/filter-menu-styles";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
+import { consoleDetailInspectorClass } from "@/components/layout/inspector-styles";
+import { DetailSurface } from "@/components/surfaces/DetailSurface";
 import { cn } from "@/lib/utils";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
 import {
@@ -82,12 +86,14 @@ export function SkillWarehousePage({
   const [filters, setFilters] = useState<RuntimeSkillInventoryFilters>(initialFilters ?? {});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [detailRowId, setDetailRowId] = useState("");
   const [selectedRowId, setSelectedRowId] = useState("");
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   useEffect(() => {
     setFilters(initialFilters ?? {});
     setSelectedRowId("");
+    setDetailRowId("");
   }, [initialFilters?.agentId, initialFilters?.available, initialFilters?.builtIn, initialFilters?.runtimeId, initialFilters?.scope]);
 
   useEffect(() => {
@@ -123,6 +129,7 @@ export function SkillWarehousePage({
     [filters, inventory.rows],
   );
   const selectedRow = visibleRows.find((row) => row.id === selectedRowId) ?? visibleRows[0] ?? null;
+  const detailRow = visibleRows.find((row) => row.id === detailRowId) ?? null;
   const activeFilterCount = countActiveFilters(filters);
 
   useConsoleWorkbar({
@@ -180,7 +187,13 @@ export function SkillWarehousePage({
             selectedRowId={selectedRow?.id}
             onSelect={setSelectedRowId}
           />
-          <SkillDetailCard row={selectedRow} />
+          <SkillDetailCard row={selectedRow} onOpenDetail={setDetailRowId} />
+          <SkillFullDetailDialog
+            row={detailRow}
+            onOpenChange={(open) => {
+              if (!open) setDetailRowId("");
+            }}
+          />
         </section>
       )}
     </section>
@@ -443,13 +456,15 @@ function SkillInventoryTable({
 }
 
 function SkillDetailCard({
+  onOpenDetail,
   row,
 }: {
+  onOpenDetail: (rowId: string) => void;
   row: RuntimeSkillInventoryRow | null;
 }) {
   if (!row) {
     return (
-      <aside aria-label="Skill 详情" className="self-start xl:sticky xl:top-4">
+      <aside aria-label="Skill 详情" className={consoleDetailInspectorClass}>
         <Card size="sm">
           <CardHeader>
             <h2 className="font-heading text-sm font-medium leading-snug">Skill 详情</h2>
@@ -463,16 +478,27 @@ function SkillDetailCard({
   }
 
   return (
-    <aside aria-label="Skill 详情" className="self-start xl:sticky xl:top-4">
+    <aside aria-label="Skill 详情" className={consoleDetailInspectorClass}>
       <Card size="sm">
         <CardHeader className="border-b border-border pb-3">
           <div className="rounded-[14px] border border-border bg-[linear-gradient(135deg,var(--blue-soft),var(--brand-soft)_48%,var(--surface-soft))] p-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <InitialAvatar size="lg" text={row.name} tone={skillTone(row.name)} variant="solid" />
-              <div className="min-w-0">
+            <div className="flex min-w-0 items-start gap-3">
+              <InitialAvatar className="mt-0.5" size="lg" text={row.name} tone={skillTone(row.name)} variant="solid" />
+              <div className="min-w-0 flex-1">
                 <h2 className="truncate text-base font-bold">{row.name}</h2>
                 <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{row.description || "暂无描述"}</p>
               </div>
+              <Button
+                aria-label={`查看 ${row.name} 详情`}
+                className="h-8 shrink-0 rounded-[10px]"
+                size="sm"
+                type="button"
+                variant="secondary"
+                onClick={() => onOpenDetail(row.id)}
+              >
+                <Eye className="size-3.5" aria-hidden="true" />
+                查看
+              </Button>
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               <Pill tone={row.scope === "runtime" ? "brand" : "cyan"}>{runtimeSkillScopeLabels[row.scope]} Skill</Pill>
@@ -496,6 +522,90 @@ function SkillDetailCard({
         </CardContent>
       </Card>
     </aside>
+  );
+}
+
+function SkillFullDetailDialog({
+  onOpenChange,
+  row,
+}: {
+  onOpenChange: (open: boolean) => void;
+  row: RuntimeSkillInventoryRow | null;
+}) {
+  if (!row) return null;
+  return (
+    <DetailSurface
+      bodyClassName="space-y-5"
+      className="sm:max-w-3xl"
+      meta={(
+        <>
+          <Pill tone={row.scope === "runtime" ? "brand" : "cyan"}>{runtimeSkillScopeLabels[row.scope]} Skill</Pill>
+          <Pill tone={row.builtIn ? "purple" : "pink"}>{row.builtIn ? "系统自带" : "自定义"}</Pill>
+          <StatusBadge tone={row.available ? "success" : "warning"}>{row.available ? "可用" : "不可用"}</StatusBadge>
+        </>
+      )}
+      open={Boolean(row)}
+      title={row.name}
+      onOpenChange={onOpenChange}
+    >
+      <DetailGrid
+        items={[
+          ["Runtime", row.runtimeName],
+          ["Scope", runtimeSkillScopeLabels[row.scope]],
+          ["来源", row.builtIn ? "系统自带" : "自定义"],
+          ["状态", row.available ? "可用" : "不可用"],
+          ["归属 Agent", row.ownerAgents.length ? row.ownerAgents.map((agent) => agent.name).join("、") : "Runtime 公共能力"],
+          ["最近采集", formatRuntimeTimestamp(row.observedAt ?? undefined)],
+        ]}
+      />
+      <LocalPathBlock row={row} />
+      <AgentAvailabilityList row={row} />
+      <SkillBodyBlock row={row} />
+    </DetailSurface>
+  );
+}
+
+function LocalPathBlock({ row }: { row: RuntimeSkillInventoryRow }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">本地路径</h3>
+        <Button
+          aria-label="复制本地路径"
+          className="h-7 rounded-[9px]"
+          disabled={!row.localPath}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => {
+            if (row.localPath) void copyTextToClipboard(row.localPath);
+          }}
+        >
+          <Copy className="size-3.5" aria-hidden="true" />
+          复制
+        </Button>
+      </div>
+      <div className="rounded-[10px] border border-border bg-[var(--surface-soft)] px-3 py-2 text-[12px] font-semibold leading-5 text-foreground">
+        {row.localPath ? <code className="break-all font-mono">{row.localPath}</code> : <span className="text-muted-foreground">当前快照没有采集到本地路径</span>}
+      </div>
+    </section>
+  );
+}
+
+function SkillBodyBlock({ row }: { row: RuntimeSkillInventoryRow }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Skill 正文</h3>
+      {row.body ? (
+        <pre className="max-h-[42svh] overflow-auto rounded-[12px] border border-border bg-[var(--surface-soft)] p-3 font-mono text-[12px] leading-5 text-foreground whitespace-pre-wrap">
+          {row.body}
+        </pre>
+      ) : (
+        <p className="rounded-[10px] border border-dashed px-3 py-4 text-sm text-muted-foreground">
+          当前快照没有采集到 SKILL.md 正文
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -569,6 +679,17 @@ function SkillWarehouseSkeleton() {
       <Skeleton className="h-[420px] w-full" />
     </section>
   );
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!clipboard?.writeText) return false;
+  try {
+    await clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function countActiveFilters(filters: RuntimeSkillInventoryFilters): number {

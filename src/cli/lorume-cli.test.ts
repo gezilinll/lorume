@@ -413,7 +413,9 @@ process.stdout.write("{}");
         skills: [
           expect.objectContaining({
             name: "cost-query",
+            body: expect.stringContaining("# cost-query"),
             description: "Query cost dashboards.",
+            localPath: expect.stringContaining(".codex/skills/cost-query/SKILL.md"),
             scope: "runtime",
             available: true,
             builtIn: false,
@@ -421,7 +423,9 @@ process.stdout.write("{}");
           }),
           expect.objectContaining({
             name: "github",
+            body: expect.stringContaining("# github"),
             description: "Inspect GitHub repositories.",
+            localPath: expect.stringContaining(".codex/plugins/cache/openai-curated/github/603a6e80/skills/github/SKILL.md"),
             scope: "runtime",
             available: true,
             builtIn: true,
@@ -429,7 +433,9 @@ process.stdout.write("{}");
           }),
           expect.objectContaining({
             name: "imagegen",
+            body: expect.stringContaining("# imagegen"),
             description: "Generate images.",
+            localPath: expect.stringContaining(".codex/skills/.system/imagegen/SKILL.md"),
             scope: "runtime",
             available: true,
             builtIn: true,
@@ -495,7 +501,9 @@ process.stdout.write("{}");
       expect(output.runtimeSkillProbes[0].skills).toEqual([
         expect.objectContaining({
           name: "commit",
+          body: expect.stringContaining("# commit"),
           description: "Commit code.",
+          localPath: expect.stringContaining(".slock/agents/agent-local-1/repos/project-a/.agents/skills/commit/SKILL.md"),
           scope: "agent",
           available: true,
           builtIn: false,
@@ -519,7 +527,9 @@ process.stdout.write("{}");
         }),
         expect.objectContaining({
           name: "share-files",
+          body: expect.stringContaining("# share-files"),
           description: "Share files.",
+          localPath: expect.stringContaining(".slock/agents/agent-local-1/.agents/skills/share-files/SKILL.md"),
           scope: "agent",
           available: true,
           builtIn: false,

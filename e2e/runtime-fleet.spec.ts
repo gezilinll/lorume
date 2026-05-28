@@ -96,6 +96,8 @@ test.describe("Runtime Fleet", () => {
     await page.getByRole("row", { name: /main/ }).click();
     const detail = page.getByRole("complementary", { name: "运行资产详情" });
     await expect(detail).toHaveCSS("position", "sticky");
+    const runtimeDetailTop = await detail.evaluate((node) => Number.parseFloat(getComputedStyle(node).top));
+    expect(runtimeDetailTop).toBeGreaterThanOrEqual(70);
     await expect(detail).toContainText("归属关系");
     await expect(detail).toContainText("状态: 在线");
     await expect(detail).toContainText("所属 Runtime: OpenClaw Gateway");
@@ -114,6 +116,8 @@ test.describe("Runtime Fleet", () => {
     await expect(skillTable).toContainText("Agent");
     await expect(skillTable).not.toContainText("weather");
     const skillDetail = page.getByRole("complementary", { name: "Skill 详情" });
+    const skillDetailTop = await skillDetail.evaluate((node) => Number.parseFloat(getComputedStyle(node).top));
+    expect(skillDetailTop).toBeGreaterThanOrEqual(70);
     await expect(skillDetail).toContainText("可用 Agent");
     await expect(skillDetail).toContainText("main");
     await expect(skillDetail).not.toContainText("/Users/example/.codex/skills/reviewer");

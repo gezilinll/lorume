@@ -35,6 +35,7 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 - Search can grow, but filters keep meaningful minimum widths.
 - Time range, Runtime, Channel, and stage filters cannot collapse to unreadable text.
 - Detail titles, badges, and metadata wrap or truncate without creating horizontal page scroll.
+- Desktop detail inspectors sit below the shared Console workbar rather than at the viewport edge, so scrolling cannot clip the inspector header under the topbar.
 
 ## Overflow
 
@@ -49,7 +50,7 @@ Lorume layout balances product clarity and operational density. Brand and Identi
 - Identity surfaces focus one form task and a compact operations preview.
 - Console surfaces reduce decoration and emphasize lists, metrics, filters, lanes, and inspectors.
 - Runtime Fleet uses Device activity-list rhythm plus Runtime/Agent directory-table rhythm.
-- Skill 仓库 uses a directory-table rhythm plus a sticky detail inspector; counts stay in the topbar rather than body metric cards.
+- Skill 仓库 uses a directory-table rhythm plus a sticky detail inspector; counts stay in the topbar rather than body metric cards. Full Skill detail opens from the inspector through a compact row action instead of expanding the table.
 - Runs uses a Kanban board rhythm: five visible lanes, `235px` minimum lane width, about `14px` lane gaps, `44px` lane headers, `11px` task-card radius, and a thin left status stripe.
 
 ## Responsive

@@ -17,6 +17,7 @@ import {
 import { InitialAvatar } from "@/components/data/InitialAvatar";
 import { StatusBadge as AppStatusBadge } from "@/components/data/StatusBadge";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
+import { consoleDetailInspectorClass } from "@/components/layout/inspector-styles";
 import { toast } from "sonner";
 import {
   deriveAgentFleetStatus,
@@ -703,7 +704,7 @@ function RuntimeDetail({
 }) {
   if (!detail) {
     return (
-      <aside aria-label="运行资产详情" className="self-start xl:sticky xl:top-4">
+      <aside aria-label="运行资产详情" className={consoleDetailInspectorClass}>
         <Card size="sm">
           <CardHeader>
             <h2 className="font-heading text-sm font-medium leading-snug">资产详情</h2>
@@ -719,7 +720,7 @@ function RuntimeDetail({
   const safeSections = detail.sections.filter((section) => section.title !== "本地路径");
 
   return (
-    <aside aria-label="运行资产详情" className="self-start xl:sticky xl:top-4">
+    <aside aria-label="运行资产详情" className={consoleDetailInspectorClass}>
       <Card size="sm">
         <CardHeader className="gap-3">
           <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

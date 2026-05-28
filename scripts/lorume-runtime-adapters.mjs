@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, opendirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, opendirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, arch, platform, networkInterfaces, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
@@ -24,7 +24,9 @@ const SKILL_SCAN_SKIP_DIRS = new Set([
   "vendor_imports",
 ]);
 const SKILL_DESCRIPTION_MAX_CHARS = 180;
+const SKILL_BODY_MAX_CHARS = 256 * 1024;
 const executableCache = new Map();
+const openClawSkillInfoCache = new Map();
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -582,14 +584,55 @@ function openClawSkillToRuntimeSkillRow(rawSkill, visibleAgentId) {
   if (!name) return null;
   const scope = openClawSkillScope(rawSkill);
   if (!scope) return null;
+  const info = openClawSkillInfoForRow(rawSkill, name);
+  const skillFilePath = openClawSkillFilePath(rawSkill, info, name);
   return {
     name,
-    description: cleanText(rawSkill.description || rawSkill.summary),
+    description: cleanText(rawSkill.description || rawSkill.summary || info?.description || info?.summary),
+    ...(skillFilePath ? { body: readSkillBody(skillFilePath), localPath: formatLocalPath(skillFilePath) } : {}),
+    ...(!skillFilePath && cleanText(rawSkill.body || info?.body || rawSkill.content || info?.content || rawSkill.markdown || info?.markdown)
+      ? { body: cleanText(rawSkill.body || info?.body || rawSkill.content || info?.content || rawSkill.markdown || info?.markdown) }
+      : {}),
+    ...(!skillFilePath && cleanText(rawSkill.localPath || info?.localPath || rawSkill.filePath || info?.filePath || rawSkill.skillPath || info?.skillPath)
+      ? { localPath: formatLocalPath(cleanText(rawSkill.localPath || info?.localPath || rawSkill.filePath || info?.filePath || rawSkill.skillPath || info?.skillPath)) }
+      : {}),
     scope,
     available: openClawSkillAvailable(rawSkill),
     builtIn: rawSkill.bundled === true || cleanText(rawSkill.source) === "openclaw-bundled",
     agentIds: scope === "agent" && visibleAgentId ? [visibleAgentId] : [],
   };
+}
+
+function openClawSkillInfoForRow(rawSkill, name) {
+  if (openClawSkillUsesPackagePath(rawSkill)) return null;
+  if (cleanText(rawSkill.filePath || rawSkill.localPath || rawSkill.skillPath)) return null;
+  if (openClawSkillInfoCache.has(name)) return openClawSkillInfoCache.get(name);
+  const info = runJsonWithFileBackedStdout("openclaw", ["skills", "info", name, "--json"], 2_500);
+  openClawSkillInfoCache.set(name, info && typeof info === "object" ? info : null);
+  return openClawSkillInfoCache.get(name);
+}
+
+function openClawSkillFilePath(rawSkill, info, name) {
+  const explicitPath = cleanText(rawSkill.filePath || rawSkill.localPath || rawSkill.skillPath || info?.filePath || info?.localPath || info?.skillPath);
+  if (explicitPath && existsSync(explicitPath)) return explicitPath;
+  return openClawSkillUsesPackagePath(rawSkill) ? openClawSkillBundledFilePath(name) : "";
+}
+
+function openClawSkillUsesPackagePath(rawSkill) {
+  const source = cleanText(rawSkill?.source);
+  return rawSkill?.bundled === true || source === "openclaw-bundled" || source === "openclaw-extra";
+}
+
+function openClawSkillBundledFilePath(name) {
+  const executable = findExecutable("openclaw");
+  if (!executable) return "";
+  try {
+    const packageDir = path.dirname(realpathSync(executable));
+    const candidate = path.join(packageDir, "skills", name, "SKILL.md");
+    return existsSync(candidate) ? candidate : "";
+  } catch {
+    return "";
+  }
 }
 
 function openClawSkillScope(rawSkill) {
@@ -628,6 +671,8 @@ function mergeRuntimeSkillRow(rowsByName, row) {
   rowsByName.set(row.name, {
     name: existing.name,
     description: existing.description || row.description,
+    ...(existing.body || row.body ? { body: existing.body || row.body } : {}),
+    ...(existing.localPath || row.localPath ? { localPath: existing.localPath || row.localPath } : {}),
     scope,
     available: existing.available || row.available,
     builtIn: existing.builtIn || row.builtIn,
@@ -648,6 +693,8 @@ function mergeCollectedRuntimeSkillRow(rowsByKey, row) {
   rowsByKey.set(key, {
     name: existing.name,
     description: existing.description || normalized.description,
+    ...(existing.body || normalized.body ? { body: existing.body || normalized.body } : {}),
+    ...(existing.localPath || normalized.localPath ? { localPath: existing.localPath || normalized.localPath } : {}),
     scope,
     available: existing.available || normalized.available,
     builtIn: existing.builtIn || normalized.builtIn,
@@ -662,6 +709,8 @@ function normalizeRuntimeSkillRow(row) {
   return {
     name,
     description: cleanText(row?.description),
+    ...(cleanText(row?.body) ? { body: cleanText(row.body) } : {}),
+    ...(cleanText(row?.localPath) ? { localPath: cleanText(row.localPath) } : {}),
     scope,
     available: row?.available === true,
     builtIn: row?.builtIn === true,
@@ -726,11 +775,35 @@ function skillRowFromDirectory(skillDir, { scope, builtIn, agentIds = [] }) {
   return normalizeRuntimeSkillRow({
     name,
     description: readSkillDescription(skillFile),
+    body: readSkillBody(skillFile),
+    localPath: formatLocalPath(skillFile),
     scope,
     available: true,
     builtIn,
     agentIds,
   });
+}
+
+function readSkillBody(skillFile) {
+  try {
+    const stats = statSync(skillFile);
+    if (!stats.isFile() || stats.size > SKILL_BODY_MAX_CHARS) return "";
+    return readFileSync(skillFile, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function formatLocalPath(filePath) {
+  const value = cleanText(filePath);
+  if (!value) return "";
+  const absolutePath = path.resolve(value);
+  const root = path.resolve(homeDir());
+  if (absolutePath === root) return "~";
+  if (absolutePath.startsWith(`${root}${path.sep}`)) {
+    return `~/${path.relative(root, absolutePath).split(path.sep).join("/")}`;
+  }
+  return absolutePath.split(path.sep).join("/");
 }
 
 function readSkillDescription(skillFile) {

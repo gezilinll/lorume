@@ -8,10 +8,12 @@ export type RuntimeSkillProbeStatus =
 /** Product-level Skill scope. Runtime adapters must map platform-specific layers into this pair. */
 export type RuntimeSkillScope = "runtime" | "agent";
 
-/** Product-facing Skill row. It intentionally excludes source paths, command names, and file contents. */
+/** Product-facing Skill row. It intentionally excludes raw source evidence and command names. */
 export interface RuntimeSkillDisplayRow {
   name: string;
   description: string;
+  body?: string;
+  localPath?: string;
   scope: RuntimeSkillScope;
   available: boolean;
   builtIn: boolean;
@@ -144,6 +146,8 @@ function normalizeSkillRow(value: unknown): RuntimeSkillDisplayRow | null {
   return {
     name,
     description: readString(value.description),
+    ...(readString(value.body) ? { body: readString(value.body) } : {}),
+    ...(readString(value.localPath) ? { localPath: readString(value.localPath) } : {}),
     scope,
     available: value.available === true,
     builtIn: value.builtIn === true,
@@ -160,6 +164,8 @@ function openClawSkillToRow(rawSkill: unknown, visibleAgentId: string | undefine
   return {
     name,
     description: readString(rawSkill.description) || readString(rawSkill.summary),
+    ...(readString(rawSkill.body) ? { body: readString(rawSkill.body) } : {}),
+    ...(readString(rawSkill.localPath) ? { localPath: readString(rawSkill.localPath) } : {}),
     scope,
     available: isOpenClawSkillAvailable(rawSkill),
     builtIn: rawSkill.bundled === true || readString(rawSkill.source) === "openclaw-bundled",
@@ -206,6 +212,8 @@ function mergeSkillRow(rowsByName: Map<string, RuntimeSkillDisplayRow>, row: Run
   rowsByName.set(row.name, {
     name: existing.name,
     description: existing.description || row.description,
+    ...(existing.body || row.body ? { body: existing.body || row.body } : {}),
+    ...(existing.localPath || row.localPath ? { localPath: existing.localPath || row.localPath } : {}),
     scope,
     available: existing.available || row.available,
     builtIn: existing.builtIn || row.builtIn,

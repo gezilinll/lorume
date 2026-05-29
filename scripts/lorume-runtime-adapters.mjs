@@ -27,6 +27,7 @@ const SKILL_DESCRIPTION_MAX_CHARS = 180;
 const SKILL_BODY_MAX_CHARS = 256 * 1024;
 const executableCache = new Map();
 const openClawSkillInfoCache = new Map();
+let openClawExtraSkillFilePathCache = null;
 
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -605,6 +606,7 @@ function openClawSkillToRuntimeSkillRow(rawSkill, visibleAgentId) {
 
 function openClawSkillInfoForRow(rawSkill, name) {
   if (openClawSkillUsesPackagePath(rawSkill)) return null;
+  if (openClawSkillUsesExtraPluginPath(rawSkill) && openClawExtraPluginSkillFilePath(name)) return null;
   if (cleanText(rawSkill.filePath || rawSkill.localPath || rawSkill.skillPath)) return null;
   if (openClawSkillInfoCache.has(name)) return openClawSkillInfoCache.get(name);
   const info = runJsonWithFileBackedStdout("openclaw", ["skills", "info", name, "--json"], 2_500);
@@ -615,12 +617,46 @@ function openClawSkillInfoForRow(rawSkill, name) {
 function openClawSkillFilePath(rawSkill, info, name) {
   const explicitPath = cleanText(rawSkill.filePath || rawSkill.localPath || rawSkill.skillPath || info?.filePath || info?.localPath || info?.skillPath);
   if (explicitPath && existsSync(explicitPath)) return explicitPath;
+  const extraPluginPath = openClawSkillUsesExtraPluginPath(rawSkill) ? openClawExtraPluginSkillFilePath(name) : "";
+  if (extraPluginPath) return extraPluginPath;
   return openClawSkillUsesPackagePath(rawSkill) ? openClawSkillBundledFilePath(name) : "";
 }
 
 function openClawSkillUsesPackagePath(rawSkill) {
   const source = cleanText(rawSkill?.source);
   return rawSkill?.bundled === true || source === "openclaw-bundled";
+}
+
+function openClawSkillUsesExtraPluginPath(rawSkill) {
+  return cleanText(rawSkill?.source) === "openclaw-extra";
+}
+
+function openClawExtraPluginSkillFilePath(name) {
+  const normalizedName = cleanText(name);
+  if (!normalizedName) return "";
+  return openClawExtraPluginSkillFileIndex().get(normalizedName) || "";
+}
+
+function openClawExtraPluginSkillFileIndex() {
+  if (openClawExtraSkillFilePathCache) return openClawExtraSkillFilePathCache;
+  const index = new Map();
+  const pluginRoot = path.join(homeDir(), ".openclaw", "plugin-skills");
+  let entries = [];
+  try {
+    entries = readdirSync(pluginRoot, { withFileTypes: true });
+  } catch {
+    openClawExtraSkillFilePathCache = index;
+    return index;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || SKILL_SCAN_SKIP_DIRS.has(entry.name)) continue;
+    const skillFile = path.join(pluginRoot, entry.name, "SKILL.md");
+    if (!existsSync(skillFile)) continue;
+    const skillName = readSkillFrontmatterName(skillFile) || entry.name;
+    if (skillName && !index.has(skillName)) index.set(skillName, skillFile);
+  }
+  openClawExtraSkillFilePathCache = index;
+  return index;
 }
 
 function openClawSkillBundledFilePath(name) {
@@ -821,6 +857,26 @@ function readSkillDescription(skillFile) {
     const text = line.trim();
     if (!text || text === "---" || text.startsWith("#") || /^[a-zA-Z_-]+:\s*/.test(text)) continue;
     return truncateSkillDescription(text);
+  }
+  return "";
+}
+
+function readSkillFrontmatterName(skillFile) {
+  let content = "";
+  try {
+    content = readFileSync(skillFile, "utf8");
+  } catch {
+    return "";
+  }
+  const frontmatter = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  return frontmatter ? parseSkillFrontmatterName(frontmatter[1]) : "";
+}
+
+function parseSkillFrontmatterName(frontmatter) {
+  const lines = String(frontmatter || "").split(/\r?\n/);
+  for (const line of lines) {
+    const match = /^name\s*:\s*(.*)$/i.exec(line);
+    if (match) return cleanText(stripYamlString(match[1]));
   }
   return "";
 }

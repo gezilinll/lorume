@@ -281,12 +281,15 @@ process.stdout.write("{}");
     ]);
   });
 
-  it("reads OpenClaw extra skill bodies from skills info file paths", () => {
+  it("reads OpenClaw extra skill bodies from plugin skill files without per-skill info", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-openclaw-extra-skill-"));
     const binDir = path.join(root, "bin");
-    const skillDir = path.join(root, ".openclaw", "plugin-skills", "browser-automation");
+    const pluginSkillRoot = path.join(root, ".openclaw", "plugin-skills");
+    const skillDir = path.join(pluginSkillRoot, "browser-automation");
+    const renamedSkillDir = path.join(pluginSkillRoot, "memory-guide");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(skillDir, { recursive: true });
+    mkdirSync(renamedSkillDir, { recursive: true });
     writeFileSync(path.join(skillDir, "SKILL.md"), `---
 description: Browser automation from extra plugin.
 ---
@@ -294,6 +297,15 @@ description: Browser automation from extra plugin.
 # Browser Automation
 
 Use the browser tool.
+`);
+    writeFileSync(path.join(renamedSkillDir, "SKILL.md"), `---
+name: nowledge-mem-guide
+description: Memory guide from renamed extra plugin.
+---
+
+# Memory Guide
+
+Use the memory guide.
 `);
     writeExecutable(path.join(binDir, "openclaw"), `#!${process.execPath}
 const args = process.argv.slice(2);
@@ -310,12 +322,15 @@ if (args[0] === "skills" && args[1] === "list" && args[2] === "--json" && args[3
   process.exit(0);
 }
 if (args[0] === "skills" && args[1] === "list" && args[2] === "--json") {
-  process.stdout.write(JSON.stringify({ skills: [{ name: "browser-automation", description: "Browser automation from list.", source: "openclaw-extra", bundled: false, eligible: true, disabled: false, blockedByAllowlist: false, missing: { bins: [], anyBins: [], env: [], config: [], os: [] } }] }));
+  process.stdout.write(JSON.stringify({ skills: [
+    { name: "browser-automation", description: "Browser automation from list.", source: "openclaw-extra", bundled: false, eligible: true, disabled: false, blockedByAllowlist: false, missing: { bins: [], anyBins: [], env: [], config: [], os: [] } },
+    { name: "nowledge-mem-guide", description: "Memory guide from list.", source: "openclaw-extra", bundled: false, eligible: true, disabled: false, blockedByAllowlist: false, missing: { bins: [], anyBins: [], env: [], config: [], os: [] } }
+  ] }));
   process.exit(0);
 }
-if (args[0] === "skills" && args[1] === "info" && args[2] === "browser-automation" && args[3] === "--json") {
-  process.stdout.write(JSON.stringify({ name: "browser-automation", filePath: ${JSON.stringify(path.join(skillDir, "SKILL.md"))} }));
-  process.exit(0);
+if (args[0] === "skills" && args[1] === "info") {
+  process.stderr.write("skills info should not be required for openclaw-extra plugin paths");
+  process.exit(91);
 }
 process.stdout.write("{}");
 `);
@@ -334,7 +349,7 @@ process.stdout.write("{}");
       },
     });
 
-    expect(output.runtimeSkillProbes?.[0]?.skills).toEqual([
+    expect(output.runtimeSkillProbes?.[0]?.skills).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: "browser-automation",
         body: expect.stringContaining("Use the browser tool."),
@@ -342,7 +357,14 @@ process.stdout.write("{}");
         scope: "runtime",
         available: true,
       }),
-    ]);
+      expect.objectContaining({
+        name: "nowledge-mem-guide",
+        body: expect.stringContaining("Use the memory guide."),
+        localPath: "~/.openclaw/plugin-skills/memory-guide/SKILL.md",
+        scope: "runtime",
+        available: true,
+      }),
+    ]));
   });
 
   it("collects native Codex tasks while skipping Slock and Multica-owned Codex sessions", () => {

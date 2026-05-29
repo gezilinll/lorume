@@ -370,6 +370,7 @@ describe("Console shell", () => {
 
     expect(screen.getByRole("heading", { name: "Skill 仓库" })).toBeInTheDocument();
     const skillTable = await screen.findByRole("table", { name: "Skill 列表" });
+    expect(within(skillTable).getByRole("columnheader", { name: "最近采集" })).toHaveClass("w-[14%]");
     expect(screen.getByRole("button", { name: /2 个筛选/ })).toBeInTheDocument();
     expect(within(skillTable).getByText("browser")).toBeInTheDocument();
     expect(within(skillTable).getByText("code-review")).toBeInTheDocument();
@@ -387,6 +388,11 @@ describe("Console shell", () => {
     expect(within(fullDetail).getByText("~/.codex/skills/.system/browser/SKILL.md")).toBeInTheDocument();
     expect(within(fullDetail).getByText("Skill 正文")).toBeInTheDocument();
     expect(within(fullDetail).getByText(/Use browser automation for screenshots and inspection/)).toBeInTheDocument();
+    expect(within(fullDetail).queryByText("基础信息")).not.toBeInTheDocument();
+    expect(within(fullDetail).queryByText("可用 Agent")).not.toBeInTheDocument();
+    expect(within(fullDetail).queryByText(/^复制$/)).not.toBeInTheDocument();
+    expect(within(fullDetail).getByRole("button", { name: "复制本地路径" })).toBeInTheDocument();
+    expect(within(fullDetail).getByRole("button", { name: "复制 Skill 正文" })).toBeInTheDocument();
   });
 
   it("deep-links Runtime Fleet Skill actions into the Skill warehouse", async () => {
@@ -397,7 +403,8 @@ describe("Console shell", () => {
     render(<App runtimeMode="agent" />);
 
     const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
-    await user.click(within(runtimeTable).getByRole("button", { name: "OpenClaw Gateway Skill" }));
+    const runtimeRow = within(runtimeTable).getByRole("row", { name: /OpenClaw Gateway/ });
+    await user.click(within(runtimeRow).getByRole("button", { name: "查看 Skill" }));
 
     expect(window.location.pathname).toBe("/skills");
     expect(window.location.search).toContain(`runtimeId=${encodeURIComponent(defaultRuntimeId)}`);
@@ -866,8 +873,8 @@ describe("Console shell", () => {
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
     const taskHeader = within(agentTable).getByRole("columnheader", { name: "Task" });
     const activeHeader = within(agentTable).getByRole("columnheader", { name: "最近活跃" });
-    const skillHeader = within(agentTable).getByRole("columnheader", { name: "Skill" });
-    const skillCell = within(agentTable).getByRole("button", { name: "main Skill" }).closest("td");
+    const skillHeader = within(agentTable).getByRole("columnheader", { name: "Skill 操作" });
+    const skillCell = within(agentTable).getAllByRole("button", { name: "查看 Skill" })[0].closest("td");
     expect(taskHeader).toHaveClass("w-[9%]");
     expect(activeHeader).toHaveClass("w-[17%]");
     expect(skillHeader).toHaveClass("w-[10%]");
@@ -952,7 +959,7 @@ describe("Console shell", () => {
     const agentRow = within(agentTable).getByRole("row", { name: /main/ });
     expect(within(agentRow).getByText("不可见")).toBeInTheDocument();
     expect(within(agentRow).queryByText("离线")).not.toBeInTheDocument();
-    expect(within(agentRow).getByRole("button", { name: "main Skill" })).toBeDisabled();
+    expect(within(agentRow).getByRole("button", { name: "查看 Skill" })).toBeDisabled();
 
     await userEvent.hover(within(agentRow).getByLabelText(/不可见：/));
     expect((await screen.findAllByText("该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。")).length).toBeGreaterThan(0);

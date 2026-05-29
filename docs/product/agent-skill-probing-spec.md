@@ -38,7 +38,8 @@ Display rules:
 - `scope="runtime"` rows keep `agentIds: []` in stored metadata. For UI display, the page derives `availableAgentIds` from active, non-`invisible` Agents under the same Runtime when the Skill is `available=true`.
 - `scope="agent"` rows use stored `agentIds` as ownership/visibility. Agent deep links show both runtime-scope Skills available to that Agent and agent-scope Skills whose `agentIds` include that Agent.
 - Runtime Fleet deep links into `/skills?runtimeId=...` or `/skills?runtimeId=...&agentId=...`; the Skill 仓库 filter menu starts with those filters selected.
-- The detail inspector keeps raw source-path evidence, command names, and hidden adapter fields out of the UI. It shows basic metadata and derived available Agents. A row-level `查看` action opens the read-only Skill detail card, where `localPath` appears as `本地路径` and the collected `SKILL.md` body appears at the bottom as `Skill 正文`.
+- The right-side detail inspector keeps raw source-path evidence, command names, and hidden adapter fields out of the UI. It shows compact metadata and derived available Agents for fast browsing.
+- A row-level `查看` action opens the read-only Skill detail card. The full detail card is optimized for reading and copying collected content: its header shows only the Skill title, its body shows `localPath` as `本地路径`, and the collected `SKILL.md` body fills the remaining space as `Skill 正文`. `本地路径` and `Skill 正文` expose icon-only copy actions that appear on content hover/focus instead of persistent text buttons.
 - Empty or failed Runtime snapshots produce empty/error UI states; the frontend must not invent Skill rows.
 
 ## Runtime Snapshot

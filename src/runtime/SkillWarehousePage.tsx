@@ -393,13 +393,13 @@ function SkillInventoryTable({
           <Table aria-label="Skill 列表" className="table-fixed">
             <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
-                <TableHead className="w-[32%]">Skill</TableHead>
+                <TableHead className="w-[30%]">Skill</TableHead>
                 <TableHead className="w-[16%]">归属 Runtime</TableHead>
                 <TableHead className="w-[12%]">Scope</TableHead>
                 <TableHead className="w-[11%]">来源</TableHead>
                 <TableHead className="w-[9%]">状态</TableHead>
-                <TableHead className="w-[10%]">Agent</TableHead>
-                <TableHead className="w-[10%] text-right">最近采集</TableHead>
+                <TableHead className="w-[8%]">Agent</TableHead>
+                <TableHead className="w-[14%] text-right">最近采集</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -535,57 +535,52 @@ function SkillFullDetailDialog({
   if (!row) return null;
   return (
     <DetailSurface
-      bodyClassName="space-y-5"
+      bodyClassName="flex min-h-[min(680px,calc(100svh-10rem))] flex-col gap-4 space-y-0"
       className="sm:max-w-3xl"
-      meta={(
-        <>
-          <Pill tone={row.scope === "runtime" ? "brand" : "cyan"}>{runtimeSkillScopeLabels[row.scope]} Skill</Pill>
-          <Pill tone={row.builtIn ? "purple" : "pink"}>{row.builtIn ? "系统自带" : "自定义"}</Pill>
-          <StatusBadge tone={row.available ? "success" : "warning"}>{row.available ? "可用" : "不可用"}</StatusBadge>
-        </>
-      )}
       open={Boolean(row)}
       title={row.name}
       onOpenChange={onOpenChange}
     >
-      <DetailGrid
-        items={[
-          ["Runtime", row.runtimeName],
-          ["Scope", runtimeSkillScopeLabels[row.scope]],
-          ["来源", row.builtIn ? "系统自带" : "自定义"],
-          ["状态", row.available ? "可用" : "不可用"],
-          ["归属 Agent", row.ownerAgents.length ? row.ownerAgents.map((agent) => agent.name).join("、") : "Runtime 公共能力"],
-          ["最近采集", formatRuntimeTimestamp(row.observedAt ?? undefined)],
-        ]}
-      />
       <LocalPathBlock row={row} />
-      <AgentAvailabilityList row={row} />
       <SkillBodyBlock row={row} />
     </DetailSurface>
+  );
+}
+
+function HoverCopyButton({
+  disabled,
+  label,
+  value,
+}: {
+  disabled?: boolean;
+  label: string;
+  value: string;
+}) {
+  if (!value) return null;
+  return (
+    <Button
+      aria-label={label}
+      className={cn(
+        "absolute right-2 top-2 z-10 border-border bg-card/95 text-muted-foreground opacity-0 shadow-[0_8px_22px_rgba(15,23,42,0.12)] transition-opacity hover:text-foreground",
+        "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+      )}
+      disabled={disabled}
+      size="icon-sm"
+      type="button"
+      variant="outline"
+      onClick={() => void copyTextToClipboard(value)}
+    >
+      <Copy className="size-3.5" aria-hidden="true" />
+    </Button>
   );
 }
 
 function LocalPathBlock({ row }: { row: RuntimeSkillInventoryRow }) {
   return (
     <section className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">本地路径</h3>
-        <Button
-          aria-label="复制本地路径"
-          className="h-7 rounded-[9px]"
-          disabled={!row.localPath}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={() => {
-            if (row.localPath) void copyTextToClipboard(row.localPath);
-          }}
-        >
-          <Copy className="size-3.5" aria-hidden="true" />
-          复制
-        </Button>
-      </div>
-      <div className="rounded-[10px] border border-border bg-[var(--surface-soft)] px-3 py-2 text-[12px] font-semibold leading-5 text-foreground">
+      <h3 className="text-sm font-medium">本地路径</h3>
+      <div className="group relative rounded-[10px] border border-border bg-[var(--surface-soft)] px-3 py-2 pr-11 text-[12px] font-semibold leading-5 text-foreground">
+        <HoverCopyButton label="复制本地路径" value={row.localPath ?? ""} />
         {row.localPath ? <code className="break-all font-mono">{row.localPath}</code> : <span className="text-muted-foreground">当前快照没有采集到本地路径</span>}
       </div>
     </section>
@@ -594,16 +589,19 @@ function LocalPathBlock({ row }: { row: RuntimeSkillInventoryRow }) {
 
 function SkillBodyBlock({ row }: { row: RuntimeSkillInventoryRow }) {
   return (
-    <section className="space-y-2">
+    <section className="flex min-h-0 flex-1 flex-col space-y-2">
       <h3 className="text-sm font-medium">Skill 正文</h3>
       {row.body ? (
-        <pre className="max-h-[42svh] overflow-auto rounded-[12px] border border-border bg-[var(--surface-soft)] p-3 font-mono text-[12px] leading-5 text-foreground whitespace-pre-wrap">
-          {row.body}
-        </pre>
+        <div className="group relative min-h-[360px] flex-1 overflow-hidden rounded-[12px] border border-border bg-[var(--surface-soft)]">
+          <HoverCopyButton label="复制 Skill 正文" value={row.body} />
+          <pre className="h-full min-h-[360px] overflow-auto p-3 pr-11 font-mono text-[12px] leading-5 text-foreground whitespace-pre-wrap">
+            {row.body}
+          </pre>
+        </div>
       ) : (
-        <p className="rounded-[10px] border border-dashed px-3 py-4 text-sm text-muted-foreground">
+        <div className="group relative flex min-h-[360px] flex-1 items-center rounded-[10px] border border-dashed px-3 py-4 text-sm text-muted-foreground">
           当前快照没有采集到 SKILL.md 正文
-        </p>
+        </div>
       )}
     </section>
   );

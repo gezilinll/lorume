@@ -21,13 +21,15 @@ describe("Runtime Fleet Skill warehouse entry", () => {
     renderRuntimeFleetPage(onOpenSkillWarehouse);
 
     const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
-    await user.click(within(runtimeTable).getByRole("button", { name: "OpenClaw Gateway Skill" }));
+    const runtimeRow = within(runtimeTable).getByRole("row", { name: /OpenClaw Gateway/ });
+    await user.click(within(runtimeRow).getByRole("button", { name: "查看 Skill" }));
     expect(onOpenSkillWarehouse).toHaveBeenCalledWith({
       runtimeId: "fixture-mac:runtime:openclaw",
     });
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
-    await user.click(within(agentTable).getByRole("button", { name: "main Skill" }));
+    const agentRow = within(agentTable).getByRole("row", { name: /main/ });
+    await user.click(within(agentRow).getByRole("button", { name: "查看 Skill" }));
     expect(onOpenSkillWarehouse).toHaveBeenCalledWith({
       agentId: "fixture-mac:runtime:openclaw:agent:main",
       runtimeId: "fixture-mac:runtime:openclaw",
@@ -39,7 +41,9 @@ describe("Runtime Fleet Skill warehouse entry", () => {
     const onOpenSkillWarehouse = vi.fn();
 
     renderRuntimeFleetPage(onOpenSkillWarehouse);
-    screen.getByRole("button", { name: "main Skill" }).focus();
+    const agentTable = screen.getByRole("table", { name: "Agent 列表" });
+    const agentRow = within(agentTable).getByRole("row", { name: /main/ });
+    within(agentRow).getByRole("button", { name: "查看 Skill" }).focus();
     await user.keyboard("{Enter}");
 
     expect(onOpenSkillWarehouse).toHaveBeenCalledWith({
@@ -91,7 +95,9 @@ describe("Runtime Fleet Skill warehouse entry", () => {
 
     renderRuntimeFleetPage(vi.fn());
 
-    const skillButton = await screen.findByRole("button", { name: "main Skill" });
+    const agentTable = await screen.findByRole("table", { name: "Agent 列表" });
+    const agentRow = within(agentTable).getByRole("row", { name: /main/ });
+    const skillButton = within(agentRow).getByRole("button", { name: "查看 Skill" });
     await waitFor(() => expect(skillButton).toBeDisabled());
     const tooltipTarget = skillButton.closest("[data-skill-probe-disabled='true']");
     expect(tooltipTarget).toBeTruthy();

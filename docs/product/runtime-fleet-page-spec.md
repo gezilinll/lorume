@@ -21,7 +21,7 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面顶部工作栏展示全局数量，页面主体展示全量 Device、Runtime 和 Agent。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
 - 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
-- Runtime / Agent 行级 Skill 入口仍是只读能力；点击后跳转到 Skill 仓库并带上 Runtime / Agent 筛选，不请求设备执行远端探测。
+- Runtime / Agent 行级 Skill 入口仍是只读能力；点击后跳转到 Skill 仓库并带上 Runtime / Agent 筛选，不请求设备执行远端探测。表格动作列不展示可见列名，行内按钮文案统一为 `查看 Skill`。
 - 页面自动轮询后端已有数据，不下发远端采集命令。
 
 ## 非目标
@@ -110,14 +110,14 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-v
 
 ### Runtime
 
-- 列表使用 `users.html` 的成员目录节奏展示 Runtime 名称、版本、所属设备、collection status、最近活跃、Task 计数和只读 Skill 入口。Runtime kind 不作为独立表格列或重复 badge 展示；需要识别 kind 时优先在详情或后端诊断语境中呈现。
+- 列表使用 `users.html` 的成员目录节奏展示 Runtime 名称、版本、所属设备、collection status、最近活跃、Task 计数和只读 Skill 入口。Runtime kind 不作为独立表格列或重复 badge 展示；需要识别 kind 时优先在详情或后端诊断语境中呈现。Skill 动作列无可见列名，按钮显示 `查看 Skill`。
 - 详情展示基础信息、归属关系、diagnostics paths 和 lastError。
 - 本地路径只展示 Runtime 根目录；adapter 内部文件、状态库、sessions 子目录等不作为默认详情字段展示。
 - 不展示 `endpoint`、`capabilities`、`sourceRefs`。
 
 ### Agent
 
-- 列表使用 `users.html` 的成员目录节奏展示 Agent 名称、归属 Runtime、collection status、最近活跃、Task 计数和只读 Skill 入口。
+- 列表使用 `users.html` 的成员目录节奏展示 Agent 名称、归属 Runtime、collection status、最近活跃、Task 计数和只读 Skill 入口。Skill 动作列无可见列名，按钮显示 `查看 Skill`。
 - Agent 来源通过 `agent.runtimeId -> runtime.kind` 派生，不显示 `origin` 字段。
 - 详情展示基础信息、归属关系、diagnostics paths 和 Task 计数；Skill metadata 通过行级入口进入 Skill 仓库查看。
 - 本地路径只在 adapter 能证明存在本机目录时展示；没有本机目录时显示 `不适用`，不能留空造成漏采集错觉。

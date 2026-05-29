@@ -105,7 +105,7 @@ test.describe("Runtime Fleet", () => {
     await expect(detail).toContainText("全部任务: 2");
     await expect(detail).not.toContainText("关联渠道");
     await expect(detail).toContainText("最近活跃:");
-    await page.getByRole("button", { name: "main Skill" }).click();
+    await page.getByRole("row", { name: /main/ }).getByRole("button", { name: "查看 Skill" }).click();
     await expect(page).toHaveURL(/\/skills\?runtimeId=fixture-mac%3Aruntime%3Aopenclaw&agentId=fixture-mac%3Aruntime%3Aopenclaw%3Aagent%3Amain/);
     await expect(page.getByRole("heading", { name: "Skill 仓库" })).toBeVisible();
     await expect(page.getByRole("button", { name: "2 个筛选" })).toBeVisible();

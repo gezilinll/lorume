@@ -506,7 +506,9 @@ function RuntimeTable({
                 <TableHead className="w-[13%]">状态</TableHead>
                 <TableHead className="w-[9%]">Task</TableHead>
                 <TableHead className="w-[15%]">最近活跃</TableHead>
-                <TableHead className="w-[8%]">Skill</TableHead>
+                <TableHead className="w-[8%]">
+                  <span className="sr-only">Skill 操作</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -549,7 +551,6 @@ function RuntimeTable({
                     </TableCell>
                     <TableCell>
                       <Button
-                        aria-label={`${runtime.name} Skill`}
                         size="sm"
                         type="button"
                         variant="outline"
@@ -558,7 +559,7 @@ function RuntimeTable({
                           onOpenSkillWarehouse(runtime);
                         }}
                       >
-                        查看
+                        查看 Skill
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -612,7 +613,9 @@ function AgentTable({
                 <TableHead className="w-[12%]">状态</TableHead>
                 <TableHead className="w-[9%]">Task</TableHead>
                 <TableHead className="w-[17%]">最近活跃</TableHead>
-                <TableHead className="w-[10%]">Skill</TableHead>
+                <TableHead className="w-[10%]">
+                  <span className="sr-only">Skill 操作</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -665,7 +668,6 @@ function AgentTable({
                             onClick={(event) => event.stopPropagation()}
                           >
                             <Button
-                              aria-label={`${agent.name} Skill`}
                               disabled={skillProbeDisabled}
                               size="sm"
                               type="button"
@@ -675,7 +677,7 @@ function AgentTable({
                                 onOpenSkillWarehouse(agent);
                               }}
                             >
-                              查看
+                              查看 Skill
                             </Button>
                           </span>
                         </TooltipTrigger>

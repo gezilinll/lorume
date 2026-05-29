@@ -72,7 +72,7 @@ Rules:
 - The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
 - The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
-- Runtime and Agent Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
+- Runtime and Agent Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. The action column keeps a stable width but has no visible header label, and the button text is `查看 Skill`. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
 - Copying an object ID uses toast feedback; the detail panel should not grow a temporary copied row.
 - Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
@@ -105,12 +105,12 @@ Rules:
 
 - The page uses the `data-dense` Console layout tier, the shared top workbar, a compact search/filter surface, a directory table, and a sticky detail inspector.
 - It does not render a hero, repeated summary metric cards, or a page-owned title block. Counts live in the top workbar.
-- The list follows the Runtime Fleet Agent directory rhythm: avatar, left accent stripe, primary Skill name, short description, Runtime ownership, `Scope`, source, status, compact Agent avatars/count, and latest collection time.
+- The list follows the Runtime Fleet Agent directory rhythm: avatar, left accent stripe, primary Skill name, short description, Runtime ownership, `Scope`, source, status, compact Agent avatars/count, and latest collection time. The latest collection column keeps enough fixed width for two-line date/time readability.
 - `Scope` and source are separate columns. `Runtime`/`Agent` explains capability layer; `系统自带`/`自定义` explains provenance.
 - Runtime-scope Skill rows derive their available Agent list from active Agents under the same Runtime. Agent-scope rows use stored Agent ownership. Agent deep links show Runtime common Skills usable by that Agent plus that Agent's own Skills.
 - The filter menu follows the Runs compact menu treatment: a single filter button, submenu groups, selected counts, and a reset-all action when any non-search filter is active. Search is a separate first-level input.
 - The detail inspector shows basic metadata, derived available Agents, and a compact `查看` action for the selected Skill. Runtime fields display the Runtime name only, because the field label already provides the semantic context.
-- The `查看` action opens a read-only detail card. The detail card header shows the Skill name and chips only; it does not repeat the short description. The card shows valuable metadata, `本地路径` when collected, available Agents, and `Skill 正文` as the final section.
+- The `查看` action opens a read-only detail card. The detail card header shows only the Skill name; it does not repeat the short description, chips, metadata, or available Agents. The card shows `本地路径` when collected and expands `Skill 正文` as the primary reading area.
 - Skill 仓库 must not show raw adapter source-path evidence, command names, hidden adapter fields, same-name diagnostics as primary content, edit/import/install/assignment controls, or auxiliary Skill files.
 - The page is read-only. No create, import, edit, publish, install, assign, migrate, sync, execute, or backend-triggered probe controls are allowed.
 

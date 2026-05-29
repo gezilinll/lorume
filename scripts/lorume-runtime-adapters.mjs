@@ -620,7 +620,7 @@ function openClawSkillFilePath(rawSkill, info, name) {
 
 function openClawSkillUsesPackagePath(rawSkill) {
   const source = cleanText(rawSkill?.source);
-  return rawSkill?.bundled === true || source === "openclaw-bundled" || source === "openclaw-extra";
+  return rawSkill?.bundled === true || source === "openclaw-bundled";
 }
 
 function openClawSkillBundledFilePath(name) {

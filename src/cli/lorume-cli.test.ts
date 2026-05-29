@@ -281,6 +281,70 @@ process.stdout.write("{}");
     ]);
   });
 
+  it("reads OpenClaw extra skill bodies from skills info file paths", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-openclaw-extra-skill-"));
+    const binDir = path.join(root, "bin");
+    const skillDir = path.join(root, ".openclaw", "plugin-skills", "browser-automation");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(path.join(skillDir, "SKILL.md"), `---
+description: Browser automation from extra plugin.
+---
+
+# Browser Automation
+
+Use the browser tool.
+`);
+    writeExecutable(path.join(binDir, "openclaw"), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === "health") {
+  process.stdout.write(JSON.stringify({ ok: true, agents: [{ agentId: "main" }] }));
+  process.exit(0);
+}
+if (args[0] === "status") {
+  process.stdout.write(JSON.stringify({ gateway: { reachable: true, self: { version: "openclaw 1.0.0" } }, agents: { agents: [{ agentId: "main" }] } }));
+  process.exit(0);
+}
+if (args[0] === "skills" && args[1] === "list" && args[2] === "--json" && args[3] === "--agent") {
+  process.stdout.write(JSON.stringify({ skills: [] }));
+  process.exit(0);
+}
+if (args[0] === "skills" && args[1] === "list" && args[2] === "--json") {
+  process.stdout.write(JSON.stringify({ skills: [{ name: "browser-automation", description: "Browser automation from list.", source: "openclaw-extra", bundled: false, eligible: true, disabled: false, blockedByAllowlist: false, missing: { bins: [], anyBins: [], env: [], config: [], os: [] } }] }));
+  process.exit(0);
+}
+if (args[0] === "skills" && args[1] === "info" && args[2] === "browser-automation" && args[3] === "--json") {
+  process.stdout.write(JSON.stringify({ name: "browser-automation", filePath: ${JSON.stringify(path.join(skillDir, "SKILL.md"))} }));
+  process.exit(0);
+}
+process.stdout.write("{}");
+`);
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.runtimeSkillProbes?.[0]?.skills).toEqual([
+      expect.objectContaining({
+        name: "browser-automation",
+        body: expect.stringContaining("Use the browser tool."),
+        localPath: "~/.openclaw/plugin-skills/browser-automation/SKILL.md",
+        scope: "runtime",
+        available: true,
+      }),
+    ]);
+  });
+
   it("collects native Codex tasks while skipping Slock and Multica-owned Codex sessions", () => {
     const root = mkdtempSync(path.join(tmpdir(), "lorume-codex-fixture-"));
     writeCodexFixtureHome(root);

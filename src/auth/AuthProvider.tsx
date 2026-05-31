@@ -176,11 +176,60 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
   }
 
   if (inviteToken) {
+    if (isInvitePreviewLoading || !invitePreview) {
+      return (
+        <AuthPageShell title="确认邀请" subtitle="正在读取邀请信息，请稍等片刻。">
+          <p className="text-sm leading-6 text-muted-foreground">加载中...</p>
+        </AuthPageShell>
+      );
+    }
+
+    if (invitePreview.status !== "available") {
+      return (
+        <InvitationStatusPage
+          error={error}
+          preview={invitePreview}
+          onBack={() => {
+            setError(null);
+            clearInviteRoute();
+            setInviteToken(null);
+          }}
+        />
+      );
+    }
+
+    if (invitePreview.email && !isSameEmail(session.user.email, invitePreview.email)) {
+      const invitedEmail = invitePreview.email;
+      return (
+        <InvitationEmailSwitchPage
+          error={error}
+          preview={invitePreview}
+          onSkip={() => {
+            setError(null);
+            clearInviteRoute();
+            setInviteToken(null);
+          }}
+          onSubmit={async () => {
+            setError(null);
+            try {
+              setAutoCodeRequestedInviteToken(inviteToken);
+              await authClient.logout();
+              setSession(null);
+              const result = await authClient.requestEmailCode(invitedEmail);
+              setEmailForCode(result.email);
+            } catch (nextError) {
+              setAutoCodeRequestedInviteToken(null);
+              setError(formatAuthError(nextError));
+            }
+          }}
+        />
+      );
+    }
+
     return (
       <InviteJoinPage
         error={error}
         preview={invitePreview}
-        session={session}
         onSkip={() => {
           setError(null);
           clearInviteRoute();
@@ -219,6 +268,45 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
   }
 
   return <AuthContext.Provider value={context}>{children}</AuthContext.Provider>;
+}
+
+function InvitationEmailSwitchPage({
+  error,
+  onSkip,
+  onSubmit,
+  preview,
+}: {
+  error?: string | null;
+  onSkip: () => void;
+  onSubmit: () => Promise<void>;
+  preview: AuthInvitationPreview;
+}) {
+  const roleLabel = preview.role === "admin" ? "管理员" : "成员";
+  const organizationName = preview.organizationName ?? "受邀组织";
+  const maskedEmail = preview.maskedEmail ?? "受邀邮箱";
+
+  return (
+    <AuthPageShell
+      title="验证受邀邮箱"
+      subtitle={`你将加入 ${organizationName}，目标角色为 ${roleLabel}。请使用受邀邮箱 ${maskedEmail} 完成验证码登录。`}
+      preview={null}
+      notice="当前浏览器已登录其他账号。为了保护组织访问权限，需要先切换到受邀邮箱。"
+    >
+      <div className="grid gap-4">
+        <Button type="button" onClick={() => void onSubmit()}>
+          发送验证码到受邀邮箱
+        </Button>
+        <Button type="button" variant="secondary" onClick={onSkip}>
+          暂不加入
+        </Button>
+      </div>
+      {error ? (
+        <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </AuthPageShell>
+  );
 }
 
 function InvitationStatusPage({
@@ -290,6 +378,10 @@ function addOrganizationToSession(
 ): AuthSessionContext {
   if (session.organizations.some((item) => item.organizationId === organization.organizationId)) return session;
   return { ...session, organizations: [...session.organizations, organization] };
+}
+
+function isSameEmail(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function formatAuthError(error: unknown): string {

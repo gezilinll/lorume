@@ -259,7 +259,7 @@ describe("auth pages", () => {
         });
       }
       if (url.endsWith("/api/auth/email-code")) return jsonResponse({ ok: true, email: "invited@gaoding.com" }, 202);
-      if (url.endsWith("/api/auth/login")) return jsonResponse(sessionResponse({ organizations: [] }));
+      if (url.endsWith("/api/auth/login")) return jsonResponse(sessionResponse({ organizations: [], userEmail: "invited@gaoding.com" }));
       if (url.endsWith("/api/invitations/invitation-token-1/accept")) {
         return jsonResponse({ organization: { organizationId: "org_2", id: "mem_2", name: "受邀组织", role: "admin", slug: "invited" } });
       }
@@ -278,6 +278,63 @@ describe("auth pages", () => {
 
     expect(requests).toContainEqual({
       url: "/api/auth/email-code",
+      body: { email: "invited@gaoding.com" },
+    });
+  });
+
+  it("asks a signed-in mismatched user to verify the invited email before accepting", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/invite/invitation-token-1");
+    const requests: Array<{ body: unknown; method?: string; url: string }> = [];
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const url = input.toString();
+      requests.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/api/me")) {
+        return jsonResponse(sessionResponse({ organizations: [], userEmail: "linbinghe@gmail.com" }));
+      }
+      if (url.endsWith("/api/invitations/invitation-token-1/preview")) {
+        return jsonResponse({
+          invitation: {
+            email: "invited@gaoding.com",
+            maskedEmail: "i***@gaoding.com",
+            organizationName: "gaoding",
+            role: "member",
+            status: "available",
+          },
+        });
+      }
+      if (url.endsWith("/api/auth/logout")) return new Response(null, { status: 204 });
+      if (url.endsWith("/api/auth/email-code")) return jsonResponse({ ok: true, email: "invited@gaoding.com" }, 202);
+      if (url.endsWith("/api/auth/login")) return jsonResponse(sessionResponse({ organizations: [], userEmail: "invited@gaoding.com" }));
+      if (url.endsWith("/api/invitations/invitation-token-1/accept")) {
+        return jsonResponse({ organization: { organizationId: "org_2", id: "mem_2", name: "gaoding", role: "member", slug: "gaoding" } });
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App runtimeMode="production" />);
+
+    expect(await screen.findByRole("heading", { name: "验证受邀邮箱" })).toBeInTheDocument();
+    expect(screen.getByText(/i\*\*\*@gaoding.com/)).toBeInTheDocument();
+    expect(screen.queryByText("linbinghe@gmail.com")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加入并进入" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "发送验证码到受邀邮箱" }));
+    expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("验证码"), "246810");
+    await user.click(screen.getByRole("button", { name: "进入控制台" }));
+    expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "加入并进入" }));
+    expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+
+    expect(requests).toContainEqual({
+      url: "/api/auth/logout",
+      method: "POST",
+      body: null,
+    });
+    expect(requests).toContainEqual({
+      url: "/api/auth/email-code",
+      method: "POST",
       body: { email: "invited@gaoding.com" },
     });
   });
@@ -317,13 +374,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function sessionResponse(options: { organizations: unknown[] }) {
+function sessionResponse(options: { organizations: unknown[]; userEmail?: string }) {
   return {
     id: "ses_1",
     organizations: options.organizations,
     user: {
       createdAt: "2026-05-12T10:00:00.000Z",
-      email: "zhangliang@gaoding.com",
+      email: options.userEmail ?? "zhangliang@gaoding.com",
       id: "usr_1",
       updatedAt: "2026-05-12T10:00:00.000Z",
     },

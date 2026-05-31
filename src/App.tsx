@@ -10,6 +10,7 @@ import {
 import { HomePage } from "./HomePage";
 import { SkillWarehousePage } from "./runtime/SkillWarehousePage";
 import { RuntimeFleetPage } from "./runtime/RuntimeFleetPage";
+import { RuntimeScheduledTasksPage } from "./runtime/RuntimeScheduledTasksPage";
 import { RuntimeWorkBoardPage } from "./runtime/RuntimeWorkBoardPage";
 import { OrganizationSettingsPage } from "./settings/OrganizationSettingsPage";
 import type { AuthOrganizationMembership } from "./auth/auth-store";
@@ -22,6 +23,7 @@ const emptyOrganizations: AuthOrganizationMembership[] = [];
 const pagePathByKey: Record<PageKey, string> = {
   runtime: "/runtime",
   runs: "/runs",
+  scheduled: "/scheduled-tasks",
   skills: "/skills",
   settings: "/settings",
 };
@@ -37,7 +39,15 @@ export function App({
   runtimeMode?: LorumeAppMode;
 }) {
   const mode = runtimeMode ?? "production";
-  if (mode !== "agent" && getCurrentPath() === "/") {
+  const [currentPath, setCurrentPath] = useState(() => getCurrentPath());
+
+  useEffect(() => {
+    const syncCurrentPath = () => setCurrentPath(getCurrentPath());
+    window.addEventListener("popstate", syncCurrentPath);
+    return () => window.removeEventListener("popstate", syncCurrentPath);
+  }, []);
+
+  if (mode !== "agent" && currentPath === "/") {
     return <HomePage />;
   }
 
@@ -168,6 +178,8 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
         <RuntimeFleetPage organizationId={runtimeOrganizationId} onOpenSkillWarehouse={openSkillWarehouse} />
       ) : activePage === "runs" ? (
         <RuntimeWorkBoardPage organizationId={runtimeOrganizationId} />
+      ) : activePage === "scheduled" ? (
+        <RuntimeScheduledTasksPage organizationId={runtimeOrganizationId} />
       ) : activePage === "skills" ? (
         <SkillWarehousePage
           initialFilters={skillFiltersFromSearch(routeSearch)}
@@ -199,6 +211,7 @@ function getCurrentSearch(): string {
 function pageFromPath(path: string): PageKey | null {
   if (path === "/runtime") return "runtime";
   if (path === "/runs") return "runs";
+  if (path === "/scheduled-tasks") return "scheduled";
   if (path === "/skills") return "skills";
   if (path === "/settings") return "settings";
   return null;

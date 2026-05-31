@@ -8,7 +8,7 @@ Surface Register defines page types, visual intensity, and experience boundaries
 |---|---|---|---|
 | Brand Surface | `/` | Explain Lorume value and direction | High |
 | Identity Surface | `/login`, `/invite/:token` | Login, organization join, identity recovery | Medium-high |
-| Console Surface | `/runtime`, `/runs`, `/skills`, `/settings`; `/operations` and `/notifications` as utility drawer routes | Daily management, inspection, filtering, triage | Medium |
+| Console Surface | `/runtime`, `/runs`, `/scheduled-tasks`, `/skills`, `/settings`; `/operations` and `/notifications` as utility drawer routes | Daily management, inspection, filtering, triage | Medium |
 
 ## Brand Surface
 

@@ -58,6 +58,16 @@ describeDb("Postgres auth store", () => {
           role: "admin",
           tokenHash: invitationTokenHash,
         });
+        await expect(store.readInvitationPreview({
+          now,
+          tokenHash: invitationTokenHash,
+        })).resolves.toMatchObject({
+          email: "juanbai@gaoding.com",
+          maskedEmail: "j***@gaoding.com",
+          organizationName: "Lorume Team",
+          role: "admin",
+          status: "available",
+        });
         const accepted = await store.acceptInvitation({
           email: "juanbai@gaoding.com",
           now,
@@ -99,17 +109,39 @@ describeDb("Postgres auth store", () => {
         });
 
         const deviceTokenHash = hashSecret("device-secret", "device-token", "test-pepper");
-        await store.createDeviceToken({
-          deviceId: "gezilinll-claw",
+        const createdDeviceToken = await store.createDeviceToken({
           name: "gezilinll-claw collector",
           organizationId: organization.id,
           tokenHash: deviceTokenHash,
           tokenPrefix: "agt_dev",
         });
-        await expect(store.verifyDeviceToken(deviceTokenHash, now)).resolves.toMatchObject({
+        expect(createdDeviceToken).toMatchObject({
+          deviceId: null,
+          status: "pending",
+        });
+        await expect(store.verifyDeviceToken(deviceTokenHash, now, "gezilinll-claw")).resolves.toMatchObject({
           deviceId: "gezilinll-claw",
           organizationId: organization.id,
+          status: "occupied",
         });
+        await expect(store.listDeviceTokens({ now, organizationId: organization.id })).resolves.toEqual([
+          expect.objectContaining({
+            deviceId: "gezilinll-claw",
+            name: "gezilinll-claw collector",
+            status: "occupied",
+          }),
+        ]);
+        await expect(store.verifyDeviceToken(deviceTokenHash, now, "other-device")).resolves.toBeNull();
+        await expect(store.listAuditEvents({ organizationId: organization.id })).resolves.toEqual([
+          expect.objectContaining({
+            eventType: "device_token.reuse_rejected",
+            metadata: expect.objectContaining({ attemptedDeviceId: "other-device" }),
+          }),
+          expect.objectContaining({
+            eventType: "device_token.occupied",
+            metadata: expect.objectContaining({ deviceId: "gezilinll-claw" }),
+          }),
+        ]);
       } finally {
         await store.close();
       }

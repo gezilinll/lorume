@@ -16,7 +16,7 @@ Runs 的会话任务页必须让用户看清：
 
 页面只消费后端 `GET /api/runtime-tasks?taskType=conversation` 返回的 `Task` 查询模型、summary 和 facets。生产构建不得读取旧 latest snapshot，不得请求旧 work item API，不得由前端解释平台 raw payload。
 
-定时任务当前允许采集和入库，但不在本阶段 Runs 页面展示。新增定时任务页面前，必须先补页面 spec 和 harness。
+定时任务当前允许采集和入库，但不在 Runs 页面展示。定时任务独立页面的数据链路、聚合规则、页面边界和 harness 要求见 `docs/product/runtime-scheduled-task-page-spec.md`。
 
 ## 当前范围
 
@@ -91,6 +91,7 @@ OpenClaw adapter 只有在外部证据能明确归属到 Agent 时才生成 Task
 - 能识别 OpenClaw agent 时写入 `agentId`，且该 `agentId` 必须引用本次采集到的 Agent。
 - Tool calls 当前不上报、不入库；不新增 first-class ToolCall / Execution / Run 实体。
 - Adapter 映射 raw OpenClaw status 到 Lorume `Task.status`，并保留 raw status 到 `raw.openclaw.status`。
+- OpenClaw trajectory 仍为 `running` 但最近事件超过 2 小时时，Lorume `Task.status` 必须归为 `unknown`，保留 raw `running` 证据，并写 `openclaw_stale_running_trajectory` warning diagnostic；不能把缺失结束证据推断为完成或失败。
 - 无法归属 Agent、缺少 `userMessage` 或只有内部运行证据时跳过，并写 diagnostic warning；不能用 assembled prompt、session fallback、日志时间邻近或 LLM 推断伪造 DingTalk `userMessage`。
 - `done` conversation 缺少 `agentReply` 可以入库，但必须写 diagnostic warning。
 - OpenClaw session / trajectory 历史数据长期累积时，adapter 仍输出所有符合产品标准的 Task；collector 负责分批上报、ACK cache 和 hash-based 重传，不通过 adapter 窗口丢弃数据。

@@ -8,6 +8,10 @@ import {
   normalizeRuntimeSkillProbeSnapshot,
   type RuntimeSkillSnapshot,
 } from "../runtime/runtime-skill-probe";
+import {
+  normalizeRuntimeScheduleProbeSnapshot,
+  type RuntimeScheduleProbeSnapshot,
+} from "../runtime/runtime-schedule-probe";
 
 export interface RuntimeDeviceStateSnapshot {
   collectedAt: string;
@@ -87,6 +91,10 @@ export interface RuntimeDeviceStateStore {
   readRuntimeSkillProbeSnapshot: (runtimeId: string) => RuntimeSkillSnapshot | null;
   /** Validate and store the latest read-only Skill probe snapshot for one Runtime. */
   writeRuntimeSkillProbeSnapshot: (snapshot: unknown) => RuntimeSkillSnapshot;
+  /** Read the latest read-only scheduled task probe snapshot for one Runtime. */
+  readRuntimeScheduleProbeSnapshot: (runtimeId: string) => RuntimeScheduleProbeSnapshot | null;
+  /** Validate and store the latest read-only scheduled task probe snapshot for one Runtime. */
+  writeRuntimeScheduleProbeSnapshot: (snapshot: unknown) => RuntimeScheduleProbeSnapshot;
 }
 
 const defaultSnapshotPath = path.resolve(".lorume", "runtime-device-state", "latest.json");
@@ -103,6 +111,7 @@ export function createRuntimeDeviceStateStore(
   const deviceConnections = new Map<string, RuntimeDeviceConnection>();
   const skillProbeSnapshots = new Map<string, AgentSkillProbeSnapshot>();
   const runtimeSkillProbeSnapshots = new Map<string, RuntimeSkillSnapshot>();
+  const runtimeScheduleProbeSnapshots = new Map<string, RuntimeScheduleProbeSnapshot>();
 
   return {
     snapshotPath,
@@ -165,6 +174,16 @@ export function createRuntimeDeviceStateStore(
       const normalized = normalizeRuntimeSkillProbeSnapshot(snapshot);
       if (!normalized) throw new Error("invalid runtime skill probe snapshot");
       runtimeSkillProbeSnapshots.set(normalized.runtimeId, cloneJson(normalized));
+      return cloneJson(normalized);
+    },
+    readRuntimeScheduleProbeSnapshot(runtimeId) {
+      const snapshot = runtimeScheduleProbeSnapshots.get(runtimeId);
+      return snapshot ? cloneJson(snapshot) : null;
+    },
+    writeRuntimeScheduleProbeSnapshot(snapshot) {
+      const normalized = normalizeRuntimeScheduleProbeSnapshot(snapshot);
+      if (!normalized) throw new Error("invalid runtime schedule probe snapshot");
+      runtimeScheduleProbeSnapshots.set(normalized.runtimeId, cloneJson(normalized));
       return cloneJson(normalized);
     },
   };

@@ -197,6 +197,8 @@ function readDeviceStateSnapshot(snapshotPath) {
     device,
     diagnostics: snapshot.diagnostics && typeof snapshot.diagnostics === "object" ? snapshot.diagnostics : undefined,
     runtimes: Array.isArray(snapshot.runtimes) ? snapshot.runtimes : [],
+    runtimeSkillProbes: Array.isArray(snapshot.runtimeSkillProbes) ? snapshot.runtimeSkillProbes : [],
+    runtimeScheduleProbes: Array.isArray(snapshot.runtimeScheduleProbes) ? snapshot.runtimeScheduleProbes : [],
     tasks: Array.isArray(snapshot.tasks) ? snapshot.tasks : [],
   };
 }
@@ -234,7 +236,42 @@ function applyDeviceStateDeviceOverrides(snapshot, flags) {
     id: String(task.id).replace(`${currentDeviceId}:`, `${deviceId}:`),
     agentId: agentIdReplacements.get(task.agentId) || String(task.agentId).replace(`${currentDeviceId}:`, `${deviceId}:`),
   }));
-  return { ...snapshot, device: nextDevice, runtimes, agents, tasks };
+  const runtimeSkillProbes = (snapshot.runtimeSkillProbes || []).map((probe) => ({
+    ...probe,
+    deviceId: String(probe.deviceId || currentDeviceId).replace(currentDeviceId, deviceId),
+    runtimeId: runtimeIdReplacements.get(probe.runtimeId) || String(probe.runtimeId).replace(`${currentDeviceId}:`, `${deviceId}:`),
+    skills: Array.isArray(probe.skills)
+      ? probe.skills.map((skill) => ({
+        ...skill,
+        agentIds: Array.isArray(skill.agentIds)
+          ? skill.agentIds.map((agentId) => String(agentId).replace(`${currentDeviceId}:`, `${deviceId}:`))
+          : [],
+      }))
+      : [],
+  }));
+  const runtimeScheduleProbes = (snapshot.runtimeScheduleProbes || []).map((probe) => ({
+    ...probe,
+    deviceId: String(probe.deviceId || currentDeviceId).replace(currentDeviceId, deviceId),
+    runtimeId: runtimeIdReplacements.get(probe.runtimeId) || String(probe.runtimeId).replace(`${currentDeviceId}:`, `${deviceId}:`),
+    schedules: Array.isArray(probe.schedules)
+      ? probe.schedules.map((schedule) => ({
+        ...schedule,
+        key: String(schedule.key || "").replace(`${currentDeviceId}:`, `${deviceId}:`),
+        agentIds: Array.isArray(schedule.agentIds)
+          ? schedule.agentIds.map((agentId) => String(agentId).replace(`${currentDeviceId}:`, `${deviceId}:`))
+          : [],
+      }))
+      : [],
+  }));
+  return {
+    ...snapshot,
+    device: nextDevice,
+    runtimes,
+    agents,
+    tasks,
+    ...(runtimeSkillProbes.length ? { runtimeSkillProbes } : {}),
+    ...(runtimeScheduleProbes.length ? { runtimeScheduleProbes } : {}),
+  };
 }
 
 function copyExplicitPath(flags) {

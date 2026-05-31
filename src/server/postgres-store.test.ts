@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import deviceStateFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
+import { createPostgresAuthStore } from "../auth/auth-store";
 import { createDeviceStateSnapshot, type DeviceStateSnapshot } from "../runtime/runtime-model";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
@@ -37,6 +38,7 @@ describeDb("Postgres runtime store", () => {
           collectorIngestions: 2,
           devices: 1,
           runtimeSkillProbeSnapshots: 0,
+          runtimeScheduleProbeSnapshots: 0,
           runtimes: 1,
           tasks: 2,
         });
@@ -232,6 +234,7 @@ describeDb("Postgres runtime store", () => {
           collectorIngestions: 3,
           devices: 1,
           runtimeSkillProbeSnapshots: 0,
+          runtimeScheduleProbeSnapshots: 0,
           runtimes: 1,
           tasks: 2,
         });
@@ -522,6 +525,194 @@ describeDb("Postgres runtime store", () => {
     }
   });
 
+  it("stores Runtime schedule probes and groups scheduled Task execution history", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const snapshot = createFixtureDeviceState();
+        await store.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] });
+        await store.upsertRuntimeScheduleProbeSnapshot({
+          deviceId: "fixture-mac",
+          runtimeId: "fixture-mac:runtime:openclaw",
+          runtimeKind: "openclaw",
+          status: "succeeded",
+          observedAt: "2026-05-29T08:00:00.000Z",
+          schedules: [{
+            sourceId: "daily-report",
+            name: "Daily report",
+            agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
+            enabled: true,
+            expression: "0 9 * * *",
+            timezone: "Asia/Shanghai",
+            nextRunAt: "2026-05-30T01:00:00.000Z",
+            lastRunAt: "2026-05-29T01:00:00.000Z",
+          }],
+        });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...snapshot,
+          tasks: [{
+            ...snapshot.tasks[0],
+            id: `${snapshot.agents[0].id}:task:scheduled-daily-report-run-1`,
+            raw: {
+              openclaw: {
+                scheduleId: "daily-report",
+                scheduleName: "Daily report",
+                sessionKey: "agent:main:cron:daily-report:run:run-1",
+                status: "success",
+                statusSource: "trajectory",
+              },
+            } as any,
+            status: "done",
+            taskType: "scheduled",
+            updatedAt: "2026-05-29T01:05:00.000Z",
+            userMessage: "[cron:daily-report Daily report] Generate summary",
+          }],
+        }));
+
+        const groups = await store.listRuntimeScheduledTasks();
+        const executions = await store.listRuntimeScheduledTaskExecutions(groups.items[0].scheduleKey);
+
+        expect(groups).toMatchObject({
+          items: [{
+            agentIds: ["fixture-mac:runtime:openclaw:agent:main"],
+            agentNames: ["main"],
+            enabled: true,
+            executionCount: 1,
+            expression: "0 9 * * *",
+            latestExecutionAt: "2026-05-29T01:05:00.000Z",
+            latestStatus: "done",
+            name: "Daily report",
+            nextRunAt: "2026-05-30T01:00:00.000Z",
+            runtimeId: "fixture-mac:runtime:openclaw",
+            runtimeKind: "openclaw",
+            runtimeName: "OpenClaw Gateway",
+            scheduleKey: "fixture-mac:runtime:openclaw:schedule:daily-report",
+            sourceId: "daily-report",
+            timezone: "Asia/Shanghai",
+          }],
+          summary: {
+            disabledCount: 0,
+            enabledCount: 1,
+            total: 1,
+          },
+          total: 1,
+        });
+        expect(groups.items[0].summary.byStatus).toMatchObject({ done: 1, total: 1 });
+        expect(executions).toMatchObject({
+          items: [expect.objectContaining({
+            id: `${snapshot.agents[0].id}:task:scheduled-daily-report-run-1`,
+            status: "done",
+            taskType: "scheduled",
+          })],
+          total: 1,
+        });
+        await expect(store.readEntityCounts()).resolves.toMatchObject({
+          runtimeScheduleProbeSnapshots: 1,
+          tasks: 1,
+        });
+      } finally {
+        await store.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("keeps Runtime scheduled task groups scoped by organization", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const store = createPostgresStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("scheduled-scope@example.com");
+        const firstOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Scheduled Org A",
+          slug: "scheduled-org-a",
+        });
+        const secondOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Scheduled Org B",
+          slug: "scheduled-org-b",
+        });
+        const orgA = createFixtureDeviceStateForDeviceId("fixture-mac");
+        const orgB = createFixtureDeviceStateForDeviceId("other-mac");
+        await store.upsertDeviceStateSnapshot({ ...orgA, tasks: [] }, { organizationId: firstOrganization.id });
+        await store.upsertDeviceStateSnapshot({ ...orgB, tasks: [] }, { organizationId: secondOrganization.id });
+        await store.upsertRuntimeScheduleProbeSnapshot({
+          deviceId: orgA.device.id,
+          runtimeId: orgA.runtimes[0].id,
+          runtimeKind: "openclaw",
+          status: "succeeded",
+          observedAt: "2026-05-29T08:00:00.000Z",
+          schedules: [{
+            sourceId: "daily-report-a",
+            name: "Org A daily",
+            agentIds: [orgA.agents[0].id],
+            enabled: true,
+          }],
+        });
+        await store.upsertRuntimeScheduleProbeSnapshot({
+          deviceId: orgB.device.id,
+          runtimeId: orgB.runtimes[0].id,
+          runtimeKind: "openclaw",
+          status: "succeeded",
+          observedAt: "2026-05-29T08:00:00.000Z",
+          schedules: [{
+            sourceId: "daily-report-b",
+            name: "Org B daily",
+            agentIds: [orgB.agents[0].id],
+            enabled: true,
+          }],
+        });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...orgA,
+          tasks: [{
+            ...orgA.tasks[0],
+            id: `${orgA.agents[0].id}:task:scheduled-daily-report-a-run-1`,
+            agentId: orgA.agents[0].id,
+            raw: { openclaw: { scheduleId: "daily-report-a", status: "success", statusSource: "trajectory" } } as any,
+            status: "done",
+            taskType: "scheduled",
+            userMessage: "[cron:daily-report-a Org A daily] Generate summary",
+          }],
+        }), { organizationId: firstOrganization.id });
+        await store.upsertRuntimeTaskBatch(createFixtureTaskBatch({
+          ...orgB,
+          tasks: [{
+            ...orgB.tasks[0],
+            id: `${orgB.agents[0].id}:task:scheduled-daily-report-b-run-1`,
+            agentId: orgB.agents[0].id,
+            raw: { openclaw: { scheduleId: "daily-report-b", status: "success", statusSource: "trajectory" } } as any,
+            status: "done",
+            taskType: "scheduled",
+            userMessage: "[cron:daily-report-b Org B daily] Generate summary",
+          }],
+        }), { organizationId: secondOrganization.id });
+
+        const scopedA = await store.listRuntimeScheduledTasks({ organizationId: firstOrganization.id });
+        const scopedB = await store.listRuntimeScheduledTasks({ organizationId: secondOrganization.id });
+        const all = await store.listRuntimeScheduledTasks();
+        const wrongOrgExecutions = await store.listRuntimeScheduledTaskExecutions(scopedA.items[0].scheduleKey, {
+          organizationId: secondOrganization.id,
+        });
+
+        expect(scopedA.items.map((item) => item.name)).toEqual(["Org A daily"]);
+        expect(scopedB.items.map((item) => item.name)).toEqual(["Org B daily"]);
+        expect(all.total).toBe(2);
+        expect(wrongOrgExecutions.total).toBe(0);
+      } finally {
+        await store.close();
+        await authStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("searches and paginates tasks with stable current-model cursors", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {
@@ -563,6 +754,18 @@ function createFixtureDeviceState(): DeviceStateSnapshot {
   return createDeviceStateSnapshot({
     ...deviceStateFixture,
     device: deviceStateFixture.devices[0],
+  });
+}
+
+function createFixtureDeviceStateForDeviceId(deviceId: string): DeviceStateSnapshot {
+  const snapshot = createFixtureDeviceState();
+  const raw = JSON.parse(JSON.stringify(snapshot).replaceAll(snapshot.device.id, deviceId));
+  return createDeviceStateSnapshot({
+    ...raw,
+    device: {
+      ...raw.device,
+      hostname: deviceId,
+    },
   });
 }
 

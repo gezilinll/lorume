@@ -78,6 +78,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 
 - Runtime Fleet
 - Runs（会话任务）
+- 定时任务
 - Skill 仓库（只读能力目录）
 - 组织设置
 
@@ -90,7 +91,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 - `/` 是公开主页，用来解释 Lorume 的控制面定位和当前已接入能力。
 - `/login` 是邮箱验证码登录入口。
 - `/invite/:token` 是组织邀请入口，用户登录被邀请邮箱后加入组织。
-- `/runtime`、`/runs`、`/skills`、`/settings` 是当前 Console 页面路由，未登录时需要先完成登录。
+- `/runtime`、`/runs`、`/scheduled-tasks`、`/skills`、`/settings` 是当前 Console 页面路由，未登录时需要先完成登录。
 - `/operations`、`/notifications` 是 Console 工具抽屉深链路由，打开时覆盖在当前 Console 上下文之上，不进入主导航。
 - 未登录用户进入邮箱验证码登录。
 - 登录后如果没有组织，需要创建组织或通过邀请链接加入组织。
@@ -101,6 +102,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 
 - 管理运行资产：登录 -> Runtime Fleet -> 查看 Device、Runtime、Agent 和采集健康。
 - 查看 Agent 会话任务：登录 -> Runs -> 按 Channel、状态和时间范围查看会话任务。
+- 查看定时任务：登录 -> 定时任务 -> 查看 Runtime 定时定义、下次运行和多次执行历史。
 - 查看 Skill 能力：登录 -> Skill 仓库，或从 Runtime Fleet 的 Runtime / Agent 行级入口跳转并自动带上筛选。
 - 跟踪异步任务：登录 -> 右上角任务中心抽屉 -> 查看 Operation / Job 状态、失败原因和目标资源。
 - 查看通知：登录 -> 右上角通知中心抽屉 -> 查看未读/已读通知、同步、采集、审核和恢复类通知。

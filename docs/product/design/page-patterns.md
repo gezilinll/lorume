@@ -4,13 +4,17 @@ Page specs define the visual, content, and interaction boundaries for current su
 
 ## Home
 
-Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, Skill 仓库, Organization Settings, and utility drawer capabilities.
+Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, 定时任务, Skill 仓库, Organization Settings, and utility drawer capabilities.
 
 Rules:
 
 - First viewport must show both the value proposition and a concrete product preview.
 - The preview must contain real current product objects such as Runtime, Agent, Runs, alerts, tasks, or notifications.
 - CTA links only point to implemented paths.
+- Public top navigation is intentionally minimal: the header shows the Lorume mark and a single `登录` action. Protected Console destinations are introduced through the capability cards, not duplicated as header nav.
+- The hero uses one primary `进入控制台` CTA. Do not add a secondary Console route CTA beside it.
+- Implemented capability cards use a balanced responsive grid with consistent card heights and bottom-aligned actions. Wide desktop may show all current capability cards in one row; medium desktop must avoid a lone orphan card row.
+- Capability icons may use the shared brand, cyan, orange, purple, and green accent tokens to keep the public page bright while staying inside the app color system.
 - Do not expose future modules as clickable product UI.
 - Avoid giant empty panels, decorative-only gradients, or abstract hero art.
 
@@ -21,6 +25,7 @@ Purpose: Email-code login.
 Rules:
 
 - The page focuses one identity task.
+- Auth pages expose a small `返回首页` link in the header; this is secondary to the form and must not become a second auth path.
 - The operations preview is compact and shows current product concepts, not live organization data.
 - Backend session probe errors are surfaced only when unexpected; anonymous probe errors stay quiet.
 - Form labels are visible and controls have clear focus/loading/error states.
@@ -96,6 +101,20 @@ Rules:
 - Long text wraps or clamps without body-level horizontal scroll.
 - Raw IDs, `cid...`, phone numbers, and opaque conversation IDs are not used as conversation names.
 - Wide screens use the board as the main surface; there is no persistent selected inspector on the right.
+
+## 定时任务
+
+Purpose: View collected Runtime schedule definitions, next-run metadata when available, latest execution status, and grouped scheduled Task history.
+
+Rules:
+
+- The page uses the `data-dense` Console layout tier, the shared top workbar, a compact search/filter surface, a directory table, and a sticky detail inspector.
+- It is the only Console page for `taskType=scheduled`; Runs remains conversation-only.
+- The table groups multiple scheduled Task executions by stable schedule identity. It shows schedule name, Runtime, Agent, cron expression, timezone, next run when known, latest status, latest time, and execution count as separate scan columns.
+- The filter menu follows the Runs compact menu treatment: a single filter button, submenu groups, selected counts, and a reset-all action when any non-search filter is active. Search is a separate first-level input.
+- Detail inspector shows the selected schedule definition first, then execution status counts and recent execution history. It does not expose raw adapter evidence, local file paths, command names, or debug payloads.
+- Disabled schedules and schedules with `failed` or `unknown` latest execution remain visible and use concise status chips rather than becoming separate alert cards.
+- The page is read-only. No create, edit, enable/disable, run-now, retry, delete, or backend-triggered probe controls are allowed.
 
 ## Skill 仓库
 

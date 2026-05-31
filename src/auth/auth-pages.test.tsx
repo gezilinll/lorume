@@ -30,6 +30,7 @@ describe("auth pages", () => {
     expect(await screen.findByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
     expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送验证码" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "返回首页" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("heading", { name: "运行资产" })).not.toBeInTheDocument();
     expect(requests).toEqual(["/api/me"]);
   });
@@ -210,6 +211,17 @@ describe("auth pages", () => {
     globalThis.fetch = vi.fn(async (input, init) => {
       const url = input.toString();
       if (url.endsWith("/api/me")) return jsonResponse(sessionResponse({ organizations: [] }));
+      if (url.endsWith("/api/invitations/invitation-token-1/preview")) {
+        return jsonResponse({
+          invitation: {
+            email: "zhangliang@gaoding.com",
+            maskedEmail: "z***@gaoding.com",
+            organizationName: "受邀组织",
+            role: "member",
+            status: "available",
+          },
+        });
+      }
       if (url.endsWith("/api/invitations/invitation-token-1/accept")) {
         expect(init?.method).toBe("POST");
         return jsonResponse({ organization: { organizationId: "org_2", id: "mem_2", name: "受邀组织", role: "member", slug: "invited" } });
@@ -220,13 +232,57 @@ describe("auth pages", () => {
     render(<App runtimeMode="production" />);
 
     expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
+    expect(await screen.findByText(/受邀组织/)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "运营概览" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "加入并进入" }));
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
   });
 
-  it("logs out and returns to the login page", async () => {
+  it("previews an invitation and automatically sends a code to the invited email before login", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/invite/invitation-token-1");
+    const requests: Array<{ body: unknown; url: string }> = [];
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const url = input.toString();
+      requests.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/api/me")) return jsonResponse({ error: "unauthorized" }, 401);
+      if (url.endsWith("/api/invitations/invitation-token-1/preview")) {
+        return jsonResponse({
+          invitation: {
+            email: "invited@gaoding.com",
+            maskedEmail: "i***@gaoding.com",
+            organizationName: "受邀组织",
+            role: "admin",
+            status: "available",
+          },
+        });
+      }
+      if (url.endsWith("/api/auth/email-code")) return jsonResponse({ ok: true, email: "invited@gaoding.com" }, 202);
+      if (url.endsWith("/api/auth/login")) return jsonResponse(sessionResponse({ organizations: [] }));
+      if (url.endsWith("/api/invitations/invitation-token-1/accept")) {
+        return jsonResponse({ organization: { organizationId: "org_2", id: "mem_2", name: "受邀组织", role: "admin", slug: "invited" } });
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<App runtimeMode="production" />);
+
+    expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
+    expect(screen.getByText(/i\*\*\*@gaoding.com/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("验证码"), "246810");
+    await user.click(screen.getByRole("button", { name: "进入控制台" }));
+    expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "加入并进入" }));
+    expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+
+    expect(requests).toContainEqual({
+      url: "/api/auth/email-code",
+      body: { email: "invited@gaoding.com" },
+    });
+  });
+
+  it("logs out and returns to the public home page", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/runtime");
     globalThis.fetch = vi.fn(async (input) => {
@@ -247,8 +303,10 @@ describe("auth pages", () => {
     await user.click(screen.getByRole("menuitem", { name: "退出登录" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "登录 Lorume" })).toBeInTheDocument();
+      expect(window.location.pathname).toBe("/");
+      expect(screen.getByRole("heading", { name: /Lorume/ })).toBeInTheDocument();
     });
+    expect(screen.queryByRole("heading", { name: "登录 Lorume" })).not.toBeInTheDocument();
   });
 });
 

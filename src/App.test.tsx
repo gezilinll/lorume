@@ -184,6 +184,63 @@ function installSkillWarehouseFetch(snapshot = fleetSnapshot) {
   }) as unknown as typeof fetch;
 }
 
+function installScheduledTasksFetch(snapshot = fleetSnapshot) {
+  const scheduleKey = `${snapshot.runtimes[0].id}:schedule:daily-report`;
+  const scheduledExecution = task({
+    agentId: snapshot.agents[0].id,
+    createdAt: "2026-05-29T08:00:00.000Z",
+    id: "scheduled-execution-daily-report",
+    status: "done",
+    taskType: "scheduled",
+    updatedAt: "2026-05-29T08:03:00.000Z",
+    userMessage: "Generate daily report",
+  });
+  globalThis.fetch = vi.fn(async (input) => {
+    const url = requestUrl(input);
+    if (url.includes("/api/runtime-scheduled-tasks/") && url.includes("/executions")) {
+      const byStatus = taskStatusCounts([scheduledExecution]);
+      byStatus.total = 1;
+      return jsonResponse({
+        items: [scheduledExecution],
+        summary: { byStatus, total: 1 },
+        total: 1,
+      });
+    }
+    if (url.includes("/api/runtime-scheduled-tasks")) {
+      return jsonResponse({
+        items: [{
+          agentIds: [snapshot.agents[0].id],
+          agentNames: [snapshot.agents[0].name],
+          deviceId: snapshot.devices[0].id,
+          enabled: true,
+          executionCount: 1,
+          expression: "0 8 * * *",
+          latestExecutionAt: "2026-05-29T08:03:00.000Z",
+          latestStatus: "done",
+          name: "每日数据报告",
+          nextRunAt: "2026-05-30T08:00:00.000Z",
+          runtimeId: snapshot.runtimes[0].id,
+          runtimeKind: snapshot.runtimes[0].kind,
+          runtimeName: snapshot.runtimes[0].name,
+          scheduleKey,
+          sourceId: "daily-report",
+          summary: {
+            byStatus: taskStatusCounts([scheduledExecution]),
+          },
+          timezone: "Asia/Shanghai",
+        }],
+        summary: {
+          disabledCount: 0,
+          enabledCount: 1,
+          total: 1,
+        },
+        total: 1,
+      });
+    }
+    return jsonResponse({ error: "unexpected request" }, 500);
+  }) as unknown as typeof fetch;
+}
+
 function runtimeSkillProbeResponse(snapshot = fleetSnapshot) {
   return {
     deviceId: snapshot.devices[0].id,
@@ -239,11 +296,12 @@ describe("Console shell", () => {
     render(<App runtimeMode="production" />);
 
     expect(screen.getByRole("heading", { name: /Lorume/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "进入控制台" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "进入控制台" })).toHaveAttribute("href", "/runtime");
     const capabilities = screen.getByRole("region", { name: "当前已实现能力" });
     expect(capabilities).toBeInTheDocument();
     expect(within(capabilities).getByText("Runtime Fleet")).toBeInTheDocument();
     expect(within(capabilities).getByText("Runs")).toBeInTheDocument();
+    expect(within(capabilities).getByText("定时任务")).toBeInTheDocument();
     expect(within(capabilities).getByText("Skill 仓库")).toBeInTheDocument();
     expect(within(capabilities).getByText("组织设置")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Agent Studio/ })).not.toBeInTheDocument();
@@ -257,15 +315,20 @@ describe("Console shell", () => {
 
     const homeNav = screen.getByRole("navigation", { name: "首页导航" });
     expect(within(homeNav).getByRole("link", { name: "登录" })).toHaveAttribute("href", "/login");
-    expect(within(homeNav).getByRole("link", { name: "Runtime Fleet" })).toHaveAttribute("href", "/runtime");
-    expect(within(homeNav).getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/runs");
-    expect(within(homeNav).getByRole("link", { name: "Skill 仓库" })).toHaveAttribute("href", "/skills");
-    expect(within(homeNav).getByRole("link", { name: "组织设置" })).toHaveAttribute("href", "/settings");
+    expect(within(homeNav).queryByRole("link", { name: "Runtime Fleet" })).not.toBeInTheDocument();
+    expect(within(homeNav).queryByRole("link", { name: "Runs" })).not.toBeInTheDocument();
+    expect(within(homeNav).queryByRole("link", { name: "定时任务" })).not.toBeInTheDocument();
+    expect(within(homeNav).queryByRole("link", { name: "Skill 仓库" })).not.toBeInTheDocument();
+    expect(within(homeNav).queryByRole("link", { name: "组织设置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "查看 Runtime Fleet" })).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runtime Fleet" })).toHaveAttribute("href", "/runtime");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Runs" })).toHaveAttribute("href", "/runs");
+    expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 定时任务" })).toHaveAttribute("href", "/scheduled-tasks");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 Skill 仓库" })).toHaveAttribute("href", "/skills");
     expect(within(screen.getByRole("region", { name: "当前已实现能力" })).getByRole("link", { name: "打开 组织设置" })).toHaveAttribute("href", "/settings");
-    expect(screen.getByText("Operations 与 Notifications 串联异步状态和提醒线程。")).toBeInTheDocument();
+    expect(screen.getByText("设备采集")).toBeInTheDocument();
+    expect(screen.getByText("异步任务")).toBeInTheDocument();
+    expect(screen.queryByText("Operations 与 Notifications 串联异步状态和提醒线程。")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "对象目录" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "总控台" })).not.toBeInTheDocument();
   });
@@ -292,6 +355,7 @@ describe("Console shell", () => {
     }
     expect(within(nav).getByRole("button", { name: "Runtime Fleet" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Runs" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "定时任务" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Skill 仓库" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "组织设置" })).toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "任务中心" })).not.toBeInTheDocument();
@@ -331,6 +395,10 @@ describe("Console shell", () => {
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
     expect(document.querySelector('[data-console-layout-tier="workspace"]')).toBeInTheDocument();
 
+    await user.click(within(nav).getByRole("button", { name: "定时任务" }));
+    expect(window.location.pathname).toBe("/scheduled-tasks");
+    expect(screen.getByRole("heading", { name: "定时任务" })).toBeInTheDocument();
+
     await user.click(operationsButton);
     expect(window.location.pathname).toBe("/operations");
     expect(operationsButton).toHaveAttribute("aria-expanded", "true");
@@ -338,7 +406,7 @@ describe("Console shell", () => {
     const operationsDrawer = screen.getByRole("dialog", { name: "Operations" });
     expect(within(operationsDrawer).getByText("本地调试模式不读取远端任务。")).toBeInTheDocument();
     await user.click(within(operationsDrawer).getByRole("button", { name: /关闭|Close/i }));
-    expect(window.location.pathname).toBe("/runs");
+    expect(window.location.pathname).toBe("/scheduled-tasks");
     expect(operationsButton).toHaveAttribute("aria-expanded", "false");
 
     await user.click(notificationsButton);
@@ -348,7 +416,7 @@ describe("Console shell", () => {
     const notificationsDrawer = screen.getByRole("dialog", { name: "Notifications" });
     expect(within(notificationsDrawer).getByText("本地调试模式不读取远端通知。")).toBeInTheDocument();
     await user.click(within(notificationsDrawer).getByRole("button", { name: /关闭|Close/i }));
-    expect(window.location.pathname).toBe("/runs");
+    expect(window.location.pathname).toBe("/scheduled-tasks");
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
 
     await user.click(within(nav).getByRole("button", { name: "组织设置" }));
@@ -357,8 +425,61 @@ describe("Console shell", () => {
     expect(screen.getAllByText("精选AI").length).toBeGreaterThan(0);
   });
 
+  it("opens Scheduled Tasks from the protected route and shows execution history", async () => {
+    installScheduledTasksFetch();
+    window.history.pushState({}, "", "/scheduled-tasks");
+
+    render(<App runtimeMode="agent" />);
+
+    expect(screen.getByRole("heading", { name: "定时任务" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "主导航" });
+    expect(within(nav).getByRole("button", { name: "定时任务" })).toHaveAttribute("aria-current", "page");
+
+    const scheduledTable = await screen.findByRole("table", { name: "定时任务列表" });
+    expect(within(scheduledTable).queryByRole("columnheader", { name: "Runtime / Agent" })).not.toBeInTheDocument();
+    expect(within(scheduledTable).queryByRole("columnheader", { name: "最近执行" })).not.toBeInTheDocument();
+    expect(within(scheduledTable).queryByRole("columnheader", { name: "执行" })).not.toBeInTheDocument();
+    for (const column of ["Runtime", "Agent", "最近状态", "最近时间", "执行次数"]) {
+      expect(within(scheduledTable).getByRole("columnheader", { name: column })).toBeInTheDocument();
+    }
+    expect(within(scheduledTable).getByText("每日数据报告")).toBeInTheDocument();
+    expect(within(scheduledTable).getByText("0 8 * * *")).toBeInTheDocument();
+    expect(within(scheduledTable).getByText("OpenClaw Gateway")).toBeInTheDocument();
+    expect(within(scheduledTable).getAllByText("成功").length).toBeGreaterThan(0);
+
+    const detail = screen.getByRole("complementary", { name: "定时任务详情" });
+    expect(within(detail).getByText("执行历史")).toBeInTheDocument();
+    expect(await within(detail).findByText("Generate daily report")).toBeInTheDocument();
+  });
+
+  it("ignores pure modifier keys when deciding keyboard focus modality", async () => {
+    const user = userEvent.setup();
+    installRuntimeFleetFetch();
+    window.history.pushState({}, "", "/runtime");
+
+    render(<App runtimeMode="agent" />);
+
+    await screen.findByRole("heading", { name: "运行资产" });
+    await user.click(screen.getByRole("button", { name: "Runtime Fleet" }));
+    expect(document.documentElement).toHaveAttribute("data-input-modality", "pointer");
+
+    fireEvent.keyDown(window, { key: "Shift" });
+    expect(document.documentElement).toHaveAttribute("data-input-modality", "pointer");
+
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.documentElement).toHaveAttribute("data-input-modality", "keyboard");
+
+    fireEvent.pointerDown(document.body);
+    expect(document.documentElement).toHaveAttribute("data-input-modality", "pointer");
+  });
+
   it("opens the Skill warehouse from URL filters and shows Runtime common Skills for the selected Agent", async () => {
     const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     installSkillWarehouseFetch();
     window.history.pushState(
       {},
@@ -391,8 +512,20 @@ describe("Console shell", () => {
     expect(within(fullDetail).queryByText("基础信息")).not.toBeInTheDocument();
     expect(within(fullDetail).queryByText("可用 Agent")).not.toBeInTheDocument();
     expect(within(fullDetail).queryByText(/^复制$/)).not.toBeInTheDocument();
-    expect(within(fullDetail).getByRole("button", { name: "复制本地路径" })).toBeInTheDocument();
-    expect(within(fullDetail).getByRole("button", { name: "复制 Skill 正文" })).toBeInTheDocument();
+    const pathCopyButton = within(fullDetail).getByRole("button", { name: "复制本地路径" });
+    const bodyCopyButton = within(fullDetail).getByRole("button", { name: "复制 Skill 正文" });
+    const skillBody = within(fullDetail).getByText(/Use browser automation for screenshots and inspection/).closest("pre");
+    expect(skillBody).toHaveClass("overflow-auto", "pb-6");
+    expect(skillBody?.parentElement).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
+
+    await user.click(pathCopyButton);
+    expect(writeText).toHaveBeenCalledWith("~/.codex/skills/.system/browser/SKILL.md");
+    expect(await screen.findByText("已复制")).toBeInTheDocument();
+
+    writeText.mockRejectedValueOnce(new Error("clipboard denied"));
+    await user.click(bodyCopyButton);
+    expect(writeText).toHaveBeenCalledWith("# Browser\n\nUse browser automation for screenshots and inspection.");
+    expect(await screen.findByText("复制失败")).toBeInTheDocument();
   });
 
   it("deep-links Runtime Fleet Skill actions into the Skill warehouse", async () => {
@@ -869,6 +1002,12 @@ describe("Console shell", () => {
 
     const runtimeTable = screen.getByRole("table", { name: "Runtime 列表" });
     expect(within(runtimeTable).queryByText("OpenClaw")).not.toBeInTheDocument();
+    const runtimeSkillHeader = within(runtimeTable).getByRole("columnheader", { name: "Skill 操作" });
+    const runtimeSkillCell = within(runtimeTable).getAllByRole("button", { name: "查看 Skill" })[0].closest("td");
+    expect(runtimeSkillHeader).toHaveClass("w-[10%]");
+    expect(runtimeSkillHeader).not.toHaveClass("text-right");
+    expect(runtimeSkillCell).toHaveClass("whitespace-nowrap");
+    expect(runtimeSkillCell).not.toHaveClass("text-right");
 
     const agentTable = screen.getByRole("table", { name: "Agent 列表" });
     const taskHeader = within(agentTable).getByRole("columnheader", { name: "Task" });

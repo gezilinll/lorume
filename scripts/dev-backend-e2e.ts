@@ -30,6 +30,13 @@ const backend = createLorumeBackendServer({
         sentAt: new Date().toISOString(),
       }, null, 2));
     },
+    async sendOrganizationInvitation(input) {
+      mkdirSync(path.dirname(e2eLoginCodePath), { recursive: true });
+      writeFileSync(e2eLoginCodePath, JSON.stringify({
+        ...input,
+        sentAt: new Date().toISOString(),
+      }, null, 2));
+    },
   },
   host: "127.0.0.1",
   deviceStateSnapshotPath: path.join(e2eSnapshotRoot, "runtime-device-state", "latest.json"),

@@ -83,6 +83,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
           collectorIngestions: 2,
           devices: 1,
           runtimeSkillProbeSnapshots: 0,
+          runtimeScheduleProbeSnapshots: 0,
           runtimes: 1,
           tasks: 1,
         });
@@ -377,6 +378,87 @@ describeDb("runtime HTTP API with Postgres store", () => {
 
         expect(payload.total).toBe(2);
         expect(payload.items.map((item) => item.channel?.kind).sort()).toEqual(["dingtalk", "webchat"]);
+      } finally {
+        await postgresStore.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("accepts Runtime schedule probes and serves scheduled task groups with execution history", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const { baseUrl } = await startRuntimeApi(postgresStore);
+        const deviceStateSnapshot = createDeviceStateSnapshot({
+          tasks: [{
+            ...createDeviceStateSnapshot().tasks[0],
+            id: "openclaw-device:runtime:openclaw:agent:main:task:scheduled-daily-report-run-1",
+            raw: {
+              openclaw: {
+                scheduleId: "daily-report",
+                sessionKey: "agent:main:cron:daily-report:run:run-1",
+                status: "success",
+                statusSource: "trajectory",
+              },
+            },
+            status: "done",
+            taskType: "scheduled",
+            updatedAt: "2026-05-29T01:05:00.000Z",
+            userMessage: "[cron:daily-report Daily report] Generate summary",
+          }],
+        });
+
+        await postJson(`${baseUrl}/api/device-state-snapshots`, { ...deviceStateSnapshot, tasks: [] });
+        const probeResponse = await postJson(`${baseUrl}/api/runtime-schedule-probe-snapshots`, {
+          deviceId: "openclaw-device",
+          runtimeId: "openclaw-device:runtime:openclaw",
+          runtimeKind: "openclaw",
+          status: "succeeded",
+          observedAt: "2026-05-29T08:00:00.000Z",
+          schedules: [{
+            sourceId: "daily-report",
+            name: "Daily report",
+            agentIds: ["openclaw-device:runtime:openclaw:agent:main"],
+            enabled: true,
+            expression: "0 9 * * *",
+            timezone: "Asia/Shanghai",
+          }],
+        });
+        await postJson(`${baseUrl}/api/device-task-batches`, createTaskBatch(deviceStateSnapshot));
+        const groupsResponse = await fetch(`${baseUrl}/api/runtime-scheduled-tasks`);
+        const groups = await groupsResponse.json() as { items: Array<{ scheduleKey: string }>; total: number };
+        const executionsResponse = await fetch(`${baseUrl}/api/runtime-scheduled-tasks/${encodeURIComponent(groups.items[0].scheduleKey)}/executions`);
+
+        expect(probeResponse.status).toBe(201);
+        await expect(probeResponse.json()).resolves.toMatchObject({
+          deviceId: "openclaw-device",
+          ok: true,
+          runtimeId: "openclaw-device:runtime:openclaw",
+          status: "succeeded",
+        });
+        expect(groupsResponse.status).toBe(200);
+        expect(groups).toMatchObject({
+          items: [expect.objectContaining({
+            executionCount: 1,
+            latestStatus: "done",
+            name: "Daily report",
+            runtimeName: "OpenClaw Gateway",
+            scheduleKey: "openclaw-device:runtime:openclaw:schedule:daily-report",
+          })],
+          total: 1,
+        });
+        expect(executionsResponse.status).toBe(200);
+        await expect(executionsResponse.json()).resolves.toMatchObject({
+          items: [expect.objectContaining({
+            id: "openclaw-device:runtime:openclaw:agent:main:task:scheduled-daily-report-run-1",
+            taskType: "scheduled",
+          })],
+          total: 1,
+        });
       } finally {
         await postgresStore.close();
       }

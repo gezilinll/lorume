@@ -106,6 +106,24 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+
+  html:not([data-input-modality="keyboard"]) [data-slot="button"]:focus-visible,
+  html:not([data-input-modality="keyboard"]) [data-slot="sidebar-trigger"]:focus-visible,
+  html:not([data-input-modality="keyboard"]) [data-slot="sidebar-menu-button"]:focus-visible,
+  html:not([data-input-modality="keyboard"]) [data-slot="sidebar-menu-action"]:focus-visible,
+  html:not([data-input-modality="keyboard"]) [data-slot="sidebar-menu-sub-button"]:focus-visible {
+    box-shadow: none;
+    outline: none;
+  }
+
+  html:not([data-input-modality="keyboard"]) [data-slot="button"][data-variant="outline"]:focus-visible {
+    border-color: var(--border);
+  }
+
+  html:not([data-input-modality="keyboard"]) [data-slot="button"]:not([data-variant="outline"]):focus-visible {
+    border-color: transparent;
+  }
+
   html {
     @apply font-sans;
   }

@@ -51,6 +51,7 @@ import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/Con
 import { consoleDetailInspectorClass } from "@/components/layout/inspector-styles";
 import { DetailSurface } from "@/components/surfaces/DetailSurface";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { formatRuntimeTimestamp } from "./runtime-fleet-query";
 import {
   fetchRuntimeSkillInventory,
@@ -535,7 +536,7 @@ function SkillFullDetailDialog({
   if (!row) return null;
   return (
     <DetailSurface
-      bodyClassName="flex min-h-[min(680px,calc(100svh-10rem))] flex-col gap-4 space-y-0"
+      bodyClassName="flex h-[min(720px,calc(100svh-12rem))] min-h-0 flex-col gap-4 overflow-hidden space-y-0"
       className="sm:max-w-3xl"
       open={Boolean(row)}
       title={row.name}
@@ -568,7 +569,16 @@ function HoverCopyButton({
       size="icon-sm"
       type="button"
       variant="outline"
-      onClick={() => void copyTextToClipboard(value)}
+      onClick={(event) => {
+        event.stopPropagation();
+        void copyTextToClipboard(value).then((copied) => {
+          if (copied) {
+            toast.success("已复制");
+          } else {
+            toast.error("复制失败");
+          }
+        });
+      }}
     >
       <Copy className="size-3.5" aria-hidden="true" />
     </Button>
@@ -592,9 +602,9 @@ function SkillBodyBlock({ row }: { row: RuntimeSkillInventoryRow }) {
     <section className="flex min-h-0 flex-1 flex-col space-y-2">
       <h3 className="text-sm font-medium">Skill 正文</h3>
       {row.body ? (
-        <div className="group relative min-h-[360px] flex-1 overflow-hidden rounded-[12px] border border-border bg-[var(--surface-soft)]">
+        <div className="group relative min-h-0 flex-1 overflow-hidden rounded-[12px] border border-border bg-[var(--surface-soft)]">
           <HoverCopyButton label="复制 Skill 正文" value={row.body} />
-          <pre className="h-full min-h-[360px] overflow-auto p-3 pr-11 font-mono text-[12px] leading-5 text-foreground whitespace-pre-wrap">
+          <pre className="h-full min-h-0 overflow-auto p-4 pb-6 pr-11 font-mono text-[12px] leading-5 text-foreground whitespace-pre-wrap">
             {row.body}
           </pre>
         </div>

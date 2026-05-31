@@ -96,7 +96,7 @@ App-owned wrappers:
 ## Workbar
 
 - Console pages use one sticky top workbar instead of page-level hero/title blocks.
-- The workbar is a shared flat Taskflow top strip (`bg-background/85`, bottom border, fixed `h-14` content row) inside the Console shell, not a page-owned loose header or a floating card inside a header. Runtime Fleet, Runs, Skill 仓库, and Settings must render the same workbar treatment.
+- The workbar is a shared flat Taskflow top strip (`bg-background/85`, bottom border, fixed `h-14` content row) inside the Console shell, not a page-owned loose header or a floating card inside a header. Runtime Fleet, Runs, 定时任务, Skill 仓库, and Settings must render the same workbar treatment.
 - The workbar must span the main content width without padded side color blocks. Avoid nested rounded workbar cards that reveal sidebar/page background on the left or right edges.
 - The left side shows page identity and compact page-specific facts. The right side holds utility icons and, only on refreshable pages, a refresh icon as the last action.
 - Page bodies do not repeat the workbar title, explanatory paragraph, or summary metrics unless the data is part of the primary workflow.

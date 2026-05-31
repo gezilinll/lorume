@@ -6,8 +6,7 @@ import type { AuthEmailProvider } from "../auth/auth-http-api";
 export function createBackendEmailProvider(): AuthEmailProvider {
   return {
     async sendLoginCode({ code, email }) {
-      const appMode = resolveLorumeAppMode(process.env.LORUME_APP_MODE);
-      if (appMode === "development" || process.env.LORUME_AUTH_DEBUG_CODES === "1") {
+      if (shouldPrintDebugEmail()) {
         process.stdout.write(`Lorume login code for ${email}: ${code}\n`);
         return;
       }
@@ -19,10 +18,71 @@ export function createBackendEmailProvider(): AuthEmailProvider {
 
       throw new Error("email_provider_not_configured");
     },
+    async sendOrganizationInvitation({ email, expiresAt, inviteUrl, organizationName, role }) {
+      if (shouldPrintDebugEmail()) {
+        process.stdout.write(`Lorume invitation for ${email}: ${inviteUrl}\n`);
+        return;
+      }
+
+      if (process.env.LORUME_EMAIL_PROVIDER === "smtp") {
+        await sendSmtpOrganizationInvitation({ email, expiresAt, inviteUrl, organizationName, role });
+        return;
+      }
+
+      throw new Error("email_provider_not_configured");
+    },
   };
 }
 
+function shouldPrintDebugEmail(): boolean {
+  const appMode = resolveLorumeAppMode(process.env.LORUME_APP_MODE);
+  return appMode === "development" || process.env.LORUME_AUTH_DEBUG_CODES === "1";
+}
+
 async function sendSmtpLoginCode(input: { code: string; email: string }): Promise<void> {
+  const { from, transporter } = createSmtpTransport();
+
+  await transporter.sendMail({
+    from,
+    to: input.email,
+    subject: "Lorume 登录验证码",
+    text: `你的 Lorume 登录验证码是 ${input.code}，10 分钟内有效。若不是你本人操作，可以忽略这封邮件。`,
+    html: [
+      "<p>你的 Lorume 登录验证码是：</p>",
+      `<p><strong style="font-size: 24px; letter-spacing: 4px;">${escapeHtml(input.code)}</strong></p>`,
+      "<p>验证码 10 分钟内有效。若不是你本人操作，可以忽略这封邮件。</p>",
+    ].join(""),
+  });
+}
+
+async function sendSmtpOrganizationInvitation(input: {
+  email: string;
+  expiresAt: Date;
+  inviteUrl: string;
+  organizationName: string;
+  role: string;
+}): Promise<void> {
+  const { from, transporter } = createSmtpTransport();
+  const roleLabel = input.role === "admin" ? "管理员" : "成员";
+
+  await transporter.sendMail({
+    from,
+    to: input.email,
+    subject: `${input.organizationName} 邀请你加入 Lorume`,
+    text: [
+      `${input.organizationName} 邀请你以${roleLabel}身份加入 Lorume。`,
+      `打开邀请链接完成登录和加入：${input.inviteUrl}`,
+      `邀请有效期至 ${input.expiresAt.toISOString()}。若不是你本人预期的邀请，可以忽略这封邮件。`,
+    ].join("\n"),
+    html: [
+      `<p>${escapeHtml(input.organizationName)} 邀请你以 <strong>${escapeHtml(roleLabel)}</strong> 身份加入 Lorume。</p>`,
+      `<p><a href="${escapeHtml(input.inviteUrl)}">打开邀请链接</a> 完成登录和加入。</p>`,
+      `<p>邀请有效期至 ${escapeHtml(input.expiresAt.toISOString())}。若不是你本人预期的邀请，可以忽略这封邮件。</p>`,
+    ].join(""),
+  });
+}
+
+function createSmtpTransport() {
   const host = readRequiredEnv("LORUME_SMTP_HOST");
   const port = Number(readRequiredEnv("LORUME_SMTP_PORT"));
   const user = readRequiredEnv("LORUME_SMTP_USER");
@@ -41,17 +101,7 @@ async function sendSmtpLoginCode(input: { code: string; email: string }): Promis
     secure,
   });
 
-  await transporter.sendMail({
-    from,
-    to: input.email,
-    subject: "Lorume 登录验证码",
-    text: `你的 Lorume 登录验证码是 ${input.code}，10 分钟内有效。若不是你本人操作，可以忽略这封邮件。`,
-    html: [
-      "<p>你的 Lorume 登录验证码是：</p>",
-      `<p><strong style="font-size: 24px; letter-spacing: 4px;">${escapeHtml(input.code)}</strong></p>`,
-      "<p>验证码 10 分钟内有效。若不是你本人操作，可以忽略这封邮件。</p>",
-    ].join(""),
-  });
+  return { from, transporter };
 }
 
 function readRequiredEnv(name: string): string {

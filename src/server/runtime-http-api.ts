@@ -14,6 +14,9 @@ import {
   type RuntimeSkillProbeStatus,
   type RuntimeSkillSnapshot,
 } from "../runtime/runtime-skill-probe";
+import {
+  type RuntimeScheduleProbeSnapshot,
+} from "../runtime/runtime-schedule-probe";
 import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
 import { normalizeRuntimeTaskBatch } from "../runtime/runtime-task-sync";
 import { deriveDeviceHealthStatus } from "../runtime/runtime-device-health";
@@ -33,6 +36,7 @@ export interface RuntimeHttpApiHandlerOptions {
   auth?: {
     requireDeviceToken?: (request: IncomingMessage) => Promise<unknown | null>;
     requireUserSession?: (request: IncomingMessage) => Promise<unknown | null>;
+    verifyDeviceTokenValue?: (token: string, deviceId?: string | null) => Promise<unknown | null>;
   };
   /** Snapshot and connection state store. */
   store: RuntimeDeviceStateStore;
@@ -133,10 +137,10 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
     }
 
     if (request.method === "POST" && requestUrl.pathname === "/api/agent-skill-probe-snapshots") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
       try {
         const body = await readJsonBody(request);
+        const deviceAuth = await authorizeDeviceWrite(options, request, response, extractDeviceId("device_state", body));
+        if (deviceAuth === null) return;
         const snapshot = await persistAgentSkillProbeSnapshot(options, body);
         sendJson(response, 201, {
           ok: true,
@@ -163,10 +167,10 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
     }
 
     if (request.method === "POST" && requestUrl.pathname === "/api/runtime-skill-probe-snapshots") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
       try {
         const body = await readJsonBody(request);
+        const deviceAuth = await authorizeDeviceWrite(options, request, response, extractDeviceId("device_state", body));
+        if (deviceAuth === null) return;
         const snapshot = await persistRuntimeSkillProbeSnapshot(options, body);
         sendJson(response, 201, {
           ok: true,
@@ -182,19 +186,67 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
-    if (request.method === "POST" && requestUrl.pathname === "/api/device-state-snapshots") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
+    if (request.method === "POST" && requestUrl.pathname === "/api/runtime-schedule-probe-snapshots") {
+      try {
+        const body = await readJsonBody(request);
+        const deviceAuth = await authorizeDeviceWrite(options, request, response, extractDeviceId("device_state", body));
+        if (deviceAuth === null) return;
+        const snapshot = await persistRuntimeScheduleProbeSnapshot(options, body);
+        sendJson(response, 201, {
+          ok: true,
+          deviceId: snapshot.deviceId,
+          runtimeId: snapshot.runtimeId,
+          status: snapshot.status,
+        });
+      } catch (error) {
+        sendJson(response, statusCodeForWriteError(error), {
+          error: error instanceof Error ? error.message : "invalid runtime schedule probe snapshot",
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/runtime-scheduled-tasks") {
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
       if (!options.postgresStore) {
         sendJson(response, 503, { error: "postgres_store_unavailable" });
         return;
       }
+      sendJson(response, 200, await options.postgresStore.listRuntimeScheduledTasks({ organizationId }));
+      return;
+    }
+
+    const scheduledTaskExecutionsMatch = requestUrl.pathname.match(/^\/api\/runtime-scheduled-tasks\/([^/]+)\/executions$/);
+    if (request.method === "GET" && scheduledTaskExecutionsMatch) {
+      const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
+      if (organizationId === null) return;
+      if (!options.postgresStore) {
+        sendJson(response, 503, { error: "postgres_store_unavailable" });
+        return;
+      }
+      const scheduleKey = decodeURIComponent(scheduledTaskExecutionsMatch[1] ?? "");
+      sendJson(response, 200, await options.postgresStore.listRuntimeScheduledTaskExecutions(scheduleKey, {
+        organizationId,
+        limit: parseLimit(requestUrl.searchParams.get("limit")),
+      }));
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/device-state-snapshots") {
       let body: unknown = undefined;
+      let deviceAuth: unknown = undefined;
       try {
         body = await readJsonBody(request);
+        deviceAuth = await authorizeDeviceWrite(options, request, response, extractDeviceId("device_state", body));
+        if (deviceAuth === null) return;
         const snapshot = normalizeDeviceStateSnapshot(enrichDeviceStateSnapshotWithRequestNetwork(body, request));
         if (!snapshot) throw new Error("invalid device state snapshot");
         if (snapshot.tasks.length > 0) throw new Error("device state snapshots must not include tasks; use task batches");
+        if (!options.postgresStore) {
+          sendJson(response, 503, { error: "postgres_store_unavailable" });
+          return;
+        }
         await options.postgresStore.upsertDeviceStateSnapshot(snapshot, { organizationId: extractOrganizationId(deviceAuth) });
         sendJson(response, 201, {
           ok: true,
@@ -212,17 +264,18 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
     }
 
     if (request.method === "POST" && requestUrl.pathname === "/api/device-task-batches") {
-      const deviceAuth = await authorizeDeviceWrite(options, request, response);
-      if (deviceAuth === null) return;
-      if (!options.postgresStore) {
-        sendJson(response, 503, { error: "postgres_store_unavailable" });
-        return;
-      }
       let body: unknown = undefined;
+      let deviceAuth: unknown = undefined;
       try {
         body = await readJsonBody(request);
+        deviceAuth = await authorizeDeviceWrite(options, request, response, extractDeviceId("task_batch", body));
+        if (deviceAuth === null) return;
         const batch = normalizeRuntimeTaskBatch(body);
         if (!batch) throw new Error("invalid runtime task batch");
+        if (!options.postgresStore) {
+          sendJson(response, 503, { error: "postgres_store_unavailable" });
+          return;
+        }
         const result = await options.postgresStore.upsertRuntimeTaskBatch(batch, { organizationId: extractOrganizationId(deviceAuth) });
         sendJson(response, 201, { ok: true, ...result });
       } catch (error) {
@@ -476,6 +529,15 @@ async function persistRuntimeSkillProbeSnapshot(
   return snapshot;
 }
 
+async function persistRuntimeScheduleProbeSnapshot(
+  options: RuntimeHttpApiHandlerOptions,
+  value: unknown,
+): Promise<RuntimeScheduleProbeSnapshot> {
+  const snapshot = options.store.writeRuntimeScheduleProbeSnapshot(value);
+  await options.postgresStore?.upsertRuntimeScheduleProbeSnapshot(snapshot).catch(() => undefined);
+  return snapshot;
+}
+
 function readString(value: unknown, key: string): string {
   if (!isRecord(value)) return "";
   const candidate = value[key];
@@ -580,11 +642,23 @@ async function authorizeDeviceWrite(
   options: RuntimeHttpApiHandlerOptions,
   request: IncomingMessage,
   response: ServerResponse,
+  deviceId?: string | null,
 ): Promise<unknown | null> {
-  if (!options.auth?.requireDeviceToken) return undefined;
-  const deviceToken = await options.auth.requireDeviceToken(request);
+  if (!options.auth?.requireDeviceToken && !options.auth?.verifyDeviceTokenValue) return undefined;
+  const bearerToken = readBearerToken(request);
+  const deviceToken = options.auth.verifyDeviceTokenValue && bearerToken
+    ? await options.auth.verifyDeviceTokenValue(bearerToken, deviceId)
+    : await options.auth.requireDeviceToken?.(request);
   if (deviceToken) return deviceToken;
   sendJson(response, 401, { error: "invalid_device_token" });
+  return null;
+}
+
+function readBearerToken(request: IncomingMessage): string | null {
+  const authorization = request.headers.authorization;
+  if (typeof authorization === "string" && authorization.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim() || null;
+  }
   return null;
 }
 

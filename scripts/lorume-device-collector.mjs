@@ -372,6 +372,11 @@ async function postRuntimeSkillProbeSnapshot(serverUrl, snapshot, deviceToken = 
   return postJsonWithRetry(url, snapshot, "Runtime Skill probe snapshot", deviceToken);
 }
 
+async function postRuntimeScheduleProbeSnapshot(serverUrl, snapshot, deviceToken = "") {
+  const url = new URL("/api/runtime-schedule-probe-snapshots", serverUrl);
+  return postJsonWithRetry(url, snapshot, "Runtime schedule probe snapshot", deviceToken);
+}
+
 async function postJsonWithRetry(url, payload, label, deviceToken = "") {
   let lastError;
   for (const [attempt, delayMs] of POST_RETRY_DELAYS_MS.entries()) {
@@ -402,7 +407,7 @@ function sleep(milliseconds) {
 }
 
 function metadataSnapshot(snapshot) {
-  const { runtimeSkillProbes: _runtimeSkillProbes, ...metadata } = snapshot;
+  const { runtimeScheduleProbes: _runtimeScheduleProbes, runtimeSkillProbes: _runtimeSkillProbes, ...metadata } = snapshot;
   return {
     ...metadata,
     tasks: [],
@@ -422,6 +427,21 @@ async function postRuntimeSkillProbes(serverUrl, snapshot, deviceToken, logger) 
     });
   }
   return { runtimeSkillProbeCount: runtimeSkillProbes.length };
+}
+
+async function postRuntimeScheduleProbes(serverUrl, snapshot, deviceToken, logger) {
+  const runtimeScheduleProbes = Array.isArray(snapshot.runtimeScheduleProbes) ? snapshot.runtimeScheduleProbes : [];
+  for (const runtimeScheduleProbe of runtimeScheduleProbes) {
+    await postRuntimeScheduleProbeSnapshot(serverUrl, runtimeScheduleProbe, deviceToken);
+  }
+  if (runtimeScheduleProbes.length > 0) {
+    logger.info({
+      deviceId: snapshot.device.id,
+      event: "runtime_schedule_probe_upload_succeeded",
+      runtimeScheduleProbes: runtimeScheduleProbes.length,
+    });
+  }
+  return { runtimeScheduleProbeCount: runtimeScheduleProbes.length };
 }
 
 async function postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger) {
@@ -665,6 +685,14 @@ function createRuntimeTaskHash(task) {
     error: normalizeTaskHashText(task.error),
     hashVersion: 1,
     id: task.id,
+    ...(task.raw?.openclaw?.scheduleId || task.raw?.openclaw?.scheduleName
+      ? {
+        openclawSchedule: {
+          scheduleId: task.raw.openclaw.scheduleId ?? null,
+          scheduleName: task.raw.openclaw.scheduleName ?? null,
+        },
+      }
+      : {}),
     status: task.status,
     taskType: task.taskType,
     updatedAt: task.updatedAt ?? null,
@@ -777,6 +805,7 @@ async function runOnce(config, args, mode = "once") {
       agents: snapshot.agents?.length ?? 0,
       tasks: snapshot.tasks?.length ?? 0,
       runtimeSkillProbes: snapshot.runtimeSkillProbes?.length ?? 0,
+      runtimeScheduleProbes: snapshot.runtimeScheduleProbes?.length ?? 0,
     },
   });
   const serverUrl = args.serverUrl || config.serverUrl || "";
@@ -786,6 +815,7 @@ async function runOnce(config, args, mode = "once") {
     await postSnapshot(serverUrl, metadataSnapshot(snapshot), deviceToken);
     metrics.metadataPostDurationMs = Date.now() - metadataPostStartedAt;
     await postRuntimeSkillProbes(serverUrl, snapshot, deviceToken, logger);
+    await postRuntimeScheduleProbes(serverUrl, snapshot, deviceToken, logger);
     const taskBatchPostStartedAt = Date.now();
     const taskBatchStats = await postChangedTaskBatches(serverUrl, snapshot, config, deviceToken, logger);
     metrics.taskBatchPostDurationMs = Date.now() - taskBatchPostStartedAt;

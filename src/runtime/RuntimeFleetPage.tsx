@@ -501,12 +501,12 @@ function RuntimeTable({
           <Table aria-label="Runtime 列表" className="table-fixed">
             <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
-                <TableHead className="w-[32%]">名称</TableHead>
-                <TableHead className="w-[23%]">所属设备</TableHead>
-                <TableHead className="w-[13%]">状态</TableHead>
+                <TableHead className="w-[30%]">名称</TableHead>
+                <TableHead className="w-[22%]">所属设备</TableHead>
+                <TableHead className="w-[12%]">状态</TableHead>
                 <TableHead className="w-[9%]">Task</TableHead>
-                <TableHead className="w-[15%]">最近活跃</TableHead>
-                <TableHead className="w-[8%]">
+                <TableHead className="w-[17%]">最近活跃</TableHead>
+                <TableHead className="w-[10%]">
                   <span className="sr-only">Skill 操作</span>
                 </TableHead>
               </TableRow>
@@ -549,7 +549,7 @@ function RuntimeTable({
                     <TableCell className="text-muted-foreground">
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <Button
                         size="sm"
                         type="button"
@@ -659,7 +659,7 @@ function AgentTable({
                     <TableCell className="text-muted-foreground">
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span

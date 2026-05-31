@@ -95,6 +95,37 @@ describe("runtime HTTP API", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "invalid_runtime_task_batch" });
   });
 
+  it("verifies device tokens against the reported device id before collector writes", async () => {
+    const verified: Array<{ deviceId?: string | null; token: string }> = [];
+    const snapshot = createDeviceStateSnapshot(fixtureSnapshot);
+    const { baseUrl } = await startRuntimeApi({
+      auth: {
+        verifyDeviceTokenValue: async (token, deviceId) => {
+          verified.push({ deviceId, token });
+          return { organizationId: "org_1", tokenPrefix: "agt_device_" };
+        },
+      },
+      postgresStore: {
+        upsertDeviceStateSnapshot: async (_snapshot, options) => {
+          expect(options).toMatchObject({ organizationId: "org_1" });
+          return { counts: {}, deviceId: snapshot.device.id, snapshotType: "device_state" };
+        },
+      } as Partial<PostgresStore> as PostgresStore,
+    });
+
+    const response = await fetch(`${baseUrl}/api/device-state-snapshots`, {
+      body: JSON.stringify({ ...snapshot, tasks: [] }),
+      headers: {
+        authorization: "Bearer device-token",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(201);
+    expect(verified).toEqual([{ deviceId: snapshot.device.id, token: "device-token" }]);
+  });
+
 });
 
 async function startRuntimeApi(options: {

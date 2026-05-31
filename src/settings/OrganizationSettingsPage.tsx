@@ -1,5 +1,13 @@
-import { useMemo, useState, type ReactNode } from "react";
-import type { AuthMemberRole, AuthOrganizationMembership, AuthSessionContext } from "../auth/auth-store";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type {
+  AuthAuditEvent,
+  AuthDeviceTokenStatus,
+  AuthDeviceTokenSummary,
+  AuthInvitableMemberRole,
+  AuthMemberRole,
+  AuthOrganizationMembership,
+  AuthSessionContext,
+} from "../auth/auth-store";
 import { InitialAvatar } from "@/components/data/InitialAvatar";
 import { StatusBadge } from "@/components/data/StatusBadge";
 import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/ConsoleWorkbar";
@@ -26,12 +34,13 @@ const roleLabels: Record<AuthMemberRole, string> = {
 export function OrganizationSettingsPage({ organization: activeOrganization, session }: OrganizationSettingsPageProps) {
   const organization = activeOrganization ?? session?.organizations[0];
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<AuthMemberRole>("member");
-  const [inviteLink, setInviteLink] = useState("");
+  const [inviteRole, setInviteRole] = useState<AuthInvitableMemberRole>("member");
+  const [inviteNotice, setInviteNotice] = useState("");
   const [deviceId, setDeviceId] = useState("");
   const [deviceToken, setDeviceToken] = useState("");
+  const [deviceTokens, setDeviceTokens] = useState<AuthDeviceTokenSummary[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuthAuditEvent[]>([]);
   const [installCommand, setInstallCommand] = useState("");
-  const [copiedInviteLink, setCopiedInviteLink] = useState(false);
   const [copiedInstallCommand, setCopiedInstallCommand] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [deviceErrorMessage, setDeviceErrorMessage] = useState("");
@@ -40,6 +49,25 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   const canManage = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
+
+  useEffect(() => {
+    if (!organization || !canManage) {
+      setDeviceTokens([]);
+      setAuditEvents([]);
+      return;
+    }
+    let isMounted = true;
+    void loadSecurityData(organization.organizationId).then(({ auditEvents: nextAuditEvents, deviceTokens: nextDeviceTokens }) => {
+      if (!isMounted) return;
+      setDeviceTokens(nextDeviceTokens);
+      setAuditEvents(nextAuditEvents);
+    }).catch((error) => {
+      if (isMounted) setDeviceErrorMessage(error instanceof Error ? error.message : "组织安全数据加载失败");
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [canManage, organization?.organizationId]);
 
   useConsoleWorkbar({
     meta: organization ? (
@@ -55,8 +83,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
     if (!organization) return;
     setIsSubmitting(true);
     setErrorMessage("");
-    setInviteLink("");
-    setCopiedInviteLink(false);
+    setInviteNotice("");
     try {
       const response = await fetch(`/api/organizations/${encodeURIComponent(organization.organizationId)}/invitations`, {
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
@@ -67,22 +94,13 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
       if (!response.ok) {
         throw new Error(typeof payload?.error === "string" ? payload.error : `邀请创建失败: HTTP ${response.status}`);
       }
-      const token = typeof payload?.invitation?.token === "string" ? payload.invitation.token : "";
-      setInviteLink(token ? `${window.location.origin}/invite/${encodeURIComponent(token)}` : "邀请已创建");
+      setInviteNotice(`邀请邮件已发送至 ${maskEmail(inviteEmail)}`);
+      setInviteEmail("");
+      await refreshSecurityData();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "邀请创建失败");
     } finally {
       setIsSubmitting(false);
-    }
-  }
-
-  async function copyInviteLink() {
-    if (!inviteLink) return;
-    try {
-      await navigator.clipboard?.writeText(inviteLink);
-      setCopiedInviteLink(true);
-    } catch {
-      setCopiedInviteLink(false);
     }
   }
 
@@ -107,16 +125,50 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
       const registeredDeviceId = typeof payload?.deviceToken?.deviceId === "string" ? payload.deviceToken.deviceId : deviceId.trim();
       if (!token) throw new Error("设备 token 创建失败");
       setDeviceToken(token);
+      setDeviceTokens((tokens) => [
+        stripPlaintextDeviceToken(payload.deviceToken as AuthDeviceTokenSummary & { token?: string }),
+        ...tokens.filter((item) => item.id !== payload.deviceToken.id),
+      ]);
       setInstallCommand(buildInstallCommand({
         deviceId: registeredDeviceId,
         origin: window.location.origin,
         token,
       }));
+      await refreshSecurityData();
     } catch (error) {
       setDeviceErrorMessage(error instanceof Error ? error.message : "设备 token 创建失败");
     } finally {
       setIsCreatingDeviceToken(false);
     }
+  }
+
+  async function revokeDeviceToken(tokenId: string) {
+    if (!organization) return;
+    setDeviceErrorMessage("");
+    try {
+      const response = await fetch(`/api/organizations/${encodeURIComponent(organization.organizationId)}/device-tokens/${encodeURIComponent(tokenId)}/revoke`, {
+        body: JSON.stringify({ reason: "manual" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : `设备 token 撤销失败: HTTP ${response.status}`);
+      }
+      if (payload?.deviceToken) {
+        setDeviceTokens((tokens) => tokens.map((item) => item.id === tokenId ? payload.deviceToken : item));
+      }
+      await refreshSecurityData();
+    } catch (error) {
+      setDeviceErrorMessage(error instanceof Error ? error.message : "设备 token 撤销失败");
+    }
+  }
+
+  async function refreshSecurityData() {
+    if (!organization || !canManage) return;
+    const data = await loadSecurityData(organization.organizationId);
+    setDeviceTokens(data.deviceTokens);
+    setAuditEvents(data.auditEvents);
   }
 
   async function copyInstallCommand() {
@@ -161,7 +213,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
         <Card>
           <CardHeader>
             <CardTitle>设备 Token</CardTitle>
-            <CardDescription>管理员创建后只在本次页面状态中显示明文 token。</CardDescription>
+            <CardDescription>一个 token 只能绑定一台设备，首次上报后变为占用。</CardDescription>
           </CardHeader>
           <CardContent>
             {canManage ? (
@@ -184,6 +236,50 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                 >
                   生成安装命令
                 </Button>
+                {deviceTokens.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Token 列表</p>
+                    <div className="overflow-hidden rounded-lg border">
+                      <Table aria-label="设备 Token 列表">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>名称</TableHead>
+                            <TableHead>设备</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead>操作</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {deviceTokens.map((token) => (
+                            <TableRow key={token.id}>
+                              <TableCell>
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">{token.name}</p>
+                                  <p className="truncate text-xs text-muted-foreground">{token.tokenPrefix}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">{token.deviceId || "待绑定"}</TableCell>
+                              <TableCell>
+                                <StatusBadge tone={deviceTokenStatusTone(token.status)}>{deviceTokenStatusLabel(token.status)}</StatusBadge>
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  type="button"
+                                  disabled={token.status === "revoked" || token.status === "expired"}
+                                  onClick={() => void revokeDeviceToken(token.id)}
+                                >
+                                  撤销
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : null}
                 {deviceErrorMessage ? (
                   <Alert variant="destructive">
                     <AlertTitle>设备 token 创建失败</AlertTitle>
@@ -202,7 +298,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
         <Card>
           <CardHeader>
             <CardTitle>成员与邀请</CardTitle>
-            <CardDescription>查看当前成员身份，并为新成员生成一次性邀请链接。</CardDescription>
+            <CardDescription>查看当前成员身份，并向新成员发送一次性邀请邮件。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <Table aria-label="组织成员">
@@ -247,7 +343,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="invite-role">角色</FieldLabel>
-                    <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as AuthMemberRole)}>
+                    <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as AuthInvitableMemberRole)}>
                       <SelectTrigger id="invite-role" aria-label="角色" className="w-full">
                         <SelectValue />
                       </SelectTrigger>
@@ -264,27 +360,13 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                   disabled={isSubmitting || !inviteEmail.trim()}
                   onClick={() => void createInvitation()}
                 >
-                  创建邀请链接
+                  发送邀请邮件
                 </Button>
-                {inviteLink ? (
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel htmlFor="invite-link">邀请链接</FieldLabel>
-                      <Input
-                        id="invite-link"
-                        aria-label="邀请链接"
-                        readOnly
-                        value={inviteLink}
-                        onFocus={(event) => event.currentTarget.select()}
-                      />
-                    </Field>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button variant="outline" type="button" onClick={() => void copyInviteLink()}>
-                        复制邀请链接
-                      </Button>
-                      {copiedInviteLink ? <span className="text-sm text-muted-foreground">已复制</span> : null}
-                    </div>
-                  </FieldGroup>
+                {inviteNotice ? (
+                  <Alert>
+                    <AlertTitle>邀请已发送</AlertTitle>
+                    <AlertDescription>{inviteNotice}</AlertDescription>
+                  </Alert>
                 ) : null}
                 {errorMessage ? (
                   <Alert variant="destructive">
@@ -294,15 +376,15 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                 ) : null}
               </FieldGroup>
             ) : (
-              <p className="text-sm text-muted-foreground">当前角色不能创建邀请链接。</p>
+              <p className="text-sm text-muted-foreground">当前角色不能发送邀请邮件。</p>
             )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>安装命令</CardTitle>
-            <CardDescription>生成后复制到目标设备执行 Collector 安装。</CardDescription>
+            <CardTitle>安装与审计</CardTitle>
+            <CardDescription>复制安装命令，并查看最近安全事件。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {installCommand ? (
@@ -337,11 +419,87 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
             ) : (
               <p className="text-sm text-muted-foreground">输入 Device ID 后生成一行安装命令。</p>
             )}
+            {canManage ? (
+              <div className="space-y-2 border-t pt-4">
+                <p className="text-sm font-medium">最近审计</p>
+                {auditEvents.length > 0 ? (
+                  <div className="space-y-2">
+                    {auditEvents.slice(0, 6).map((event) => (
+                      <div key={event.id} className="rounded-lg border bg-[var(--surface-soft)] px-3 py-2">
+                        <p className="text-sm font-medium">{auditEventLabel(event.eventType)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">暂无审计事件。</p>
+                )}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
     </div>
   );
+}
+
+async function loadSecurityData(organizationId: string): Promise<{
+  auditEvents: AuthAuditEvent[];
+  deviceTokens: AuthDeviceTokenSummary[];
+}> {
+  const [deviceTokensResponse, auditEventsResponse] = await Promise.all([
+    fetch(`/api/organizations/${encodeURIComponent(organizationId)}/device-tokens`),
+    fetch(`/api/organizations/${encodeURIComponent(organizationId)}/audit-events?limit=20`),
+  ]);
+  if (!deviceTokensResponse.ok) throw new Error(`设备 token 列表加载失败: HTTP ${deviceTokensResponse.status}`);
+  if (!auditEventsResponse.ok) throw new Error(`审计日志加载失败: HTTP ${auditEventsResponse.status}`);
+  const deviceTokensPayload = await deviceTokensResponse.json().catch(() => ({}));
+  const auditEventsPayload = await auditEventsResponse.json().catch(() => ({}));
+  return {
+    auditEvents: Array.isArray(auditEventsPayload?.auditEvents) ? auditEventsPayload.auditEvents : [],
+    deviceTokens: Array.isArray(deviceTokensPayload?.deviceTokens) ? deviceTokensPayload.deviceTokens.map(stripPlaintextDeviceToken) : [],
+  };
+}
+
+function stripPlaintextDeviceToken(token: AuthDeviceTokenSummary & { token?: string }): AuthDeviceTokenSummary {
+  const { token: _token, ...summary } = token;
+  return summary;
+}
+
+function deviceTokenStatusLabel(status: AuthDeviceTokenStatus): string {
+  if (status === "pending") return "待绑定";
+  if (status === "occupied") return "已占用";
+  if (status === "revoked") return "已撤销";
+  return "已过期";
+}
+
+function deviceTokenStatusTone(status: AuthDeviceTokenStatus): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (status === "pending") return "warning";
+  if (status === "occupied") return "success";
+  if (status === "revoked") return "danger";
+  return "neutral";
+}
+
+function auditEventLabel(eventType: AuthAuditEvent["eventType"]): string {
+  if (eventType === "invitation.sent") return "发送邀请";
+  if (eventType === "invitation.accepted") return "接受邀请";
+  if (eventType === "invitation.rejected") return "拒绝邀请";
+  if (eventType === "device_token.created") return "创建设备 Token";
+  if (eventType === "device_token.occupied") return "设备 Token 绑定";
+  if (eventType === "device_token.reuse_rejected") return "设备 Token 复用被拒绝";
+  if (eventType === "device_token.revoked") return "撤销设备 Token";
+  if (eventType === "auth.login_failed") return "登录失败";
+  if (eventType === "auth.login_succeeded") return "登录成功";
+  return "退出登录";
+}
+
+function formatDateTime(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function SummaryItem({ label, value }: { label: string; value: ReactNode }) {
@@ -368,4 +526,10 @@ function buildInstallCommand(input: { deviceId: string; origin: string; token: s
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function maskEmail(email: string): string {
+  const [local = "", domain = ""] = email.trim().toLowerCase().split("@");
+  if (!domain) return email.trim();
+  return `${local.slice(0, 1)}***@${domain}`;
 }

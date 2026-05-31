@@ -6,20 +6,21 @@ import { AuthPageShell } from "./AuthPageShell";
 import { AuthOperationsPreview } from "./auth-preview";
 
 interface VerifyCodePageProps {
+  displayEmail?: string;
   email: string;
   error?: string | null;
   onBack: () => void;
   onSubmit: (code: string) => Promise<void>;
 }
 
-export function VerifyCodePage({ email, error, onBack, onSubmit }: VerifyCodePageProps) {
+export function VerifyCodePage({ displayEmail, email, error, onBack, onSubmit }: VerifyCodePageProps) {
   const [code, setCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   return (
     <AuthPageShell
       title="输入验证码"
-      subtitle={`验证码已发送到 ${email}，10 分钟内有效。`}
+      subtitle={`验证码已发送到 ${displayEmail ?? email}，10 分钟内有效。`}
       preview={<AuthOperationsPreview />}
       notice="验证通过后会自动进入控制台；若账号还没有组织，需要先创建或加入组织。"
     >

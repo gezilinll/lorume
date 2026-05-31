@@ -1,10 +1,11 @@
-import type { AuthOrganizationMembership, AuthSessionContext } from "./auth-store";
+import type { AuthInvitationPreview, AuthOrganizationMembership, AuthSessionContext } from "./auth-store";
 import { authErrorMessage } from "./auth-errors";
 
 /** Browser auth API client for email-code login, organization setup, invitations, and logout. */
 export interface AuthClient {
   acceptInvitation: (token: string) => Promise<{ organization: AuthOrganizationMembership }>;
   createOrganization: (input: { name: string; slug: string }) => Promise<{ organizations: AuthOrganizationMembership[] }>;
+  getInvitationPreview: (token: string) => Promise<AuthInvitationPreview>;
   getMe: () => Promise<AuthSessionContext | null>;
   loginWithCode: (input: { code: string; email: string }) => Promise<AuthSessionContext>;
   logout: () => Promise<void>;
@@ -24,6 +25,12 @@ export function createAuthClient(): AuthClient {
         body: JSON.stringify({ name: input.name.trim(), slug: input.slug.trim() }),
         method: "POST",
       });
+    },
+    async getInvitationPreview(token) {
+      const result = await requestJson<{ invitation: AuthInvitationPreview }>(`/api/invitations/${encodeURIComponent(token)}/preview`, {
+        method: "GET",
+      });
+      return result.invitation;
     },
     async getMe() {
       const response = await fetch("/api/me", { credentials: "include" });

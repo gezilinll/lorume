@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createNumericCode, createSecretToken, hashSecret } from "./auth-crypto";
 import type {
+  AuthAuditEventType,
   AuthDeviceTokenVerification,
+  AuthInvitableMemberRole,
   AuthMemberRole,
   AuthSessionContext,
   AuthStore,
@@ -14,6 +16,13 @@ const sessionCookieName = "lorume_session";
 /** Email provider contract for login codes. */
 export interface AuthEmailProvider {
   sendLoginCode: (input: { code: string; email: string }) => Promise<void>;
+  sendOrganizationInvitation: (input: {
+    email: string;
+    expiresAt: Date;
+    inviteUrl: string;
+    organizationName: string;
+    role: AuthInvitableMemberRole;
+  }) => Promise<void>;
 }
 
 /** Dependencies for the auth HTTP API. */
@@ -38,7 +47,7 @@ export type AuthHttpApiHandler = (
 export interface AuthRuntimeGuards {
   requireDeviceToken: (request: IncomingMessage) => Promise<AuthDeviceTokenVerification | null>;
   requireUserSession: (request: IncomingMessage) => Promise<AuthSessionContext | null>;
-  verifyDeviceTokenValue: (token: string) => Promise<AuthDeviceTokenVerification | null>;
+  verifyDeviceTokenValue: (token: string, deviceId?: string | null) => Promise<AuthDeviceTokenVerification | null>;
 }
 
 /** Create auth routes for login, organization management, invitations, and logout. */
@@ -89,6 +98,10 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         now: now(),
       });
       if (!consumedCode) {
+        await options.store.createAuditEvent({
+          eventType: "auth.login_failed",
+          metadata: { email: maskEmail(email), reason: "invalid_or_expired_code" },
+        });
         sendAuthError(response, 401, "invalid_or_expired_code");
         return;
       }
@@ -101,6 +114,11 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         userId: user.id,
       });
       setSessionCookie(response, sessionToken, 30 * 24 * 60 * 60);
+      await options.store.createAuditEvent({
+        actorUserId: user.id,
+        eventType: "auth.login_succeeded",
+        metadata: { email: maskEmail(email) },
+      });
       sendJson(response, 200, {
         id: session.id,
         organizations: await options.store.listOrganizationsForUser(user.id),
@@ -111,8 +129,16 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
 
     if (request.method === "POST" && requestUrl.pathname === "/api/auth/logout") {
       const sessionToken = readSessionToken(request);
+      const session = sessionToken ? await options.store.readSessionByHash(hashSecret(sessionToken, "session-token", pepper), now()) : null;
       if (sessionToken) {
         await options.store.revokeSession(hashSecret(sessionToken, "session-token", pepper));
+      }
+      if (session) {
+        await options.store.createAuditEvent({
+          actorUserId: session.user.id,
+          eventType: "auth.logout",
+          metadata: { email: maskEmail(session.user.email) },
+        });
       }
       setSessionCookie(response, "", 0);
       response.statusCode = 204;
@@ -171,23 +197,66 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       }
       const body = await readJsonBody(request);
       const email = normalizeEmail(readString(body, "email"));
-      const role = normalizeRole(readString(body, "role"));
-      if (!email || !role) {
+      const rawRole = readString(body, "role").trim();
+      const role = normalizeInvitableRole(rawRole);
+      if (!email || !rawRole) {
         sendAuthError(response, 400, "invitation_email_and_role_required");
         return;
       }
+      if (!role) {
+        sendAuthError(response, 400, "invitation_role_not_allowed");
+        return;
+      }
       const token = createInvitationToken();
+      const expiresAt = new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000);
       const invitation = await options.store.createInvitation({
         email,
-        expiresAt: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+        expiresAt,
         invitedByUserId: session.user.id,
         organizationId,
         role,
         tokenHash: hashSecret(token, "invitation-token", pepper),
       });
-      sendJson(response, 201, {
-        invitation: { ...invitation, token },
+      const inviteUrl = `${originFromRequest(request)}/invite/${encodeURIComponent(token)}`;
+      try {
+        await options.emailProvider.sendOrganizationInvitation({
+          email,
+          expiresAt,
+          inviteUrl,
+          organizationName: membership.name,
+          role,
+        });
+      } catch (error) {
+        await options.store.revokeInvitation({ id: invitation.id, now: now() });
+        sendAuthError(response, 503, "email_provider_unavailable");
+        return;
+      }
+      await options.store.createAuditEvent({
+        actorUserId: session.user.id,
+        eventType: "invitation.sent",
+        metadata: {
+          email: maskEmail(email),
+          expiresAt: expiresAt.toISOString(),
+          role,
+        },
+        organizationId,
+        targetId: invitation.id,
+        targetType: "invitation",
       });
+      sendJson(response, 201, {
+        invitation,
+      });
+      return;
+    }
+
+    const invitationPreviewMatch = requestUrl.pathname.match(/^\/api\/invitations\/([^/]+)\/preview$/);
+    if (request.method === "GET" && invitationPreviewMatch) {
+      const token = decodeURIComponent(invitationPreviewMatch[1] ?? "");
+      const invitation = await options.store.readInvitationPreview({
+        now: now(),
+        tokenHash: hashSecret(token, "invitation-token", pepper),
+      });
+      sendJson(response, 200, { invitation });
       return;
     }
 
@@ -203,9 +272,24 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         userId: session.user.id,
       });
       if (!organization) {
+        await options.store.createAuditEvent({
+          actorUserId: session.user.id,
+          eventType: "invitation.rejected",
+          metadata: { email: maskEmail(session.user.email), reason: "invitation_not_available" },
+        });
         sendAuthError(response, 403, "invitation_not_available");
         return;
       }
+      await options.store.createAuditEvent({
+        actorUserId: session.user.id,
+        eventType: "invitation.accepted",
+        metadata: {
+          email: maskEmail(session.user.email),
+          role: organization.role,
+        },
+        organizationId: organization.organizationId,
+        targetType: "invitation",
+      });
       sendJson(response, 200, { organization });
       return;
     }
@@ -232,7 +316,81 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         tokenHash: hashSecret(token, "device-token", pepper),
         tokenPrefix,
       });
+      await options.store.createAuditEvent({
+        actorUserId: session.user.id,
+        eventType: "device_token.created",
+        metadata: {
+          deviceId,
+          tokenPrefix,
+        },
+        organizationId,
+        targetId: deviceToken.id,
+        targetType: "device_token",
+      });
       sendJson(response, 201, { deviceToken: { ...deviceToken, token } });
+      return;
+    }
+
+    const deviceTokenListMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/device-tokens$/);
+    if (request.method === "GET" && deviceTokenListMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(deviceTokenListMatch[1] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      sendJson(response, 200, {
+        deviceTokens: await options.store.listDeviceTokens({ now: now(), organizationId }),
+      });
+      return;
+    }
+
+    const deviceTokenRevokeMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/device-tokens\/([^/]+)\/revoke$/);
+    if (request.method === "POST" && deviceTokenRevokeMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(deviceTokenRevokeMatch[1] ?? "");
+      const tokenId = decodeURIComponent(deviceTokenRevokeMatch[2] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      const body = await readJsonBody(request);
+      const deviceToken = await options.store.revokeDeviceToken({
+        actorUserId: session.user.id,
+        id: tokenId,
+        now: now(),
+        organizationId,
+        reason: readString(body, "reason").trim() || "manual",
+      });
+      if (!deviceToken) {
+        sendAuthError(response, 404, "device_token_not_found");
+        return;
+      }
+      sendJson(response, 200, { deviceToken });
+      return;
+    }
+
+    const auditEventsMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/audit-events$/);
+    if (request.method === "GET" && auditEventsMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(auditEventsMatch[1] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      sendJson(response, 200, {
+        auditEvents: await options.store.listAuditEvents({
+          eventType: normalizeAuditEventType(requestUrl.searchParams.get("eventType") ?? ""),
+          limit: parseLimit(requestUrl.searchParams.get("limit")),
+          organizationId,
+        }),
+      });
       return;
     }
 
@@ -255,8 +413,8 @@ export function createAuthRuntimeGuards(
     requireUserSession(request) {
       return readSessionContext(request, store, now(), options.pepper);
     },
-    verifyDeviceTokenValue(token) {
-      return verifyDeviceTokenValue(store, token, now(), options.pepper);
+    verifyDeviceTokenValue(token, deviceId) {
+      return verifyDeviceTokenValue(store, token, now(), options.pepper, deviceId);
     },
   };
 }
@@ -266,9 +424,10 @@ function verifyDeviceTokenValue(
   token: string,
   now: Date,
   pepper?: string,
+  deviceId?: string | null,
 ): Promise<AuthDeviceTokenVerification | null> {
   if (!token.trim()) return Promise.resolve(null);
-  return store.verifyDeviceToken(hashSecret(token, "device-token", pepper), now);
+  return store.verifyDeviceToken(hashSecret(token, "device-token", pepper), now, deviceId);
 }
 
 async function requireSession(
@@ -331,13 +490,57 @@ function canManageOrganization(role: AuthMemberRole): boolean {
   return role === "owner" || role === "admin";
 }
 
-function normalizeRole(value: string): AuthMemberRole | null {
-  if (value === "owner" || value === "admin" || value === "member") return value;
+function normalizeInvitableRole(value: string): AuthInvitableMemberRole | null {
+  if (value === "admin" || value === "member") return value;
   return null;
+}
+
+function normalizeAuditEventType(value: string): AuthAuditEventType | undefined {
+  if (
+    value === "auth.login_failed"
+    || value === "auth.login_succeeded"
+    || value === "auth.logout"
+    || value === "device_token.created"
+    || value === "device_token.occupied"
+    || value === "device_token.reuse_rejected"
+    || value === "device_token.revoked"
+    || value === "invitation.accepted"
+    || value === "invitation.rejected"
+    || value === "invitation.sent"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function parseLimit(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(Math.max(parsed, 1), 200);
+}
+
+function originFromRequest(request: IncomingMessage): string {
+  const origin = request.headers.origin;
+  if (typeof origin === "string" && origin.trim()) return origin.trim().replace(/\/+$/, "");
+  const forwardedProto = request.headers["x-forwarded-proto"];
+  const proto = typeof forwardedProto === "string" && forwardedProto.trim()
+    ? forwardedProto.split(",")[0]?.trim() || "http"
+    : "http";
+  const forwardedHost = request.headers["x-forwarded-host"];
+  const host = typeof forwardedHost === "string" && forwardedHost.trim()
+    ? forwardedHost.split(",")[0]?.trim()
+    : request.headers.host;
+  return `${proto}://${host || "lorume.local"}`;
 }
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function maskEmail(email: string): string {
+  const [local = "", domain = ""] = normalizeEmail(email).split("@");
+  return `${local.slice(0, 1)}***@${domain}`;
 }
 
 function slugify(value: string): string {

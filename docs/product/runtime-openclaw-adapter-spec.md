@@ -76,6 +76,8 @@ Runtime 和 Agent 不保存 working / idle。页面需要“进行中数量”�
 
 Adapter 负责生成归一化 `Task.status`，但不得覆盖 OpenClaw 原始状态。原始状态保存在 `Task.raw.openclaw.status`，并通过 `Task.raw.openclaw.statusSource` 标注状态来自 session、trajectory 或 tasks_list diagnostics。
 
+OpenClaw trajectory 缺少 `session.ended` 或 `trace.artifacts.finalStatus` 时可以短期视为 `running`。如果 `running` trajectory 的最近事件时间距离本轮采集时间超过 2 小时，adapter 必须把 Lorume `Task.status` 映射为 `unknown`，同时保留 `Task.raw.openclaw.status="running"` 并写入 `openclaw_stale_running_trajectory` warning diagnostic。该规则只表达“结束状态证据缺失”，不得推断为 `done`、`failed` 或直接修改历史数据。
+
 ## OpenClaw Adapter
 
 OpenClaw adapter 输出当前本地 `DeviceStateSnapshot` 内的 `runtimes`、`agents`、`tasks` 和 `runtimeSkillProbes`；collector 再拆分为 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 上报。

@@ -164,6 +164,8 @@ export interface Task {
       sessionKey?: string;
       messageId?: string;
       trajectoryRunId?: string;
+      scheduleId?: string;
+      scheduleName?: string;
     };
     slock?: {
       status?: string;
@@ -395,6 +397,8 @@ function cleanOpenClawRaw(value: LooseRecord | undefined): NonNullable<NonNullab
     ...(value.sessionKey ? { sessionKey: String(value.sessionKey) } : {}),
     ...(value.messageId ? { messageId: String(value.messageId) } : {}),
     ...(value.trajectoryRunId ? { trajectoryRunId: String(value.trajectoryRunId) } : {}),
+    ...(value.scheduleId ? { scheduleId: String(value.scheduleId) } : {}),
+    ...(value.scheduleName ? { scheduleName: String(value.scheduleName) } : {}),
   };
   return Object.keys(output).length ? output : undefined;
 }

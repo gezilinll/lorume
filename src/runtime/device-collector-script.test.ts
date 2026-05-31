@@ -457,7 +457,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
     }
   });
 
-  it("posts runtime Skill snapshots separately from device metadata", async () => {
+  it("posts runtime Skill and schedule snapshots separately from device metadata", async () => {
     const configDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-skill-probe-config-"));
     const fakeCli = path.join(configDir, "lorume.mjs");
     const configPath = path.join(configDir, "config.json");
@@ -494,6 +494,22 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
           agentIds: [],
         }],
       }],
+      runtimeScheduleProbes: [{
+        deviceId: "skill-probe-device",
+        runtimeId: "skill-probe-device:runtime:openclaw",
+        runtimeKind: "openclaw",
+        status: "succeeded",
+        observedAt: "2026-05-29T08:00:00.000Z",
+        schedules: [{
+          key: "skill-probe-device:runtime:openclaw:schedule:daily-summary",
+          sourceId: "daily-summary",
+          name: "Daily summary",
+          agentIds: ["skill-probe-device:runtime:openclaw:agent:main"],
+          enabled: true,
+          expression: "0 9 * * *",
+          timezone: "Asia/Shanghai",
+        }],
+      }],
     };
     writeFileSync(fakeCli, `#!/usr/bin/env node
 console.log(JSON.stringify({
@@ -517,11 +533,20 @@ console.log(JSON.stringify({
       ]);
 
       expect(collectorServer.snapshots()[0]).not.toHaveProperty("runtimeSkillProbes");
+      expect(collectorServer.snapshots()[0]).not.toHaveProperty("runtimeScheduleProbes");
       expect(collectorServer.runtimeSkillProbes()).toEqual([
         expect.objectContaining({
           deviceId: "skill-probe-device",
           runtimeId: "skill-probe-device:runtime:openclaw",
           status: "succeeded",
+        }),
+      ]);
+      expect(collectorServer.runtimeScheduleProbes()).toEqual([
+        expect.objectContaining({
+          deviceId: "skill-probe-device",
+          runtimeId: "skill-probe-device:runtime:openclaw",
+          status: "succeeded",
+          schedules: [expect.objectContaining({ sourceId: "daily-summary" })],
         }),
       ]);
     } finally {
@@ -1311,6 +1336,7 @@ async function startControlAndSnapshotServer(): Promise<{
 
 async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{
   baseUrl: string;
+  runtimeScheduleProbes: () => Array<Record<string, unknown>>;
   runtimeSkillProbes: () => Array<Record<string, unknown>>;
   server: Server;
   snapshots: () => Array<Record<string, unknown>>;
@@ -1319,11 +1345,13 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
   const snapshots: Array<Record<string, unknown>> = [];
   const taskBatches: Array<Record<string, unknown>> = [];
   const runtimeSkillProbes: Array<Record<string, unknown>> = [];
+  const runtimeScheduleProbes: Array<Record<string, unknown>> = [];
   const server = createServer((request, response) => {
     if (
       request.url !== "/api/device-state-snapshots" &&
       request.url !== "/api/device-task-batches" &&
-      request.url !== "/api/runtime-skill-probe-snapshots"
+      request.url !== "/api/runtime-skill-probe-snapshots" &&
+      request.url !== "/api/runtime-schedule-probe-snapshots"
     ) {
       response.statusCode = 404;
       response.end("not found");
@@ -1343,6 +1371,7 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
       const parsed = JSON.parse(body);
       if (request.url === "/api/device-state-snapshots") snapshots.push(parsed);
       else if (request.url === "/api/runtime-skill-probe-snapshots") runtimeSkillProbes.push(parsed);
+      else if (request.url === "/api/runtime-schedule-probe-snapshots") runtimeScheduleProbes.push(parsed);
       else taskBatches.push(parsed);
       response.writeHead(201, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -1361,6 +1390,7 @@ async function startRecordingSnapshotServer(options: { expectedAuthorization?: s
   if (!address || typeof address === "string") throw new Error("missing server address");
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
+    runtimeScheduleProbes: () => [...runtimeScheduleProbes],
     runtimeSkillProbes: () => [...runtimeSkillProbes],
     server,
     snapshots: () => [...snapshots],

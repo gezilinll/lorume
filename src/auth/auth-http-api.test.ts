@@ -2,6 +2,8 @@ import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuthHttpApiHandler } from "./auth-http-api";
 import type {
+  AuthAuditEvent,
+  AuthDeviceTokenSummary,
   AuthDeviceTokenVerification,
   AuthLoginCode,
   AuthMemberRole,
@@ -19,10 +21,11 @@ afterEach(async () => {
 });
 
 describe("auth HTTP API", () => {
-  it("logs in with an email code, creates an organization, invites a member, accepts the invite, and logs out", async () => {
+  it("logs in with an email code, creates an organization, emails an invitation, accepts the invite, and logs out", async () => {
     const sentCodes: Array<{ code: string; email: string }> = [];
+    const sentInvitations: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }> = [];
     const store = new MemoryAuthStore();
-    const { baseUrl } = await startAuthApi(store, sentCodes);
+    const { baseUrl } = await startAuthApi(store, { sentCodes, sentInvitations });
 
     const codeResponse = await postJson(`${baseUrl}/api/auth/email-code`, { email: "ZHANGLIANG@GAODING.COM" });
     expect(codeResponse.status).toBe(202);
@@ -59,7 +62,27 @@ describe("auth HTTP API", () => {
     }, cookie);
     expect(inviteResponse.status).toBe(201);
     await expect(inviteResponse.json()).resolves.toMatchObject({
-      invitation: { email: "juanbai@gaoding.com", token: "invite-token" },
+      invitation: { email: "juanbai@gaoding.com", role: "admin" },
+    });
+    expect(sentInvitations).toEqual([
+      expect.objectContaining({
+        email: "juanbai@gaoding.com",
+        inviteUrl: `${baseUrl}/invite/invite-token`,
+        organizationName: "Lorume Team",
+        role: "admin",
+      }),
+    ]);
+
+    const previewResponse = await fetch(`${baseUrl}/api/invitations/invite-token/preview`);
+    expect(previewResponse.status).toBe(200);
+    await expect(previewResponse.json()).resolves.toMatchObject({
+      invitation: {
+        email: "juanbai@gaoding.com",
+        maskedEmail: "j***@gaoding.com",
+        organizationName: "Lorume Team",
+        role: "admin",
+        status: "available",
+      },
     });
 
     await postJson(`${baseUrl}/api/auth/email-code`, { email: "juanbai@gaoding.com" });
@@ -82,7 +105,7 @@ describe("auth HTTP API", () => {
 
   it("rejects anonymous organization management and invalid invitation emails", async () => {
     const store = new MemoryAuthStore();
-    const { baseUrl } = await startAuthApi(store, []);
+    const { baseUrl } = await startAuthApi(store);
 
     const anonymousCreate = await postJson(`${baseUrl}/api/organizations`, { name: "Nope" });
     expect(anonymousCreate.status).toBe(401);
@@ -105,9 +128,30 @@ describe("auth HTTP API", () => {
     expect(wrongAccept.status).toBe(403);
   });
 
+  it("rejects owner invitations from the public invitation API", async () => {
+    const store = new MemoryAuthStore();
+    const { baseUrl } = await startAuthApi(store);
+
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "owner@gaoding.com" });
+    const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "owner@gaoding.com", code: "246810" });
+    const ownerCookie = ownerLogin.headers.get("set-cookie") ?? "";
+    const orgResponse = await postJson(`${baseUrl}/api/organizations`, { name: "Lorume" }, ownerCookie);
+    const orgBody = await orgResponse.json() as { organization: { id: string } };
+
+    const inviteOwnerResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      email: "next-owner@gaoding.com",
+      role: "owner",
+    }, ownerCookie);
+
+    expect(inviteOwnerResponse.status).toBe(400);
+    await expect(inviteOwnerResponse.json()).resolves.toMatchObject({
+      error: "invitation_role_not_allowed",
+    });
+  });
+
   it("creates device tokens only for organization admins and returns the plaintext token once", async () => {
     const store = new MemoryAuthStore();
-    const { baseUrl } = await startAuthApi(store, []);
+    const { baseUrl } = await startAuthApi(store);
 
     await postJson(`${baseUrl}/api/auth/email-code`, { email: "owner@gaoding.com" });
     const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "owner@gaoding.com", code: "246810" });
@@ -126,6 +170,7 @@ describe("auth HTTP API", () => {
     expect(tokenResponse.status).toBe(201);
     expect(tokenBody.deviceToken).toMatchObject({
       deviceId: "fixture-device",
+      status: "pending",
       tokenPrefix: expect.stringMatching(/^agt_device_/),
     });
     expect(tokenBody.deviceToken.token).toEqual(expect.stringMatching(/^agt_device_/));
@@ -150,6 +195,31 @@ describe("auth HTTP API", () => {
     }, memberCookie);
 
     expect(forbiddenTokenResponse.status).toBe(403);
+
+    const listResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(listResponse.status).toBe(200);
+    const listBody = await listResponse.json() as { deviceTokens: Array<{ token?: string }> };
+    expect(listBody).toMatchObject({
+      deviceTokens: [
+        expect.objectContaining({
+          deviceId: "fixture-device",
+          name: "Fixture collector",
+          status: "pending",
+          tokenPrefix: expect.stringMatching(/^agt_device_/),
+        }),
+      ],
+    });
+    expect(listBody.deviceTokens[0]).not.toHaveProperty("token");
+
+    const revokeResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens/devtok-1/revoke`, {
+      reason: "rotated",
+    }, ownerCookie);
+    expect(revokeResponse.status).toBe(200);
+    await expect(revokeResponse.json()).resolves.toMatchObject({
+      deviceToken: { id: "devtok-1", status: "revoked" },
+    });
   });
 
   it("returns a readable message when the email provider is unavailable", async () => {
@@ -158,6 +228,9 @@ describe("auth HTTP API", () => {
       createLoginCode: () => "246810",
       emailProvider: {
         sendLoginCode: async () => {
+          throw new Error("email_provider_not_configured");
+        },
+        sendOrganizationInvitation: async () => {
           throw new Error("email_provider_not_configured");
         },
       },
@@ -188,7 +261,15 @@ describe("auth HTTP API", () => {
   });
 });
 
-async function startAuthApi(store: AuthStore, sentCodes: Array<{ code: string; email: string }>) {
+async function startAuthApi(
+  store: AuthStore,
+  captures: {
+    sentCodes?: Array<{ code: string; email: string }>;
+    sentInvitations?: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }>;
+  } = {},
+) {
+  const sentCodes = captures.sentCodes ?? [];
+  const sentInvitations = captures.sentInvitations ?? [];
   const handler = createAuthHttpApiHandler({
     createInvitationToken: () => "invite-token",
     createLoginCode: () => "246810",
@@ -196,6 +277,9 @@ async function startAuthApi(store: AuthStore, sentCodes: Array<{ code: string; e
     emailProvider: {
       sendLoginCode: async ({ code, email }) => {
         sentCodes.push({ code, email });
+      },
+      sendOrganizationInvitation: async ({ email, inviteUrl, organizationName, role }) => {
+        sentInvitations.push({ email, inviteUrl, organizationName, role });
       },
     },
     now: () => new Date("2026-05-12T10:00:00.000Z"),
@@ -241,13 +325,14 @@ class MemoryAuthStore implements AuthStore {
     invitedByUserId: string;
     organizationId: string;
     role: AuthMemberRole;
+    revokedAt?: Date;
     tokenHash: string;
   }> = [];
   private readonly memberships: AuthOrganizationMembership[] = [];
   private readonly organizations: Array<{ createdByUserId: string; id: string; name: string; slug: string }> = [];
   private readonly sessions: Array<{ expiresAt: Date; id: string; revokedAt?: Date; sessionHash: string; userId: string }> = [];
   private readonly users: AuthUser[] = [];
-  readonly createdDeviceTokens: AuthDeviceTokenVerification[] = [];
+  readonly createdDeviceTokens: AuthDeviceTokenSummary[] = [];
 
   async createLoginCode(input: { codeHash: string; email: string; expiresAt: Date }): Promise<AuthLoginCode> {
     const code = {
@@ -341,11 +426,26 @@ class MemoryAuthStore implements AuthStore {
     return invitation;
   }
 
+  async readInvitationPreview(input: { now: Date; tokenHash: string }) {
+    const invitation = this.invitations.find((item) => item.tokenHash === input.tokenHash);
+    if (!invitation) return { status: "not_found" as const };
+    const organization = this.organizations.find((item) => item.id === invitation.organizationId);
+    return {
+      email: invitation.email,
+      maskedEmail: maskEmail(invitation.email),
+      organizationId: invitation.organizationId,
+      organizationName: organization?.name ?? "Unknown",
+      role: invitation.role,
+      status: invitation.revokedAt ? "revoked" as const : invitation.acceptedAt ? "accepted" as const : invitation.expiresAt <= input.now ? "expired" as const : "available" as const,
+    };
+  }
+
   async acceptInvitation(input: { email: string; now: Date; tokenHash: string; userId: string }) {
     const invitation = this.invitations.find((item) =>
       item.tokenHash === input.tokenHash
       && item.email === normalizeEmail(input.email)
       && !item.acceptedAt
+      && !item.revokedAt
       && item.expiresAt > input.now
     );
     if (!invitation) return null;
@@ -365,16 +465,25 @@ class MemoryAuthStore implements AuthStore {
     return membership;
   }
 
+  async revokeInvitation(input: { id: string; now: Date }): Promise<void> {
+    const invitation = this.invitations.find((item) => item.id === input.id);
+    if (invitation) invitation.revokedAt = input.now;
+  }
+
   async createDeviceToken(input: {
+    expiresAt?: Date | null;
     deviceId?: string | null;
     name: string;
     organizationId: string;
     tokenHash: string;
     tokenPrefix: string;
-  }): Promise<AuthDeviceTokenVerification> {
+  }): Promise<AuthDeviceTokenSummary> {
     const token = {
       deviceId: input.deviceId ?? null,
+      expiresAt: input.expiresAt ?? null,
       id: `devtok-${this.createdDeviceTokens.length + 1}`,
+      name: input.name,
+      status: "pending" as const,
       organizationId: input.organizationId,
       tokenPrefix: input.tokenPrefix,
     };
@@ -384,6 +493,31 @@ class MemoryAuthStore implements AuthStore {
 
   async verifyDeviceToken(): Promise<AuthDeviceTokenVerification | null> {
     throw new Error("not needed by HTTP unit tests");
+  }
+
+  async listDeviceTokens(input: { organizationId: string }) {
+    return this.createdDeviceTokens.filter((token) => token.organizationId === input.organizationId);
+  }
+
+  async revokeDeviceToken(input: { id: string; now: Date; organizationId: string }) {
+    const token = this.createdDeviceTokens.find((item) => item.id === input.id && item.organizationId === input.organizationId);
+    if (!token) return null;
+    token.status = "revoked";
+    token.revokedAt = input.now;
+    return token;
+  }
+
+  async createAuditEvent() {
+    return {
+      createdAt: new Date("2026-05-12T10:00:00.000Z"),
+      eventType: "auth.login_succeeded",
+      id: "audit-1",
+      metadata: {},
+    } satisfies AuthAuditEvent;
+  }
+
+  async listAuditEvents() {
+    return [];
   }
 
   async close(): Promise<void> {}
@@ -397,4 +531,9 @@ class MemoryAuthStore implements AuthStore {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function maskEmail(email: string): string {
+  const [local = "", domain = ""] = normalizeEmail(email).split("@");
+  return `${local.slice(0, 1)}***@${domain}`;
 }

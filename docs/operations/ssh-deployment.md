@@ -34,7 +34,7 @@ Known SSH targets:
 | Purpose | Alias | User | Host / IP | Usage |
 |---|---|---|---|---|
 | Production server | `lorume.com` | `root` | `lorume.com` | `ssh root@lorume.com` |
-| Real device | `gezilinll-claw` | `gezilinll-claw` | `10.1.67.125` | `ssh gezilinll-claw` |
+| Real device | `gezilinll-claw` | `gezilinll-claw` | `10.1.67.61` | `ssh gezilinll-claw` |
 
 Use local shell variables for repeatable commands:
 
@@ -159,6 +159,8 @@ The canonical install command is generated in Organization Settings. It has this
 ```sh
 curl -fsSL "https://lorume.com/api/device-collector/install.sh" | bash -s -- --server-url "https://lorume.com" --device-id "gezilinll-claw" --device-token "<device token>"
 ```
+
+The current `gezilinll-claw` installation uses `https://claw.gezilinll.com` as its configured server URL. Keep that URL when reinstalling from the existing device config unless intentionally rotating the device endpoint; this device has not been reliable when fetching `https://lorume.com` directly.
 
 Run it on the real device through SSH:
 

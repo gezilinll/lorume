@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Bell, Bot, ClipboardList, KeyRound, Layers3, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, Bell, Bot, CalendarClock, ClipboardList, KeyRound, Layers3, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
 
 import { LorumeLogo } from "@/components/brand/LorumeLogo";
 import { Badge } from "@/components/ui/badge";
@@ -10,33 +10,44 @@ const capabilityCards = [
     description: "按 Device、Runtime、Agent 组织运行资产，查看采集健康、在线状态和最近活动。",
     href: "/runtime",
     icon: Server,
+    tone: "bg-primary/10 text-primary",
     title: "Runtime Fleet",
   },
   {
     description: "以会话 Task 为中心查看工作项状态、Channel、用户消息和 Agent 回复。",
     href: "/runs",
     icon: MessageSquareText,
+    tone: "bg-[var(--cyan-soft)] text-[var(--cyan-foreground)]",
     title: "Runs",
+  },
+  {
+    description: "汇总 Runtime 上报的定时定义，查看计划、下次运行和多次执行历史。",
+    href: "/scheduled-tasks",
+    icon: CalendarClock,
+    tone: "bg-[var(--orange-soft)] text-[var(--orange-foreground)]",
+    title: "定时任务",
   },
   {
     description: "聚合 Runtime 与 Agent 上报的 Skill 元数据，按 Scope、来源、状态和归属筛选。",
     href: "/skills",
     icon: Layers3,
+    tone: "bg-[var(--purple-soft)] text-[var(--purple-foreground)]",
     title: "Skill 仓库",
   },
   {
     description: "管理当前组织上下文、成员邀请、设备 token 和 collector 安装入口。",
     href: "/settings",
     icon: Settings2,
+    tone: "bg-[var(--green-soft)] text-[var(--green-foreground)]",
     title: "组织设置",
   },
 ] as const;
 
 const operatingSignals = [
-  { icon: RadioTower, label: "Device collector", value: "采集 Device / Runtime / Agent / Task" },
-  { icon: Bot, label: "Skill warehouse", value: "只读汇总 Runtime 与 Agent Skill 元数据" },
-  { icon: ClipboardList, label: "Operations", value: "异步任务状态和 Job 明细" },
-  { icon: Bell, label: "Notifications", value: "采集、同步和恢复提醒线程" },
+  { icon: RadioTower, label: "设备采集", value: "同步 Device / Runtime / Agent / Task / Schedule" },
+  { icon: Bot, label: "Skill 仓库", value: "只读汇总 Runtime 与 Agent Skill 元数据" },
+  { icon: ClipboardList, label: "异步任务", value: "查看 Operation 状态和 Job 明细" },
+  { icon: Bell, label: "通知线程", value: "跟踪采集、同步和恢复提醒" },
 ] as const;
 
 const platformBadges = ["OpenClaw", "Slock", "Codex", "DingTalk", "Postgres backend"] as const;
@@ -46,26 +57,14 @@ export function HomePage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
         <LorumeLogo />
-        <nav aria-label="首页导航" className="flex flex-wrap items-center justify-end gap-1">
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/runtime">Runtime Fleet</a>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/runs">Runs</a>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/skills">Skill 仓库</a>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/settings">组织设置</a>
-          </Button>
+        <nav aria-label="首页导航" className="flex items-center justify-end">
           <Button variant="outline" size="sm" asChild>
             <a href="/login">登录</a>
           </Button>
         </nav>
       </header>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-10 px-4 pb-14 pt-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_28rem] lg:px-8 lg:pb-20 lg:pt-14" aria-labelledby="home-title">
+      <section className="mx-auto grid w-full max-w-7xl gap-10 px-4 pb-12 pt-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_28rem] lg:px-8 lg:pb-16 lg:pt-14" aria-labelledby="home-title">
         <div className="flex flex-col justify-center gap-7">
           <div className="flex flex-wrap gap-2" aria-label="当前接入能力">
             {platformBadges.map((badge) => (
@@ -87,13 +86,10 @@ export function HomePage() {
 
           <div className="flex flex-wrap gap-3">
             <Button size="lg" asChild>
-              <a href="/login">
+              <a href="/runtime">
                 进入控制台
                 <ArrowRight aria-hidden="true" />
               </a>
-            </Button>
-            <Button variant="outline" size="lg" asChild>
-              <a href="/runtime">查看 Runtime Fleet</a>
             </Button>
           </div>
         </div>
@@ -121,27 +117,24 @@ export function HomePage() {
                 </div>
               );
             })}
-            <div className="rounded-lg border border-dashed border-border p-3 text-sm leading-6 text-muted-foreground">
-              Operations 与 Notifications 串联异步状态和提醒线程。
-            </div>
           </CardContent>
         </Card>
       </section>
 
       <section aria-label="当前已实现能力" className="border-t bg-muted/30">
-        <div className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-4 lg:px-8">
+        <div className="mx-auto grid w-full max-w-7xl items-stretch gap-4 px-4 py-12 sm:px-6 sm:grid-cols-2 lg:grid-cols-3 lg:px-8 xl:grid-cols-5">
           {capabilityCards.map((capability) => {
             const Icon = capability.icon;
             return (
-              <Card className="border-border/70 bg-card" key={capability.title}>
-                <CardHeader>
-                  <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
+              <Card className="flex h-full border-border/70 bg-card" key={capability.title}>
+                <CardHeader className="flex-1">
+                  <div className={`mb-2 flex size-10 items-center justify-center rounded-lg ${capability.tone}`} aria-hidden="true">
                     <Icon className="size-5" />
                   </div>
                   <CardTitle>{capability.title}</CardTitle>
-                  <CardDescription>{capability.description}</CardDescription>
+                  <CardDescription className="line-clamp-3">{capability.description}</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="mt-auto">
                   <Button variant="outline" size="sm" asChild>
                     <a href={capability.href}>
                       打开 {capability.title}

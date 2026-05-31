@@ -51,7 +51,7 @@ Lorume is not a chatbot UI and not a single-agent framework. It is a product lay
 - **Integrations & Resources**: connect OpenClaw, Nowledge, DingTalk, slock.ai, BI, Xingtu, SLS, GitLab, Aetheris CLI, and other systems.
 - **Governance Center**: manage approvals, audit logs, policies, cost guard, memory governance, evals, stability, security, and lifecycle.
 
-The current product UI intentionally exposes only the implemented surfaces: public homepage, email-code login, Runtime Fleet, Runs / Work Board, read-only Skill 仓库, and 组织设置. Operations and Notifications are available as top-right utility drawers instead of primary navigation pages. Runtime Fleet links Runtime and Agent rows into the read-only Skill 仓库 for already-collected target-local metadata. Other surfaces above are product direction and are added to navigation only after their page, data path, permissions, and harness exist.
+The current product UI intentionally exposes only the implemented surfaces: public homepage, email-code login, Runtime Fleet, Runs / Work Board, read-only 定时任务, read-only Skill 仓库, and 组织设置. Operations and Notifications are available as top-right utility drawers instead of primary navigation pages. Runtime Fleet links Runtime and Agent rows into the read-only Skill 仓库 for already-collected target-local metadata. Other surfaces above are product direction and are added to navigation only after their page, data path, permissions, and harness exist.
 
 ## Core Concepts
 
@@ -80,7 +80,7 @@ A single Run may contain multiple Tasks. For example, one Workflow Run may creat
 
 ## Current Status
 
-Lorume is in product definition and early engineering. The first implemented surfaces are a public homepage, email-code login with organization membership, Runtime Fleet, read-only Skill 仓库 for target-local Skill metadata, a read-only Runs / Work Board for Task visibility, organization settings, and top-right Operations / Notifications utility drawers. These surfaces are backed by the initial TypeScript Catalog Object model, the current `Device / Runtime / Agent / Task` runtime model, target-local Skill probe metadata, a device collector, Postgres-backed Operations and Notifications, a standalone local backend with Postgres-backed query APIs, and an outbound WebSocket device control channel for device connection health.
+Lorume is in product definition and early engineering. The first implemented surfaces are a public homepage, email-code login with organization membership, Runtime Fleet, read-only Skill 仓库 for target-local Skill metadata, a read-only Runs / Work Board for conversation Task visibility, a read-only 定时任务 page for collected Runtime schedule definitions and execution history, organization settings, and top-right Operations / Notifications utility drawers. These surfaces are backed by the initial TypeScript Catalog Object model, the current `Device / Runtime / Agent / Task` runtime model, target-local Skill probe metadata, Runtime schedule probes, a device collector, Postgres-backed Operations and Notifications, a standalone local backend with Postgres-backed query APIs, and an outbound WebSocket device control channel for device connection health.
 
 Runtime and device registration can now complete a development and ECS loop against the current device collector path. The backend has a Postgres-backed service shape, production-like local deployment path, organization-based access, and an initial ECS deployment; backups, monitoring, multi-device orchestration, and execution control are still being built.
 
@@ -92,6 +92,7 @@ The first product design package is available here:
 - [Runtime Fleet Page Spec](docs/product/runtime-fleet-page-spec.md)
 - [Runtime OpenClaw Adapter Spec](docs/product/runtime-openclaw-adapter-spec.md)
 - [Runtime Task Acceptance Spec](docs/product/runtime-task-acceptance-spec.md)
+- [Runtime Scheduled Task Page Spec](docs/product/runtime-scheduled-task-page-spec.md)
 - [Backend Service Spec](docs/product/backend-service-spec.md)
 - [CLI Device Capability Spec](docs/product/cli-device-capability-spec.md)
 - [Agent Skill Probing Spec](docs/product/agent-skill-probing-spec.md)

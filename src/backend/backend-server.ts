@@ -128,6 +128,7 @@ export function createLorumeBackendServer(
     auth: {
       requireDeviceToken: deviceTokenRequired ? authGuards?.requireDeviceToken : undefined,
       requireUserSession: authRequired ? authGuards?.requireUserSession : undefined,
+      verifyDeviceTokenValue: deviceTokenRequired ? authGuards?.verifyDeviceTokenValue : undefined,
     },
     store,
     controlChannel,
@@ -329,7 +330,8 @@ function attachDeviceControlWebSocket(
         }
         authenticating = true;
         const hello = parseControlHello(rawMessage);
-        if (!hello || !hello.deviceToken || !(await options.authGuards?.verifyDeviceTokenValue(hello.deviceToken))) {
+        const helloDeviceId = typeof hello?.deviceId === "string" ? hello.deviceId : undefined;
+        if (!hello || !hello.deviceToken || !(await options.authGuards?.verifyDeviceTokenValue(hello.deviceToken, helloDeviceId))) {
           webSocket.close(1008, "invalid device token");
           return;
         }

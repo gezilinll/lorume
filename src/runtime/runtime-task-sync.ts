@@ -43,6 +43,12 @@ export function createRuntimeTaskHash(task: Task): string {
     error: normalizeTaskHashText(task.error),
     hashVersion: 1,
     id: task.id,
+    ...(task.raw?.openclaw?.scheduleId || task.raw?.openclaw?.scheduleName
+      ? { openclawSchedule: {
+        scheduleId: task.raw.openclaw.scheduleId ?? null,
+        scheduleName: task.raw.openclaw.scheduleName ?? null,
+      } }
+      : {}),
     status: task.status,
     taskType: task.taskType,
     updatedAt: task.updatedAt ?? null,

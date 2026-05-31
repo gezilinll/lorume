@@ -20,6 +20,8 @@ const errorMessages: Record<string, string> = {
   invalid_or_expired_code: "验证码无效或已过期，请重新获取验证码。",
   invitation_email_and_role_required: "请输入邀请邮箱并选择成员角色。",
   invitation_not_available: "邀请链接无效、已过期或与当前邮箱不匹配。",
+  invitation_role_not_allowed: "邀请角色暂不支持，请选择管理员或成员。",
+  device_token_not_found: "设备令牌不存在或已不可用。",
   organization_name_required: "请输入组织名称。",
   postgres_store_unavailable: "后端数据存储暂时不可用，请稍后重试。",
   request_body_too_large: "请求内容过大，请减少单次上报的数据量。",

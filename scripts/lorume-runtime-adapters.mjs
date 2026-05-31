@@ -25,6 +25,7 @@ const SKILL_SCAN_SKIP_DIRS = new Set([
 ]);
 const SKILL_DESCRIPTION_MAX_CHARS = 180;
 const SKILL_BODY_MAX_CHARS = 256 * 1024;
+const OPENCLAW_STALE_RUNNING_TRAJECTORY_AFTER_MS = 2 * 60 * 60 * 1000;
 const executableCache = new Map();
 const openClawSkillInfoCache = new Map();
 let openClawExtraSkillFilePathCache = null;
@@ -516,12 +517,20 @@ function collectOpenClawDeviceState(deviceId, collectedAt) {
     runtime,
     agentExternalIds: agentIds,
   });
+  const runtimeScheduleProbe = collectOpenClawRuntimeScheduleProbe({
+    agents,
+    collectedAt,
+    deviceId,
+    runtime,
+    agentExternalIds: agentIds,
+  });
 
   return {
     runtimes: [runtime],
     agents,
     tasks: trajectoryMapping.tasks,
     runtimeSkillProbes: runtimeSkillProbe ? [runtimeSkillProbe] : [],
+    runtimeScheduleProbes: runtimeScheduleProbe ? [runtimeScheduleProbe] : [],
     diagnostics: trajectoryMapping.diagnostics,
   };
 }
@@ -555,6 +564,92 @@ function collectOpenClawRuntimeSkillProbe({ agents, collectedAt, deviceId, runti
 
 function openClawSkillsListJson(extraArgs) {
   return runJsonWithFileBackedStdout("openclaw", ["skills", "list", "--json", ...extraArgs]);
+}
+
+function collectOpenClawRuntimeScheduleProbe({ agents, collectedAt, deviceId, runtime, agentExternalIds }) {
+  const cronJobs = openClawCronListFromOutput(openClawCronListJson());
+  if (cronJobs.length === 0) return null;
+  const agentIdByExternalId = new Map(agentExternalIds.map((agentExternalId) => [
+    agentExternalId,
+    agents.find((agent) => agent.id === makeAgentId(runtime.id, agentExternalId))?.id || makeAgentId(runtime.id, agentExternalId),
+  ]));
+  const schedules = openClawRuntimeScheduleRows({ cronJobs, runtime, agentIdByExternalId });
+  return {
+    deviceId,
+    runtimeId: runtime.id,
+    runtimeKind: runtime.kind,
+    status: schedules.length ? "succeeded" : "unsupported",
+    observedAt: collectedAt,
+    summary: createRuntimeScheduleSummary(schedules),
+    schedules,
+    ...(!schedules.length ? { errorSummary: "未发现可归一化的 OpenClaw 定时任务定义。" } : {}),
+  };
+}
+
+function openClawCronListJson() {
+  return runJsonWithFileBackedStdout("openclaw", ["cron", "list", "--json", "--all"]);
+}
+
+function openClawCronListFromOutput(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  for (const key of ["jobs", "schedules", "items", "data", "results"]) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [];
+}
+
+function openClawRuntimeScheduleRows({ cronJobs, runtime, agentIdByExternalId }) {
+  return cronJobs
+    .map((job) => openClawCronJobToScheduleRow(job, runtime, agentIdByExternalId))
+    .filter(Boolean)
+    .sort((left, right) => left.name.localeCompare(right.name) || left.sourceId.localeCompare(right.sourceId));
+}
+
+function openClawCronJobToScheduleRow(job, runtime, agentIdByExternalId) {
+  if (!job || typeof job !== "object") return null;
+  const sourceId = cleanText(job.id || job.jobId || job.key) || sanitizeId(job.name || job.title);
+  if (!sourceId) return null;
+  const schedule = job.schedule && typeof job.schedule === "object" ? job.schedule : {};
+  const state = job.state && typeof job.state === "object" ? job.state : {};
+  const agentExternalId = cleanText(
+    job.agentId ||
+    job.agent?.id ||
+    job.agent?.agentId ||
+    job.target?.agentId ||
+    job.target?.id,
+  );
+  const agentId = agentExternalId ? agentIdByExternalId.get(agentExternalId) : "";
+  const nextRunAt = toIsoTimestamp(state.nextRunAt || job.nextRunAt) || toIsoTimestamp(state.nextRunAtMs || job.nextRunAtMs);
+  const lastRunAt = toIsoTimestamp(state.lastRunAt || job.lastRunAt) || toIsoTimestamp(state.lastRunAtMs || job.lastRunAtMs);
+  return {
+    key: `${runtime.id}:schedule:${sanitizeId(sourceId)}`,
+    sourceId,
+    name: cleanText(job.name || job.title) || sourceId,
+    agentIds: agentId ? [agentId] : [],
+    enabled: job.disabled === true ? false : job.enabled !== false,
+    ...(cleanText(schedule.expr || schedule.expression || job.cron || job.expression)
+      ? { expression: cleanText(schedule.expr || schedule.expression || job.cron || job.expression) }
+      : {}),
+    ...(cleanText(schedule.tz || schedule.timezone || job.timezone)
+      ? { timezone: cleanText(schedule.tz || schedule.timezone || job.timezone) }
+      : {}),
+    ...(nextRunAt ? { nextRunAt } : {}),
+    ...(lastRunAt ? { lastRunAt } : {}),
+  };
+}
+
+function createRuntimeScheduleSummary(schedules) {
+  const agentIds = new Set();
+  for (const schedule of schedules) {
+    for (const agentId of schedule.agentIds || []) agentIds.add(agentId);
+  }
+  return {
+    total: schedules.length,
+    enabledCount: schedules.filter((schedule) => schedule.enabled).length,
+    disabledCount: schedules.filter((schedule) => !schedule.enabled).length,
+    agentCount: agentIds.size,
+  };
 }
 
 function openClawSkillListFromOutput(value) {
@@ -2445,6 +2540,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
   const diagnostics = createCollectionDiagnosticCollector();
   const agentExternalIds = new Set();
   const taskAgentExternalIds = new Map();
+  const collectedAtMs = Date.now();
 
   for (const run of runs) {
     const taskType = inferOpenClawTaskType(run);
@@ -2484,7 +2580,16 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
       );
       continue;
     }
-    const status = normalizeOpenClawTrajectoryProductTaskStatus(run);
+    const status = normalizeOpenClawTrajectoryProductTaskStatus(run, collectedAtMs);
+    if (isOpenClawStaleRunningTrajectory(run, collectedAtMs)) {
+      diagnostics.add({
+        action: "task_ingested_with_gap",
+        code: "openclaw_stale_running_trajectory",
+        severity: "warning",
+        source: "openclaw",
+        target: "task",
+      }, runId);
+    }
     const toolError = firstOpenClawFailedToolCallError(run.toolCalls);
     const error = openClawTrajectoryError(run) || toolError;
     const agentReply = openClawProductAgentReply(run);
@@ -2498,6 +2603,7 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
       }, runId);
     }
     const creator = openClawProductCreatorFromTrajectoryRun(run) || openClawProductCreatorFromDingTalkMessage(userMessageResult.message);
+    const scheduleInfo = taskType === "scheduled" ? openClawScheduleInfoFromRun(run, userMessageResult.userMessage) : null;
 
     const task = {
       id: makeProductTaskId(agentId, runId),
@@ -2528,6 +2634,8 @@ function collectOpenClawProductTrajectoryTasks({ runs, knownAgentIds, runtimeId 
           ...(run.sessionKey ? { sessionKey: run.sessionKey } : {}),
           ...(run.messageId ? { messageId: run.messageId } : {}),
           trajectoryRunId: runId,
+          ...(scheduleInfo?.sourceId ? { scheduleId: scheduleInfo.sourceId } : {}),
+          ...(scheduleInfo?.name ? { scheduleName: scheduleInfo.name } : {}),
         },
       },
       ...(run.startedAt ? { createdAt: run.startedAt } : {}),
@@ -2591,8 +2699,10 @@ function openClawAgentIdFromSessionKey(sessionKey) {
   return parseOpenClawSessionKey(sessionKey)?.agentExternalId || "";
 }
 
-function normalizeOpenClawTrajectoryProductTaskStatus(run) {
-  return normalizeOpenClawExecutionProductTaskStatus(normalizeOpenClawTrajectoryExecutionStatus(run));
+function normalizeOpenClawTrajectoryProductTaskStatus(run, collectedAtMs = Date.now()) {
+  const executionStatus = normalizeOpenClawTrajectoryExecutionStatus(run);
+  if (executionStatus === "running" && isOpenClawStaleRunningTrajectory(run, collectedAtMs)) return "unknown";
+  return normalizeOpenClawExecutionProductTaskStatus(executionStatus);
 }
 
 function normalizeOpenClawExecutionProductTaskStatus(executionStatus) {
@@ -2614,6 +2724,14 @@ function openClawRawTrajectoryStatus(run) {
   if (run.aborted) return "aborted";
   if (run.timedOut || run.idleTimedOut) return "timed_out";
   return "running";
+}
+
+function isOpenClawStaleRunningTrajectory(run, collectedAtMs = Date.now()) {
+  if (normalizeOpenClawTrajectoryExecutionStatus(run) !== "running") return false;
+  const lastActivityAt = run.lastEventAt || run.endedAt || run.startedAt;
+  const lastActivityMs = Date.parse(String(lastActivityAt || ""));
+  if (!Number.isFinite(lastActivityMs)) return false;
+  return collectedAtMs - lastActivityMs > OPENCLAW_STALE_RUNNING_TRAJECTORY_AFTER_MS;
 }
 
 function openClawProductChannel(channel) {
@@ -2761,12 +2879,32 @@ function applyDeviceOverrides(snapshot, config) {
       };
     })
     : undefined;
+  const runtimeScheduleProbes = Array.isArray(snapshot.runtimeScheduleProbes)
+    ? snapshot.runtimeScheduleProbes.map((probe) => {
+      const nextRuntimeId = idReplacements.get(probe.runtimeId) || String(probe.runtimeId || "").replace(`${snapshot.device.id}:`, `${nextDevice.id}:`);
+      return {
+        ...probe,
+        deviceId: String(probe.deviceId || snapshot.device.id).replace(snapshot.device.id, nextDevice.id),
+        runtimeId: nextRuntimeId,
+        schedules: Array.isArray(probe.schedules)
+          ? probe.schedules.map((schedule) => ({
+            ...schedule,
+            key: String(schedule.key || "").replace(`${snapshot.device.id}:`, `${nextDevice.id}:`),
+            agentIds: Array.isArray(schedule.agentIds)
+              ? schedule.agentIds.map((agentId) => String(agentId).replace(`${snapshot.device.id}:`, `${nextDevice.id}:`))
+              : [],
+          }))
+          : [],
+      };
+    })
+    : undefined;
   return {
     ...snapshot,
     device: nextDevice,
     runtimes,
     agents,
     ...(runtimeSkillProbes ? { runtimeSkillProbes } : {}),
+    ...(runtimeScheduleProbes ? { runtimeScheduleProbes } : {}),
   };
 }
 
@@ -3373,6 +3511,28 @@ function parseOpenClawSessionKey(sessionKey) {
   return agentMatch?.[1] ? { agentExternalId: agentMatch[1] } : null;
 }
 
+function openClawScheduleInfoFromRun(run, userMessage) {
+  const sourceId = openClawScheduleIdFromSessionKey(run?.sessionKey) ||
+    openClawScheduleIdFromPrompt(userMessage) ||
+    openClawScheduleIdFromPrompt(run?.prompt);
+  const name = openClawScheduleNameFromPrompt(userMessage) || openClawScheduleNameFromPrompt(run?.prompt);
+  return sourceId || name ? { sourceId, name } : null;
+}
+
+function openClawScheduleIdFromSessionKey(sessionKey) {
+  const session = parseOpenClawSessionKey(sessionKey);
+  if (session?.channelKind !== "cron") return "";
+  return cleanText(session.conversationId).replace(/:run:.+$/i, "");
+}
+
+function openClawScheduleIdFromPrompt(value) {
+  return /^\[cron:([^\s\]]+)/i.exec(String(value || ""))?.[1] || "";
+}
+
+function openClawScheduleNameFromPrompt(value) {
+  return /^\[cron:[^\s\]]+\s+([^\]]+)\]/i.exec(String(value || ""))?.[1]?.trim() || "";
+}
+
 function openClawDingTalkChannel(conversationId, targetsByConversationId, fallbackKind) {
   const target = conversationId
     ? targetsByConversationId.get(conversationId) || targetsByConversationId.get(String(conversationId).toLowerCase())
@@ -3459,6 +3619,7 @@ export function collectDeviceStateSnapshot(config = {}, args = {}) {
     agents: collected.agents,
     tasks: collected.tasks,
     ...(collected.runtimeSkillProbes.length ? { runtimeSkillProbes: collected.runtimeSkillProbes } : {}),
+    ...(collected.runtimeScheduleProbes.length ? { runtimeScheduleProbes: collected.runtimeScheduleProbes } : {}),
     ...(collected.diagnostics.length ? { diagnostics: { items: collected.diagnostics } } : {}),
   };
 }
@@ -3468,12 +3629,14 @@ function mergeRuntimeCollections(collections) {
   const agentsById = new Map();
   const tasksById = new Map();
   const runtimeSkillProbesById = new Map();
+  const runtimeScheduleProbesById = new Map();
   const diagnostics = [];
   for (const collection of collections) {
     for (const runtime of collection.runtimes || []) runtimesById.set(runtime.id, runtime);
     for (const agent of collection.agents || []) agentsById.set(agent.id, agent);
     for (const task of collection.tasks || []) tasksById.set(task.id, task);
     for (const probe of collection.runtimeSkillProbes || []) mergeRuntimeSkillProbe(runtimeSkillProbesById, probe);
+    for (const probe of collection.runtimeScheduleProbes || []) mergeRuntimeScheduleProbe(runtimeScheduleProbesById, probe);
     diagnostics.push(...(collection.diagnostics || []));
   }
   return {
@@ -3481,6 +3644,9 @@ function mergeRuntimeCollections(collections) {
     agents: Array.from(agentsById.values()),
     tasks: Array.from(tasksById.values()).sort(compareOpenClawTasksByRecency),
     runtimeSkillProbes: Array.from(runtimeSkillProbesById.values()).sort((left, right) =>
+      String(left.runtimeId).localeCompare(String(right.runtimeId)),
+    ),
+    runtimeScheduleProbes: Array.from(runtimeScheduleProbesById.values()).sort((left, right) =>
       String(left.runtimeId).localeCompare(String(right.runtimeId)),
     ),
     diagnostics: diagnostics.sort(compareDiagnostics),
@@ -3513,6 +3679,32 @@ function mergeRuntimeSkillProbe(runtimeSkillProbesById, probe) {
   });
 }
 
+function mergeRuntimeScheduleProbe(runtimeScheduleProbesById, probe) {
+  const runtimeId = cleanText(probe?.runtimeId);
+  if (!runtimeId) return;
+  const incoming = normalizeRuntimeScheduleProbeForMerge(probe);
+  const existing = runtimeScheduleProbesById.get(runtimeId);
+  if (!existing) {
+    runtimeScheduleProbesById.set(runtimeId, incoming);
+    return;
+  }
+
+  const schedulesBySourceId = new Map();
+  for (const schedule of existing.schedules || []) mergeCollectedRuntimeScheduleRow(schedulesBySourceId, schedule);
+  for (const schedule of incoming.schedules || []) mergeCollectedRuntimeScheduleRow(schedulesBySourceId, schedule);
+  const schedules = sortRuntimeScheduleRows(Array.from(schedulesBySourceId.values()));
+  const errorSummary = mergeRuntimeSkillProbeErrorSummary(existing.errorSummary, incoming.errorSummary);
+  runtimeScheduleProbesById.set(runtimeId, {
+    ...existing,
+    ...incoming,
+    status: schedules.length ? "succeeded" : (incoming.status || existing.status || "unsupported"),
+    observedAt: latestIsoTimestamp(existing.observedAt, incoming.observedAt),
+    schedules,
+    summary: createRuntimeScheduleSummary(schedules),
+    ...(errorSummary ? { errorSummary } : {}),
+  });
+}
+
 function normalizeRuntimeSkillProbeForMerge(probe) {
   const rowsByKey = new Map();
   for (const row of Array.isArray(probe?.skills) ? probe.skills : []) {
@@ -3529,6 +3721,63 @@ function normalizeRuntimeSkillProbeForMerge(probe) {
     summary: createRuntimeSkillSummary(skills),
     ...(cleanText(probe?.errorSummary) ? { errorSummary: cleanText(probe.errorSummary) } : {}),
   };
+}
+
+function normalizeRuntimeScheduleProbeForMerge(probe) {
+  const schedulesBySourceId = new Map();
+  for (const schedule of Array.isArray(probe?.schedules) ? probe.schedules : []) {
+    mergeCollectedRuntimeScheduleRow(schedulesBySourceId, schedule);
+  }
+  const schedules = sortRuntimeScheduleRows(Array.from(schedulesBySourceId.values()));
+  return {
+    deviceId: cleanText(probe?.deviceId),
+    runtimeId: cleanText(probe?.runtimeId),
+    runtimeKind: cleanText(probe?.runtimeKind),
+    status: cleanText(probe?.status) || (schedules.length ? "succeeded" : "unsupported"),
+    observedAt: toIsoTimestamp(probe?.observedAt),
+    summary: createRuntimeScheduleSummary(schedules),
+    schedules,
+    ...(cleanText(probe?.errorSummary) ? { errorSummary: cleanText(probe.errorSummary) } : {}),
+  };
+}
+
+function mergeCollectedRuntimeScheduleRow(rowsBySourceId, row) {
+  const normalized = normalizeRuntimeScheduleRow(row);
+  if (!normalized) return;
+  const existing = rowsBySourceId.get(normalized.sourceId);
+  if (!existing) {
+    rowsBySourceId.set(normalized.sourceId, normalized);
+    return;
+  }
+  rowsBySourceId.set(normalized.sourceId, {
+    ...existing,
+    ...normalized,
+    name: existing.name || normalized.name,
+    agentIds: uniqueSorted([...(existing.agentIds || []), ...(normalized.agentIds || [])]),
+  });
+}
+
+function normalizeRuntimeScheduleRow(row) {
+  const sourceId = cleanText(row?.sourceId || row?.id);
+  if (!sourceId) return null;
+  return {
+    key: cleanText(row?.key),
+    sourceId,
+    name: cleanText(row?.name) || sourceId,
+    agentIds: uniqueSorted(Array.isArray(row?.agentIds) ? row.agentIds : []),
+    enabled: row?.enabled !== false,
+    ...(cleanText(row?.expression) ? { expression: cleanText(row.expression) } : {}),
+    ...(cleanText(row?.timezone) ? { timezone: cleanText(row.timezone) } : {}),
+    ...(toIsoTimestamp(row?.nextRunAt) ? { nextRunAt: toIsoTimestamp(row.nextRunAt) } : {}),
+    ...(toIsoTimestamp(row?.lastRunAt) ? { lastRunAt: toIsoTimestamp(row.lastRunAt) } : {}),
+  };
+}
+
+function sortRuntimeScheduleRows(rows) {
+  return rows.sort((left, right) =>
+    left.name.localeCompare(right.name) ||
+    left.sourceId.localeCompare(right.sourceId),
+  );
 }
 
 function mergeRuntimeSkillProbeStatus(leftStatus, rightStatus, skills) {

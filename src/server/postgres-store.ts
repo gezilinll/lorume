@@ -13,6 +13,12 @@ import {
   type RuntimeSkillSnapshot,
 } from "../runtime/runtime-skill-probe";
 import {
+  makeRuntimeScheduleKey,
+  normalizeRuntimeScheduleProbeSnapshot,
+  type RuntimeScheduleDefinition,
+  type RuntimeScheduleProbeSnapshot,
+} from "../runtime/runtime-schedule-probe";
+import {
   createDeviceStateSnapshot,
   createEmptyRuntimeFleetTaskSummary,
   createEmptyTaskStatusCounts,
@@ -72,6 +78,7 @@ export interface PostgresEntityCounts {
   tasks: number;
   agentSkillProbeSnapshots: number;
   runtimeSkillProbeSnapshots: number;
+  runtimeScheduleProbeSnapshots: number;
   collectorIngestions: number;
 }
 
@@ -111,6 +118,25 @@ interface PostgresTaskStatusSummaryRow {
 interface PostgresTaskChannelFacetRow {
   kind: string;
   count: string;
+}
+
+interface PostgresRuntimeScheduleProbeRow {
+  raw: unknown;
+  runtimeId: string | null;
+  runtimeKind: string | null;
+  runtimeName: string | null;
+  deviceId: string | null;
+}
+
+interface PostgresScheduledTaskQueryRow {
+  raw: Task;
+  orderTimestamp: Date | null;
+  agentId: string | null;
+  agentName: string | null;
+  runtimeId: string | null;
+  runtimeKind: string | null;
+  runtimeName: string | null;
+  deviceId: string | null;
 }
 
 /** Backend query result for Runtime Fleet. */
@@ -157,6 +183,53 @@ export interface PostgresRuntimeTaskResult {
   };
 }
 
+export interface PostgresRuntimeScheduledTaskGroup {
+  scheduleKey: string;
+  sourceId: string;
+  name: string;
+  deviceId: string;
+  runtimeId: string;
+  runtimeKind: string;
+  runtimeName: string;
+  agentIds: string[];
+  agentNames: string[];
+  enabled: boolean;
+  expression?: string;
+  timezone?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  executionCount: number;
+  latestExecutionAt?: string;
+  latestStatus?: TaskStatus;
+  summary: {
+    byStatus: TaskStatusCounts;
+  };
+}
+
+export interface PostgresRuntimeScheduledTasksResult {
+  items: PostgresRuntimeScheduledTaskGroup[];
+  total: number;
+  summary: {
+    total: number;
+    enabledCount: number;
+    disabledCount: number;
+  };
+}
+
+export interface PostgresRuntimeScheduledTaskExecutionFilters {
+  organizationId?: string | null;
+  limit?: number;
+}
+
+export interface PostgresRuntimeScheduledTaskExecutionsResult {
+  items: Task[];
+  total: number;
+  summary: {
+    byStatus: TaskStatusCounts;
+    total: number;
+  };
+}
+
 /** Postgres-backed repository for the current Device / Runtime / Agent / Task model. */
 export interface PostgresStore {
   /** Upsert a unified Device / Runtime / Agent / Task snapshot. */
@@ -181,6 +254,14 @@ export interface PostgresStore {
   upsertRuntimeSkillProbeSnapshot: (snapshot: unknown) => Promise<RuntimeSkillSnapshot>;
   /** Read the latest read-only Runtime Skill probe snapshot for one Runtime. */
   readRuntimeSkillProbeSnapshot: (runtimeId: string, scope?: PostgresOrganizationScope) => Promise<RuntimeSkillSnapshot | null>;
+  /** Upsert the latest read-only Runtime scheduled task probe snapshot. */
+  upsertRuntimeScheduleProbeSnapshot: (snapshot: unknown) => Promise<RuntimeScheduleProbeSnapshot>;
+  /** Read the latest read-only Runtime scheduled task probe snapshot for one Runtime. */
+  readRuntimeScheduleProbeSnapshot: (runtimeId: string, scope?: PostgresOrganizationScope) => Promise<RuntimeScheduleProbeSnapshot | null>;
+  /** List current scheduled task definitions enriched with already collected execution history. */
+  listRuntimeScheduledTasks: (scope?: PostgresOrganizationScope) => Promise<PostgresRuntimeScheduledTasksResult>;
+  /** List execution Tasks for one scheduled task group. */
+  listRuntimeScheduledTaskExecutions: (scheduleKey: string, filters?: PostgresRuntimeScheduledTaskExecutionFilters) => Promise<PostgresRuntimeScheduledTaskExecutionsResult>;
   /** List collector ingestion metadata for a device. */
   listCollectorIngestions: (deviceId: string, scope?: PostgresOrganizationScope) => Promise<PostgresCollectorIngestion[]>;
   /** Read product-level collection health for one device. */
@@ -313,6 +394,7 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
           collectorIngestions: await countTable(client, "collector_ingestions"),
           agentSkillProbeSnapshots: await countTable(client, "agent_skill_probe_snapshots"),
           runtimeSkillProbeSnapshots: await countTable(client, "runtime_skill_probe_snapshots"),
+          runtimeScheduleProbeSnapshots: await countTable(client, "runtime_schedule_probe_snapshots"),
           devices: await countTable(client, "devices"),
           runtimes: await countTable(client, "runtimes"),
           tasks: await countTable(client, "tasks"),
@@ -548,6 +630,95 @@ export function createPostgresStore(options: PostgresStoreOptions = {}): Postgre
         LIMIT 1
       `, [runtimeId, organizationId]);
       return normalizeRuntimeSkillProbeSnapshot(result.rows[0]?.raw);
+    },
+    async upsertRuntimeScheduleProbeSnapshot(snapshot) {
+      const normalized = normalizeRuntimeScheduleProbeSnapshot(snapshot);
+      if (!normalized) throw new Error("invalid runtime schedule probe snapshot");
+      await pool.query(`
+        INSERT INTO runtime_schedule_probe_snapshots (
+          id,
+          device_id,
+          runtime_id,
+          runtime_kind,
+          status,
+          observed_at,
+          summary,
+          schedules,
+          diagnostics,
+          raw,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, now())
+        ON CONFLICT (id) DO UPDATE SET
+          device_id = excluded.device_id,
+          runtime_id = excluded.runtime_id,
+          runtime_kind = excluded.runtime_kind,
+          status = excluded.status,
+          observed_at = excluded.observed_at,
+          summary = excluded.summary,
+          schedules = excluded.schedules,
+          diagnostics = excluded.diagnostics,
+          raw = excluded.raw,
+          updated_at = now()
+      `, [
+        runtimeScheduleProbeSnapshotId(normalized.runtimeId),
+        normalized.deviceId,
+        normalized.runtimeId,
+        normalized.runtimeKind,
+        normalized.status,
+        normalized.observedAt ?? null,
+        JSON.stringify(normalized.summary),
+        JSON.stringify(normalized.schedules),
+        JSON.stringify({}),
+        JSON.stringify(normalized),
+      ]);
+      return normalized;
+    },
+    async readRuntimeScheduleProbeSnapshot(runtimeId, scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
+      const result = await pool.query<{ raw: unknown }>(`
+        SELECT s.raw
+        FROM runtime_schedule_probe_snapshots s
+        LEFT JOIN devices d ON d.id = s.device_id
+        WHERE s.runtime_id = $1
+          AND ($2::text IS NULL OR d.organization_id = $2)
+        LIMIT 1
+      `, [runtimeId, organizationId]);
+      return normalizeRuntimeScheduleProbeSnapshot(result.rows[0]?.raw);
+    },
+    async listRuntimeScheduledTasks(scope = {}) {
+      const organizationId = normalizeOrganizationId(scope.organizationId);
+      const [scheduleRows, taskRows, agentNameById] = await Promise.all([
+        readRuntimeScheduleProbeRows(pool, organizationId),
+        readScheduledTaskRows(pool, { organizationId }),
+        readAgentNameMap(pool, organizationId),
+      ]);
+      return buildRuntimeScheduledTasksResult(scheduleRows, taskRows, agentNameById);
+    },
+    async listRuntimeScheduledTaskExecutions(scheduleKey, filters = {}) {
+      const organizationId = normalizeOrganizationId(filters.organizationId);
+      const rows = await readScheduledTaskRows(pool, { organizationId });
+      const matchingRows = rows
+        .filter((row) => row.runtimeId && scheduleKeyFromScheduledTask(row.raw, row.runtimeId) === scheduleKey)
+        .sort(compareScheduledTaskRowsByRecency)
+        .slice(0, Math.min(Math.max(filters.limit ?? 200, 1), 500));
+      const tasks = createDeviceStateSnapshot({
+        collectedAt: new Date().toISOString(),
+        device: { id: "query", hostname: "query", os: "unknown" },
+        runtimes: [],
+        agents: [],
+        tasks: matchingRows.map((row) => row.raw),
+      }).tasks;
+      const byStatus = createEmptyTaskStatusCounts();
+      for (const task of tasks) incrementTaskStatusSummary(byStatus, task.status);
+      return {
+        items: tasks,
+        total: tasks.length,
+        summary: {
+          byStatus,
+          total: byStatus.total,
+        },
+      };
     },
     listCollectorIngestions,
     async readDeviceCollectionHealth(deviceId, scope = {}) {
@@ -912,6 +1083,251 @@ async function readTaskFacets(
   };
 }
 
+async function readRuntimeScheduleProbeRows(
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
+  organizationId: string | null,
+): Promise<PostgresRuntimeScheduleProbeRow[]> {
+  const result = await client.query<PostgresRuntimeScheduleProbeRow>(`
+    SELECT
+      s.raw,
+      s.runtime_id AS "runtimeId",
+      r.kind AS "runtimeKind",
+      r.name AS "runtimeName",
+      d.id AS "deviceId"
+    FROM runtime_schedule_probe_snapshots s
+    LEFT JOIN runtimes r ON r.id = s.runtime_id
+    LEFT JOIN devices d ON d.id = s.device_id
+    WHERE ($1::text IS NULL OR d.organization_id = $1)
+    ORDER BY s.updated_at DESC
+  `, [organizationId]);
+  return result.rows;
+}
+
+async function readScheduledTaskRows(
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
+  filters: Pick<PostgresRuntimeTaskFilters, "organizationId">,
+): Promise<PostgresScheduledTaskQueryRow[]> {
+  const { clause, values } = createTaskWhereClause({
+    organizationId: filters.organizationId,
+    taskType: "scheduled",
+  });
+  const result = await client.query<PostgresScheduledTaskQueryRow>(`
+    SELECT
+      t.raw,
+      ${taskOrderExpression} AS "orderTimestamp",
+      a.id AS "agentId",
+      a.name AS "agentName",
+      r.id AS "runtimeId",
+      r.kind AS "runtimeKind",
+      r.name AS "runtimeName",
+      d.id AS "deviceId"
+    FROM tasks t
+    LEFT JOIN agents a ON a.id = t.agent_id
+    LEFT JOIN runtimes r ON r.id = a.runtime_id
+    LEFT JOIN devices d ON d.id = t.device_id
+    ${clause}
+    ORDER BY ${taskOrderExpression} DESC, t.id DESC
+  `, values);
+  return result.rows;
+}
+
+async function readAgentNameMap(
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
+  organizationId: string | null,
+): Promise<Map<string, string>> {
+  const result = await client.query<{ id: string; name: string }>(`
+    SELECT a.id, a.name
+    FROM agents a
+    LEFT JOIN runtimes r ON r.id = a.runtime_id
+    LEFT JOIN devices d ON d.id = r.device_id
+    WHERE ($1::text IS NULL OR d.organization_id = $1)
+  `, [organizationId]);
+  return new Map(result.rows.map((row) => [row.id, row.name]));
+}
+
+function buildRuntimeScheduledTasksResult(
+  scheduleRows: PostgresRuntimeScheduleProbeRow[],
+  taskRows: PostgresScheduledTaskQueryRow[],
+  agentNameById: Map<string, string>,
+): PostgresRuntimeScheduledTasksResult {
+  const groupsByKey = new Map<string, PostgresRuntimeScheduledTaskGroup>();
+
+  for (const row of scheduleRows) {
+    const snapshot = normalizeRuntimeScheduleProbeSnapshot(row.raw);
+    if (!snapshot) continue;
+    for (const schedule of snapshot.schedules) {
+      groupsByKey.set(schedule.key, createScheduledTaskGroupFromDefinition(schedule, snapshot, row, agentNameById));
+    }
+  }
+
+  for (const row of taskRows) {
+    if (!row.runtimeId) continue;
+    const scheduleKey = scheduleKeyFromScheduledTask(row.raw, row.runtimeId);
+    if (!scheduleKey) continue;
+    const group = groupsByKey.get(scheduleKey) ?? createScheduledTaskGroupFromExecution(row, scheduleKey, agentNameById);
+    addScheduledTaskExecutionToGroup(group, row, agentNameById);
+    groupsByKey.set(scheduleKey, group);
+  }
+
+  const items = Array.from(groupsByKey.values()).sort(compareScheduledTaskGroups);
+  return {
+    items,
+    total: items.length,
+    summary: {
+      total: items.length,
+      enabledCount: items.filter((item) => item.enabled).length,
+      disabledCount: items.filter((item) => !item.enabled).length,
+    },
+  };
+}
+
+function createScheduledTaskGroupFromDefinition(
+  schedule: RuntimeScheduleDefinition,
+  snapshot: RuntimeScheduleProbeSnapshot,
+  row: PostgresRuntimeScheduleProbeRow,
+  agentNameById: Map<string, string>,
+): PostgresRuntimeScheduledTaskGroup {
+  const byStatus = createEmptyTaskStatusCounts();
+  return {
+    scheduleKey: schedule.key,
+    sourceId: schedule.sourceId,
+    name: schedule.name,
+    deviceId: row.deviceId || snapshot.deviceId,
+    runtimeId: row.runtimeId || snapshot.runtimeId,
+    runtimeKind: row.runtimeKind || snapshot.runtimeKind,
+    runtimeName: row.runtimeName || snapshot.runtimeKind,
+    agentIds: uniqueSorted(schedule.agentIds),
+    agentNames: schedule.agentIds.map((agentId) => agentNameById.get(agentId) || fallbackNameFromId(agentId)),
+    enabled: schedule.enabled,
+    ...(schedule.expression ? { expression: schedule.expression } : {}),
+    ...(schedule.timezone ? { timezone: schedule.timezone } : {}),
+    ...(schedule.nextRunAt ? { nextRunAt: schedule.nextRunAt } : {}),
+    ...(schedule.lastRunAt ? { lastRunAt: schedule.lastRunAt } : {}),
+    executionCount: 0,
+    summary: { byStatus },
+  };
+}
+
+function createScheduledTaskGroupFromExecution(
+  row: PostgresScheduledTaskQueryRow,
+  scheduleKey: string,
+  agentNameById: Map<string, string>,
+): PostgresRuntimeScheduledTaskGroup {
+  const sourceId = scheduleSourceIdFromTask(row.raw) || scheduleKey.split(":schedule:").at(-1) || "unknown";
+  const agentIds = row.agentId ? [row.agentId] : [];
+  return {
+    scheduleKey,
+    sourceId,
+    name: scheduleNameFromTask(row.raw, sourceId),
+    deviceId: row.deviceId || row.raw.id.split(":runtime:")[0] || "",
+    runtimeId: row.runtimeId || "",
+    runtimeKind: row.runtimeKind || "",
+    runtimeName: row.runtimeName || row.runtimeKind || "",
+    agentIds,
+    agentNames: agentIds.map((agentId) => agentNameById.get(agentId) || row.agentName || fallbackNameFromId(agentId)),
+    enabled: true,
+    executionCount: 0,
+    summary: { byStatus: createEmptyTaskStatusCounts() },
+  };
+}
+
+function addScheduledTaskExecutionToGroup(
+  group: PostgresRuntimeScheduledTaskGroup,
+  row: PostgresScheduledTaskQueryRow,
+  agentNameById: Map<string, string>,
+): void {
+  group.executionCount += 1;
+  incrementTaskStatusSummary(group.summary.byStatus, row.raw.status);
+  if (row.agentId && !group.agentIds.includes(row.agentId)) {
+    group.agentIds = uniqueSorted([...group.agentIds, row.agentId]);
+    group.agentNames = group.agentIds.map((agentId) => agentNameById.get(agentId) || fallbackNameFromId(agentId));
+  }
+  const timestamp = scheduledTaskRowTimestamp(row);
+  const previous = Date.parse(group.latestExecutionAt ?? "");
+  if (timestamp && (Number.isNaN(previous) || timestamp.getTime() > previous)) {
+    group.latestExecutionAt = timestamp.toISOString();
+    if (isTaskStatus(row.raw.status)) group.latestStatus = row.raw.status;
+  }
+}
+
+function scheduleKeyFromScheduledTask(task: Task, runtimeId: string): string {
+  const sourceId = scheduleSourceIdFromTask(task) || `unknown-${task.agentId.split(":").at(-1) || "agent"}`;
+  return makeRuntimeScheduleKey(runtimeId, sourceId);
+}
+
+function scheduleSourceIdFromTask(task: Task): string {
+  return task.raw?.openclaw?.scheduleId ||
+    openClawScheduleIdFromSessionKey(task.raw?.openclaw?.sessionKey) ||
+    openClawScheduleIdFromPrompt(task.userMessage) ||
+    "";
+}
+
+function scheduleNameFromTask(task: Task, fallback: string): string {
+  return task.raw?.openclaw?.scheduleName ||
+    openClawScheduleNameFromPrompt(task.userMessage) ||
+    fallback;
+}
+
+function openClawScheduleIdFromSessionKey(value: string | undefined): string {
+  const text = String(value || "");
+  const match = /^(?:agent:[^:]+:)?cron:(.+)$/.exec(text);
+  if (!match?.[1]) return "";
+  return match[1].replace(/:run:.+$/i, "").trim();
+}
+
+function openClawScheduleIdFromPrompt(value: string | undefined): string {
+  return /^\[cron:([^\s\]]+)/i.exec(String(value || ""))?.[1] || "";
+}
+
+function openClawScheduleNameFromPrompt(value: string | undefined): string {
+  return /^\[cron:[^\s\]]+\s+([^\]]+)\]/i.exec(String(value || ""))?.[1]?.trim() || "";
+}
+
+function scheduledTaskRowTimestamp(row: PostgresScheduledTaskQueryRow): Date | null {
+  if (row.orderTimestamp) return row.orderTimestamp;
+  return toDate(row.raw.updatedAt) || toDate(row.raw.createdAt);
+}
+
+function compareScheduledTaskRowsByRecency(left: PostgresScheduledTaskQueryRow, right: PostgresScheduledTaskQueryRow): number {
+  const leftTime = scheduledTaskRowTimestamp(left)?.getTime() ?? 0;
+  const rightTime = scheduledTaskRowTimestamp(right)?.getTime() ?? 0;
+  if (leftTime !== rightTime) return rightTime - leftTime;
+  return left.raw.id.localeCompare(right.raw.id);
+}
+
+function compareScheduledTaskGroups(
+  left: PostgresRuntimeScheduledTaskGroup,
+  right: PostgresRuntimeScheduledTaskGroup,
+): number {
+  const leftLatest = Date.parse(left.latestExecutionAt ?? "");
+  const rightLatest = Date.parse(right.latestExecutionAt ?? "");
+  if (!Number.isNaN(leftLatest) || !Number.isNaN(rightLatest)) {
+    if ((rightLatest || 0) !== (leftLatest || 0)) return (rightLatest || 0) - (leftLatest || 0);
+  }
+  const leftNext = Date.parse(left.nextRunAt ?? "");
+  const rightNext = Date.parse(right.nextRunAt ?? "");
+  if (!Number.isNaN(leftNext) || !Number.isNaN(rightNext)) {
+    if ((leftNext || Number.MAX_SAFE_INTEGER) !== (rightNext || Number.MAX_SAFE_INTEGER)) {
+      return (leftNext || Number.MAX_SAFE_INTEGER) - (rightNext || Number.MAX_SAFE_INTEGER);
+    }
+  }
+  return left.name.localeCompare(right.name) || left.scheduleKey.localeCompare(right.scheduleKey);
+}
+
+function incrementTaskStatusSummary(summary: TaskStatusCounts, status: TaskStatus): void {
+  if (!isTaskStatus(status)) return;
+  summary[status] += 1;
+  summary.total += 1;
+}
+
+function fallbackNameFromId(id: string): string {
+  return id.split(":").at(-1) || id;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+}
+
 function addTaskStatusCount(
   summary: RuntimeFleetTaskSummary["byAgentId"],
   id: string,
@@ -1059,6 +1475,10 @@ function agentSkillProbeSnapshotId(agentId: string): string {
 
 function runtimeSkillProbeSnapshotId(runtimeId: string): string {
   return `runtime-skill-probe:${runtimeId}`;
+}
+
+function runtimeScheduleProbeSnapshotId(runtimeId: string): string {
+  return `runtime-schedule-probe:${runtimeId}`;
 }
 
 function toDate(value: string | undefined): Date | null {

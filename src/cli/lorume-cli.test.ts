@@ -1425,6 +1425,8 @@ EOF
     const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-runtime-channel-"));
     const binDir = path.join(root, "bin");
     const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "webchat");
+    const startedAt = new Date(Date.now() - 60_000).toISOString();
+    const promptAt = new Date(Date.now() - 30_000).toISOString();
     mkdirSync(binDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
     writeOpenClawExecutable(binDir, {
@@ -1440,14 +1442,14 @@ EOF
         type: "session.started",
         runId: "run-webchat-1",
         sessionKey: "agent:main:webchat:conversation-local-1",
-        ts: "2026-05-21T03:00:00.000Z",
+        ts: startedAt,
         data: { agentId: "main" },
       }),
       JSON.stringify({
         type: "prompt.submitted",
         runId: "run-webchat-1",
         sessionKey: "agent:main:webchat:conversation-local-1",
-        ts: "2026-05-21T03:01:00.000Z",
+        ts: promptAt,
         data: { prompt: "Run a local OpenClaw check" },
       }),
     ].join("\n"));
@@ -1483,6 +1485,67 @@ EOF
     expect(output.tasks[0]).not.toHaveProperty("toolCalls");
     expect(output.tasks[0]).not.toHaveProperty("lastSeenAt");
     expect(output.tasks[0].channel.kind).not.toBe("openclaw");
+  });
+
+  it("moves stale OpenClaw running trajectory runs to unknown instead of leaving them in progress", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lorume-cli-device-state-stale-running-"));
+    const binDir = path.join(root, "bin");
+    const sessionDir = path.join(root, ".openclaw", "agents", "main", "sessions", "webchat");
+    const startedAt = new Date(Date.now() - (3 * 60 * 60 * 1000)).toISOString();
+    const promptAt = new Date(Date.now() - ((3 * 60 * 60 * 1000) - 60_000)).toISOString();
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    writeOpenClawExecutable(binDir, {
+      health: { ok: true, agents: [{ agentId: "main" }] },
+      status: {
+        gateway: { reachable: true, url: "local", self: { version: "openclaw 1.0.0" } },
+        agents: { agents: [{ agentId: "main" }] },
+      },
+      tasks: { tasks: [] },
+    });
+    writeFileSync(path.join(sessionDir, "run-stale-running.trajectory.jsonl"), [
+      JSON.stringify({
+        type: "session.started",
+        runId: "run-stale-running",
+        sessionKey: "agent:main:webchat:conversation-local-1",
+        ts: startedAt,
+        data: { agentId: "main" },
+      }),
+      JSON.stringify({
+        type: "prompt.submitted",
+        runId: "run-stale-running",
+        sessionKey: "agent:main:webchat:conversation-local-1",
+        ts: promptAt,
+        data: { prompt: "Restart the OpenClaw gateway" },
+      }),
+    ].join("\n"));
+
+    const output = runCli([
+      "collect",
+      "device-state",
+      "--json",
+      "--device-id",
+      "test-device",
+    ], {
+      env: {
+        LORUME_COLLECTOR_HOME: root,
+        LORUME_ENABLED_RUNTIME_ADAPTERS: "openclaw",
+        PATH: binDir,
+      },
+    });
+
+    expect(output.tasks).toHaveLength(1);
+    expect(output.tasks[0]).toMatchObject({
+      id: "test-device:runtime:openclaw:agent:main:task:run-stale-running",
+      status: "unknown",
+      raw: { openclaw: { status: "running", statusSource: "trajectory" } },
+    });
+    expect(output.diagnostics?.items ?? []).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "openclaw_stale_running_trajectory",
+        severity: "warning",
+      }),
+    ]));
   });
 
   it("only exposes OpenClaw task errors for failed tasks", () => {
@@ -1896,6 +1959,16 @@ EOF
         agents: { agents: [{ agentId: "main" }] },
       },
       tasks: { tasks: [] },
+      cron: {
+        jobs: [{
+          id: "daily-summary",
+          name: "Daily summary",
+          agentId: "main",
+          enabled: true,
+          schedule: { expr: "0 9 * * *", tz: "Asia/Shanghai" },
+          state: { nextRunAtMs: Date.parse("2026-05-30T01:00:00.000Z") },
+        }],
+      },
     });
     writeOpenClawTrajectoryFile(sessionDir, "cron-daily-summary", {
       finalStatus: "success",
@@ -1933,6 +2006,7 @@ EOF
       assignee: { name: "main", externalId: "main" },
       raw: {
         openclaw: {
+          scheduleId: "daily-summary",
           sessionKey: "agent:main:cron:daily-summary",
           status: "success",
           statusSource: "trajectory",
@@ -1945,8 +2019,32 @@ EOF
       userMessage: "[cron:weekly-report 工具产研团队昨日日报文档-工具能力合伙人] 生成昨天的团队日报",
       status: "cancelled",
       adapter: { kind: "openclaw" },
-      raw: { openclaw: { status: "interrupted" } },
+      raw: { openclaw: { scheduleId: "weekly-report", scheduleName: "工具产研团队昨日日报文档-工具能力合伙人", status: "interrupted" } },
     });
+    expect(output.runtimeScheduleProbes).toEqual([
+      expect.objectContaining({
+        deviceId: "test-device",
+        runtimeId: "test-device:runtime:openclaw",
+        runtimeKind: "openclaw",
+        status: "succeeded",
+        summary: {
+          total: 1,
+          enabledCount: 1,
+          disabledCount: 0,
+          agentCount: 1,
+        },
+        schedules: [{
+          key: "test-device:runtime:openclaw:schedule:daily-summary",
+          sourceId: "daily-summary",
+          name: "Daily summary",
+          agentIds: ["test-device:runtime:openclaw:agent:main"],
+          enabled: true,
+          expression: "0 9 * * *",
+          timezone: "Asia/Shanghai",
+          nextRunAt: "2026-05-30T01:00:00.000Z",
+        }],
+      }),
+    ]);
     expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-daily-summary"))).not.toHaveProperty("channel");
     expect(output.tasks.find((task: { id: string }) => task.id.endsWith(":task:cron-daily-summary"))).not.toHaveProperty("conversation");
     expect(output.tasks[0]).not.toHaveProperty("title");
@@ -2667,7 +2765,7 @@ function spawnCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}) {
 
 function writeOpenClawExecutable(
   binDir: string,
-  payload: { health: unknown; status: unknown; tasks: unknown },
+  payload: { health: unknown; status: unknown; tasks: unknown; cron?: unknown },
 ) {
   writeExecutable(path.join(binDir, "openclaw"), `#!/usr/bin/env node
 const payload = ${JSON.stringify(payload)};
@@ -2682,6 +2780,10 @@ if (args[0] === "status") {
 }
 if (args[0] === "tasks" && args[1] === "list") {
   console.log(JSON.stringify(payload.tasks));
+  process.exit(0);
+}
+if (args[0] === "cron" && args[1] === "list") {
+  console.log(JSON.stringify(payload.cron || { jobs: [] }));
   process.exit(0);
 }
 console.log("{}");

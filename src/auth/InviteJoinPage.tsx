@@ -1,20 +1,31 @@
 import { Button } from "@/components/ui/button";
 import { AuthPageShell } from "./AuthPageShell";
 import { AuthOperationsPreview } from "./auth-preview";
-import type { AuthSessionContext } from "./auth-store";
+import type { AuthInvitationPreview, AuthSessionContext } from "./auth-store";
 
 interface InviteJoinPageProps {
   error?: string | null;
   onSkip: () => void;
   onSubmit: () => Promise<void>;
+  preview?: AuthInvitationPreview | null;
   session: AuthSessionContext;
 }
 
-export function InviteJoinPage({ error, onSkip, onSubmit, session }: InviteJoinPageProps) {
+const roleLabels = {
+  admin: "管理员",
+  member: "成员",
+  owner: "Owner",
+};
+
+export function InviteJoinPage({ error, onSkip, onSubmit, preview, session }: InviteJoinPageProps) {
+  const organizationName = preview?.organizationName ?? "受邀组织";
+  const roleLabel = preview?.role ? roleLabels[preview.role] : "成员";
+  const maskedEmail = preview?.maskedEmail ?? "受邀邮箱";
+
   return (
     <AuthPageShell
       title="加入组织"
-      subtitle={`当前登录邮箱为 ${session.user.email}。确认后会使用该邮箱接受邀请。`}
+      subtitle={`你将加入 ${organizationName}，目标角色为 ${roleLabel}。请确认当前登录邮箱 ${session.user.email} 与受邀邮箱 ${maskedEmail} 一致。`}
       preview={<AuthOperationsPreview />}
       notice="邀请链接只决定加入哪个组织，真正的身份仍以邮箱验证码登录结果为准。"
     >

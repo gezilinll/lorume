@@ -11,7 +11,7 @@
 - 组织可以由登录用户创建，也可以通过邀请链接加入。
 - 组织内成员有最小角色：owner、admin、member。
 - 组织邀请由系统邮件发送，受邀用户点击链接后使用受邀邮箱完成验证码登录并加入组织。
-- Device Collector 使用设备 token 向 backend 上报数据；token 只保存哈希，不明文入库。
+- Device Collector 使用设备 token 向 backend 上报数据；token 明文不入日志和列表，数据库保存哈希用于鉴权，并保存受保护加密密文用于 owner / admin 后续复制安装命令。
 - Device token 一次只能绑定一台设备，首次成功使用后进入占用状态。
 - 组织安全相关动作必须进入审计日志，覆盖邀请、登录、设备 token 和异常复用等事件。
 - Runtime Fleet、Runs、组织设置等 Console 页面，以及任务中心、通知中心工具抽屉必须通过用户 session 访问。
@@ -24,7 +24,7 @@
 - 不做通用细粒度资源 ACL，例如单个 Runtime、单个 Agent、单条 Run 的授权。
 - 不做跨组织共享数据。
 - 不做审计日志报表、合规归档、外部 SIEM 对接、复杂检索或前端审计页面；当前只做安全事件写入和后端排查所需字段。
-- 不在日志、fixture、文档或截图中保留验证码、session token、device token、邮件 API key。Device token 只允许在管理员创建后的一次性响应和当前受保护页面状态中明文出现，页面刷新后不能从后端再次读取明文。
+- 不在日志、fixture、文档或截图中保留验证码、session token、device token、邮件 API key。Device token 列表不能返回明文；owner / admin 可通过受保护的安装命令接口复制包含 token 的安装命令，用于重装 collector。
 
 ## 对象模型
 
@@ -97,7 +97,10 @@ Invitation 是加入组织的邮件凭证。
 - 邀请链接包含一次性 token，数据库只存 token 哈希。
 - 邀请创建后由系统邮件发送，不依赖管理员手动复制链接。
 - owner / admin 可以查看尚未完成加入的邀请记录，并对未接受邀请执行重发。
+- owner / admin 创建邀请时可以选择过期时间：一天、一星期、一个月或永不过期。
 - 重发邀请必须生成新的 invitation token 并发送新邮件；旧邀请应转为 `revoked`，避免多个有效链接长期并存。
+- 重发邀请沿用原邀请的有效期策略；原邀请永不过期时，新邀请也永不过期。
+- owner / admin 可以撤销未接受邀请，撤销后邀请链接不可再加入组织。
 - 被邀请人点击链接后，如果未登录，先进入邀请登录流程。
 - 邀请登录流程可以根据邀请 token 自动预填受邀邮箱，并自动发送验证码；页面展示仍只显示脱敏邮箱。
 - 登录邮箱必须和邀请邮箱一致，才能接受邀请。
@@ -111,8 +114,7 @@ Device Token 是设备侧 Collector 上报和连接健康通道的凭证。
 规则：
 
 - token 由 owner / admin 创建。
-- token 明文只在创建时返回一次。
-- 数据库存储 token 哈希和短 prefix，用于识别与排查。
+- token 明文不直接入库；数据库存储 token 哈希、短 prefix 和加密密文。哈希用于设备鉴权，prefix 用于识别排查，加密密文只用于 owner / admin 复制安装命令。
 - token 状态只保留 `pending`、`occupied`、`revoked`、`expired`。
 - `pending` 表示 token 已创建但尚未被设备成功使用。
 - `occupied` 表示 token 已被某台设备首次成功使用，并绑定到该 `deviceId`。
@@ -160,16 +162,19 @@ Organization API：
 
 - `POST /api/organizations`：创建组织。
 - `GET /api/organizations`：读取当前用户组织列表。
-- `POST /api/organizations/:organizationId/invitations`：创建邀请并发送邮件，只有 owner / admin 可用，目标角色只能是 `member` 或 `admin`。
+- `GET /api/organizations/:organizationId/members`：列出组织成员，只有 owner / admin 可用。
+- `POST /api/organizations/:organizationId/invitations`：创建邀请并发送邮件，只有 owner / admin 可用，目标角色只能是 `member` 或 `admin`，`expiresIn` 支持 `1d`、`7d`、`30d`、`never`。
 - `GET /api/organizations/:organizationId/invitations`：列出组织邀请记录，只有 owner / admin 可用；前端默认展示尚未接受的记录用于查看状态和重发。
 - `POST /api/organizations/:organizationId/invitations/:invitationId/resend`：为未接受邀请生成新 token 并重发邮件，旧邀请转为撤销；已接受邀请不能重发。
+- `POST /api/organizations/:organizationId/invitations/:invitationId/revoke`：撤销未接受邀请，只有 owner / admin 可用；已接受邀请不能撤销。
 - `GET /api/invitations/:token/preview`：读取邀请预览，用于邀请登录页展示组织名、目标角色、脱敏邮箱和可用状态；可返回完整邮箱给受保护的验证码请求流程使用，但页面文案不得展示完整邮箱。
 - `POST /api/invitations/:token/accept`：接受邀请。
 
 Device token API：
 
-- `POST /api/organizations/:organizationId/device-tokens`：创建设备 token，只有 owner / admin 可用，响应只在本次返回明文 token，初始状态为 `pending`。
-- `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要，只返回名称、device id、token prefix、状态、创建时间、首次占用时间、最近使用时间和过期时间，不能返回明文 token。
+- `POST /api/organizations/:organizationId/device-tokens`：创建设备 token，只有 owner / admin 可用，输入名称为 `Token 名称`；响应返回 token 摘要、一次性明文 token 和包含明文 token 的安装命令，初始状态为 `pending`。
+- `GET /api/organizations/:organizationId/device-tokens`：列出设备 token 摘要，只返回名称、token id、device id、token prefix、状态、创建时间、首次占用时间、最近使用时间、过期时间和是否可复制安装命令，不能返回明文 token。
+- `GET /api/organizations/:organizationId/device-tokens/:tokenId/install-command`：读取某个 token 的安装命令，只有 owner / admin 可用；接口从加密密文解出 token 并返回完整命令，`revoked`、`expired` 或缺少密文的旧 token 不能复制。
 - `POST /api/organizations/:organizationId/device-tokens/:tokenId/revoke`：撤销设备 token，只有 owner / admin 可用。
 - `POST /api/device-state-snapshots`：Collector 上报 `DeviceStateSnapshot`，使用 device token。
 - `GET /api/device-control/ws`：设备连接健康通道，使用 device token。
@@ -210,12 +215,15 @@ Runtime / Runs 读取 API：
 - 不回退复古像素边框、厚黑线、高饱和黄色侧栏、错位阴影、像素 sprite 或装饰性调试文案。
 - 登录页的 `/api/me` 匿名会话探测返回 `401` 或 `404` 属于正常未登录状态，不能直接把 `Not Found`、接口错误或调试字段暴露在页面上；其他后端故障仍应展示可读错误，避免把真实服务异常吞掉。
 - Auth API 错误必须使用稳定 `error` code，并通过共享错误字典维护用户可读 `message`。前端遇到只有 code 的响应时，也必须映射成可读提示，不能把 `invalid_or_expired_code` 等技术字符串直接展示给用户。
-- 组织设置页生成安装命令时可以显示 device token 和包含 token 的命令，但只显示当前创建结果，不提供历史明文 token 查询。
+- 组织设置页顶部用组织概览横跨内容区，展示组织名称、slug、当前角色、成员数、待加入邀请数、设备 token 数和已绑定数量，避免空白占位。
+- 组织设置页中“成员与邀请”和“设备 Token”并列展示在组织概览下方；不单独展示审计卡片或安装命令卡片。
+- 组织设置页生成安装命令时只在“设备 Token”卡片内展示本次安装命令，并提供复制按钮。
 - 组织设置页的邀请入口应是“发送邀请”，而不是“创建邀请链接”。发送成功后展示发送状态和受邀邮箱脱敏值，不默认暴露可复制链接。
-- 组织设置页应展示待加入邀请记录，包括邮箱、角色、状态、过期时间和重发操作；已接受邀请不作为待加入记录展示。
+- 组织设置页发送邀请时支持选择过期时间：一天、一星期、一个月或永不过期。
+- 组织设置页应展示待加入邀请记录，包括邮箱、角色、状态、过期时间、重发和撤销操作；已接受邀请不作为待加入记录展示。
 - 邀请页登录前可以展示组织名、目标角色、邀请状态和脱敏邮箱；不得展示完整邮箱、邀请 token、邀请创建人内部信息。
 - 邀请页未登录时可以自动预填受邀邮箱并自动发送验证码；用户只需填写验证码。已登录但邮箱不匹配时，提示退出并使用受邀邮箱登录。
-- 设备 token 管理应以列表呈现 token 摘要和状态。`pending`、`occupied`、`revoked`、`expired` 使用清晰状态标签，列表不展示明文 token。
+- 设备 token 管理应以列表呈现 token 摘要。名称列第一行展示 token 名称，第二行展示 `token_id`；设备列展示已绑定设备名，未绑定时展示待绑定，已撤销/过期且无绑定设备时展示已撤销/已过期；安装命令列提供复制完整安装命令按钮；操作列保留撤销。列表不展示明文 token。
 - 组织设置页创建设备 token 的输入统一命名为“Token 名称”，用于识别该安装 token；当前安装命令会继续把该值作为默认 `--device-id` 传给 collector。
 - owner / admin 可以撤销 token；member 只能看到自己无权管理设备 token 的说明。
 
@@ -233,12 +241,12 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 
 后端：
 
-- crypto 测试必须证明验证码、session、invitation token 和 device token 只可通过哈希校验。
+- crypto 测试必须证明验证码、session、invitation token 和 device token 可通过哈希校验；需要后续复制安装命令的 device token secret 必须通过可恢复加密保存，且不会以明文入库。
 - store 测试必须覆盖 User -> Organization -> Member -> Invitation -> Session -> Device Token 的核心链路。
 - store 测试必须覆盖 device token 从 `pending` 到 `occupied`、跨设备复用拒绝、撤销和过期。
 - store 测试必须覆盖 invitation 只允许 `member` / `admin`，拒绝 `owner`。
 - store 测试必须覆盖审计事件写入，且不包含 token 明文或验证码明文。
-- HTTP API 测试必须覆盖发送验证码、登录、`/api/me`、创建组织、发送邀请邮件、邀请列表、邀请重发、邀请预览、接受邀请和 logout。
+- HTTP API 测试必须覆盖发送验证码、登录、`/api/me`、创建组织、发送邀请邮件、邀请过期选项、邀请列表、邀请重发、邀请撤销、邀请预览、接受邀请、device token 安装命令复制和 logout。
 - Runtime 读取 API 在开启 session 校验时必须拒绝匿名请求。
 - Collector / control 在开启 device token 校验时必须拒绝无效 token。
 - Collector / control 测试必须覆盖 `occupied` token 只能被已绑定设备继续使用。
@@ -247,7 +255,7 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 
 - 登录页、验证码页、创建组织页和邀请加入页必须有组件测试。
 - 邀请页测试必须覆盖邀请预览、脱敏邮箱展示、自动发送验证码、邮箱不匹配、过期/撤销/已接受状态和接受成功后切换到目标组织。
-- 组织设置页测试必须覆盖发送邀请邮件、待加入邀请记录、邀请重发、拒绝 owner 邀请、设备 token 列表、撤销和不同角色的管理权限。
+- 组织设置页测试必须覆盖发送邀请邮件、邀请过期选项、待加入邀请记录、邀请重发、邀请撤销、拒绝 owner 邀请、设备 token 列表、安装命令复制、撤销和不同角色的管理权限。
 - Console 必须被 `/api/me` gate 保护。
 - shadcn auth component tests and behavior-focused tests must cover the modern logo, base form/button/badge/token usage, and identity page structure so later pages do not bypass shared shadcn tokens or generated primitives.
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。
@@ -261,10 +269,10 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 - 无组织用户登录后进入创建组织流程。
 - 有待接受邀请的用户可以在登录后通过邀请链接加入组织。
 - 管理员发送邀请后，系统通过邮件发送邀请链接；普通邀请不能预设 owner。
-- 管理员可以在组织设置页查看待加入邀请并重发邮件；重发后旧邀请链接不可继续使用。
+- 管理员可以在组织设置页查看待加入邀请并重发或撤销邮件；重发后旧邀请链接不可继续使用，撤销后邀请链接不可加入组织。
 - 邀请链接打开后，未登录用户看到组织名、目标角色、脱敏邮箱和可用状态，并使用自动预填的受邀邮箱完成验证码登录。
 - 登录用户可以查看 Console；logout 后不能继续访问 Console API。
-- 设备 token 明文不入库，历史查询不返回明文。
+- 设备 token 明文不入列表、不入日志；历史 token 可由 owner / admin 通过受保护接口复制完整安装命令，接口必须从加密密文恢复 token。
 - 设备 token 初始为 `pending`，首次成功上报后变为 `occupied` 并绑定一台设备。
 - `occupied` token 被其他设备复用时必须拒绝，且写入审计日志。
 - 撤销或过期 token 无法上报。

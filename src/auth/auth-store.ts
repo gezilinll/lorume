@@ -86,6 +86,7 @@ export interface AuthDeviceTokenVerification {
 
 /** Device token summary returned to organization admins. */
 export interface AuthDeviceTokenSummary extends AuthDeviceTokenVerification {
+  canCopyInstallCommand?: boolean;
   createdAt?: Date;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
@@ -110,7 +111,7 @@ export interface AuthInvitationSummary {
   acceptedAt?: Date | null;
   createdAt: Date;
   email: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   id: string;
   invitedByUserId: string;
   maskedEmail: string;
@@ -118,6 +119,16 @@ export interface AuthInvitationSummary {
   revokedAt?: Date | null;
   role: AuthMemberRole;
   status: AuthInvitationStatus;
+}
+
+/** Organization member summary returned to organization owners and admins. */
+export interface AuthOrganizationMemberSummary {
+  email: string;
+  id: string;
+  joinedAt: Date;
+  role: AuthMemberRole;
+  status: "active" | "removed";
+  userId: string;
 }
 
 /** Append-only security event visible to organization admins. */
@@ -146,12 +157,12 @@ export interface AuthStore {
   listOrganizationAdminUserIds: (organizationId: string) => Promise<string[]>;
   createInvitation: (input: {
     email: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     invitedByUserId: string;
     organizationId: string;
     role: AuthInvitableMemberRole;
     tokenHash: string;
-  }) => Promise<{ email: string; id: string; organizationId: string; role: AuthMemberRole }>;
+  }) => Promise<{ email: string; expiresAt: Date | null; id: string; organizationId: string; role: AuthMemberRole }>;
   listOrganizationInvitations: (input: {
     now: Date;
     organizationId: string;
@@ -172,15 +183,22 @@ export interface AuthStore {
     userId: string;
   }) => Promise<AuthOrganizationMembership | null>;
   revokeInvitation: (input: { id: string; now: Date }) => Promise<void>;
+  listOrganizationMembers: (input: { organizationId: string }) => Promise<AuthOrganizationMemberSummary[]>;
   createDeviceToken: (input: {
     deviceId?: string | null;
     expiresAt?: Date | null;
     name: string;
     organizationId: string;
+    tokenCiphertext: string;
     tokenHash: string;
     tokenPrefix: string;
   }) => Promise<AuthDeviceTokenSummary>;
   listDeviceTokens: (input: { now?: Date; organizationId: string }) => Promise<AuthDeviceTokenSummary[]>;
+  readDeviceTokenInstallSecret: (input: {
+    id: string;
+    now: Date;
+    organizationId: string;
+  }) => Promise<{ deviceToken: AuthDeviceTokenSummary; tokenCiphertext: string | null } | null>;
   revokeDeviceToken: (input: {
     actorUserId?: string | null;
     id: string;
@@ -356,6 +374,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
     async createInvitation(input) {
       const result = await pool.query<{
         email: string;
+        expiresAt: Date | null;
         id: string;
         organizationId: string;
         role: AuthMemberRole;
@@ -364,7 +383,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
           id, organization_id, email, role, token_hash, invited_by_user_id, expires_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, organization_id AS "organizationId", email, role
+        RETURNING id, organization_id AS "organizationId", email, role, expires_at AS "expiresAt"
       `, [
         createId("inv"),
         input.organizationId,
@@ -418,7 +437,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
       const result = await pool.query<{
         acceptedAt: Date | null;
         email: string;
-        expiresAt: Date;
+        expiresAt: Date | null;
         organizationId: string;
         organizationName: string;
         revokedAt: Date | null;
@@ -445,7 +464,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
         organizationId: row.organizationId,
         organizationName: row.organizationName,
         role: row.role,
-        status: row.revokedAt ? "revoked" : row.acceptedAt ? "accepted" : row.expiresAt <= input.now ? "expired" : "available",
+        status: row.revokedAt ? "revoked" : row.acceptedAt ? "accepted" : row.expiresAt !== null && row.expiresAt <= input.now ? "expired" : "available",
       };
     },
     async acceptInvitation(input) {
@@ -464,7 +483,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
               AND email = $2
               AND accepted_at IS NULL
               AND revoked_at IS NULL
-              AND expires_at > $3
+              AND (expires_at IS NULL OR expires_at > $3)
             LIMIT 1
             FOR UPDATE
           )
@@ -484,17 +503,34 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
     async revokeInvitation(input) {
       await pool.query("UPDATE organization_invitations SET revoked_at = $2 WHERE id = $1", [input.id, input.now]);
     },
+    async listOrganizationMembers(input) {
+      const result = await pool.query<AuthOrganizationMemberSummary>(`
+        SELECT
+          m.id,
+          m.user_id AS "userId",
+          u.email,
+          m.role,
+          m.status,
+          m.joined_at AS "joinedAt"
+        FROM organization_members m
+        INNER JOIN users u ON u.id = m.user_id
+        WHERE m.organization_id = $1
+        ORDER BY m.joined_at ASC, m.id ASC
+      `, [input.organizationId]);
+      return result.rows;
+    },
     async createDeviceToken(input) {
       const result = await pool.query<DeviceTokenRow>(`
         INSERT INTO device_tokens (
-          id, organization_id, device_id, name, token_hash, token_prefix, status, expires_at
+          id, organization_id, device_id, name, token_hash, token_ciphertext, token_prefix, status, expires_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
         RETURNING
           id,
           organization_id AS "organizationId",
           device_id AS "deviceId",
           name,
+          token_ciphertext AS "tokenCiphertext",
           token_prefix AS "tokenPrefix",
           status,
           created_at AS "createdAt",
@@ -508,6 +544,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
         input.deviceId ?? null,
         input.name,
         input.tokenHash,
+        input.tokenCiphertext,
         input.tokenPrefix,
         input.expiresAt ?? null,
       ]);
@@ -520,6 +557,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
           organization_id AS "organizationId",
           device_id AS "deviceId",
           name,
+          token_ciphertext AS "tokenCiphertext",
           token_prefix AS "tokenPrefix",
           status,
           created_at AS "createdAt",
@@ -534,6 +572,33 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
       const now = input.now ?? new Date();
       return result.rows.map((row) => toDeviceTokenSummary(row, now));
     },
+    async readDeviceTokenInstallSecret(input) {
+      const result = await pool.query<DeviceTokenRow>(`
+        SELECT
+          id,
+          organization_id AS "organizationId",
+          device_id AS "deviceId",
+          name,
+          token_ciphertext AS "tokenCiphertext",
+          token_prefix AS "tokenPrefix",
+          status,
+          created_at AS "createdAt",
+          expires_at AS "expiresAt",
+          occupied_at AS "occupiedAt",
+          revoked_at AS "revokedAt",
+          last_used_at AS "lastUsedAt"
+        FROM device_tokens
+        WHERE organization_id = $1
+          AND id = $2
+        LIMIT 1
+      `, [input.organizationId, input.id]);
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        deviceToken: toDeviceTokenSummary(row, input.now),
+        tokenCiphertext: row.tokenCiphertext ?? null,
+      };
+    },
     async revokeDeviceToken(input) {
       const result = await pool.query<DeviceTokenRow>(`
         UPDATE device_tokens
@@ -545,6 +610,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
           organization_id AS "organizationId",
           device_id AS "deviceId",
           name,
+          token_ciphertext AS "tokenCiphertext",
           token_prefix AS "tokenPrefix",
           status,
           created_at AS "createdAt",
@@ -576,6 +642,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
             organization_id AS "organizationId",
             device_id AS "deviceId",
             name,
+            token_ciphertext AS "tokenCiphertext",
             token_prefix AS "tokenPrefix",
             status,
             created_at AS "createdAt",
@@ -626,6 +693,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
               organization_id AS "organizationId",
               device_id AS "deviceId",
               name,
+              token_ciphertext AS "tokenCiphertext",
               token_prefix AS "tokenPrefix",
               status,
               created_at AS "createdAt",
@@ -656,6 +724,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
             organization_id AS "organizationId",
             device_id AS "deviceId",
             name,
+            token_ciphertext AS "tokenCiphertext",
             token_prefix AS "tokenPrefix",
             status,
             created_at AS "createdAt",
@@ -731,6 +800,7 @@ interface DeviceTokenRow {
   organizationId: string;
   revokedAt?: Date | null;
   status: AuthDeviceTokenStatus;
+  tokenCiphertext?: string | null;
   tokenPrefix: string;
 }
 
@@ -738,7 +808,7 @@ interface InvitationSummaryRow {
   acceptedAt?: Date | null;
   createdAt: Date;
   email: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   id: string;
   invitedByUserId: string;
   organizationId: string;
@@ -769,13 +839,14 @@ function toInvitationSummary(row: InvitationSummaryRow, now: Date): AuthInvitati
     organizationId: row.organizationId,
     revokedAt: row.revokedAt ?? null,
     role: row.role,
-    status: row.revokedAt ? "revoked" : row.acceptedAt ? "accepted" : row.expiresAt <= now ? "expired" : "available",
+    status: row.revokedAt ? "revoked" : row.acceptedAt ? "accepted" : row.expiresAt !== null && row.expiresAt <= now ? "expired" : "available",
   };
 }
 
 function toDeviceTokenSummary(row: DeviceTokenRow, now = new Date()): AuthDeviceTokenSummary {
   return {
     createdAt: row.createdAt,
+    canCopyInstallCommand: Boolean(row.tokenCiphertext) && resolveDeviceTokenStatus(row, now) !== "revoked" && resolveDeviceTokenStatus(row, now) !== "expired",
     deviceId: row.deviceId,
     expiresAt: row.expiresAt,
     id: row.id,

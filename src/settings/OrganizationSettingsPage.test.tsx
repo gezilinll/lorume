@@ -29,9 +29,10 @@ describe("OrganizationSettingsPage", () => {
       const url = input.toString();
       if (url === "/api/organizations/org_1/device-tokens") return jsonResponse({ deviceTokens: [] });
       if (url === "/api/organizations/org_1/invitations" && init?.method !== "POST") return jsonResponse({ invitations: [] });
+      if (url === "/api/organizations/org_1/members") return jsonResponse({ members: [memberSummary()] });
       expect(url).toBe("/api/organizations/org_1/invitations");
       expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual({ email: "teammate@lorume.com", role: "member" });
+      expect(JSON.parse(String(init?.body))).toEqual({ email: "teammate@lorume.com", expiresIn: "7d", role: "member" });
       return jsonResponse({ invitation: { email: "teammate@lorume.com", role: "member" } }, 201);
     }) as unknown as typeof fetch;
 
@@ -39,6 +40,8 @@ describe("OrganizationSettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "组织设置" })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "组织成员" })).toBeInTheDocument();
+    expect(screen.getByText("成员数")).toBeInTheDocument();
+    expect(screen.getAllByText("待加入邀请").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "发送邀请邮件" })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("邮箱"), "teammate@lorume.com");
@@ -58,12 +61,13 @@ describe("OrganizationSettingsPage", () => {
         return jsonResponse({ deviceTokens: createdToken ? [createdToken] : [] });
       }
       if (url === "/api/organizations/org_1/invitations") return jsonResponse({ invitations: [] });
+      if (url === "/api/organizations/org_1/members") return jsonResponse({ members: [memberSummary()] });
       expect(url).toBe("/api/organizations/org_1/device-tokens");
       expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toEqual({ deviceId: "fixture-mac", name: "fixture-mac" });
+      expect(JSON.parse(String(init?.body))).toEqual({ name: "fixture-mac" });
       createdToken = {
-        deviceId: "fixture-mac",
-        id: "devtok_1",
+        deviceId: null,
+        id: "devtok_4a2e65d7-1111-4444-8888-21f5d4aaf301",
         name: "fixture-mac",
         organizationId: "org_1",
         status: "pending",
@@ -74,6 +78,7 @@ describe("OrganizationSettingsPage", () => {
           ...(createdToken as Record<string, unknown>),
           token: "agt_device_secret_123",
         },
+        installCommand: "curl -fsSL 'http://localhost/api/device-collector/install.sh' | bash -s -- --server-url 'http://localhost' --device-id 'fixture-mac' --device-token 'agt_device_secret_123'",
       }, 201);
     }) as unknown as typeof fetch;
 
@@ -82,26 +87,30 @@ describe("OrganizationSettingsPage", () => {
     await user.type(screen.getByLabelText("Token 名称"), "fixture-mac");
     await user.click(screen.getByRole("button", { name: "生成安装命令" }));
 
-    const tokenInput = await screen.findByLabelText("Device token");
-    expect((tokenInput as HTMLInputElement).value).toBe("agt_device_secret_123");
-    const installCommand = screen.getByLabelText("安装命令");
-    expect(installCommand).toHaveTextContent(`${window.location.origin}/api/device-collector/install.sh`);
+    const installCommand = await screen.findByLabelText("本次安装命令");
+    expect(installCommand).toHaveTextContent("http://localhost/api/device-collector/install.sh");
     expect(installCommand).toHaveTextContent("--device-token 'agt_device_secret_123'");
     expect(installCommand).toHaveTextContent("--device-id 'fixture-mac'");
     expect(installCommand).not.toHaveTextContent("--device-name");
-    expect(screen.getByText(/install-device-collector/)).toBeInTheDocument();
     expect(await screen.findByRole("table", { name: "设备 Token 列表" })).toBeInTheDocument();
     expect(screen.getByText("待绑定")).toBeInTheDocument();
+    expect(screen.getByText("devtok_4a2e65d7-1111-4444-8888-21f5d4aaf301")).toBeInTheDocument();
   });
 
   it("lists and revokes device tokens for organization admins", async () => {
     const user = userEvent.setup();
     let status = "occupied";
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     globalThis.fetch = vi.fn(async (input, init) => {
       const url = input.toString();
       if (url === "/api/organizations/org_1/device-tokens") {
         return jsonResponse({
           deviceTokens: [{
+            canCopyInstallCommand: true,
             deviceId: "fixture-mac",
             id: "devtok_1",
             name: "Fixture collector",
@@ -112,6 +121,10 @@ describe("OrganizationSettingsPage", () => {
         });
       }
       if (url === "/api/organizations/org_1/invitations") return jsonResponse({ invitations: [] });
+      if (url === "/api/organizations/org_1/members") return jsonResponse({ members: [memberSummary()] });
+      if (url === "/api/organizations/org_1/device-tokens/devtok_1/install-command") {
+        return jsonResponse({ installCommand: "curl -fsSL 'http://localhost/api/device-collector/install.sh' | bash -s -- --device-token 'agt_device_secret_123'" });
+      }
       expect(url).toBe("/api/organizations/org_1/device-tokens/devtok_1/revoke");
       expect(init?.method).toBe("POST");
       status = "revoked";
@@ -130,19 +143,25 @@ describe("OrganizationSettingsPage", () => {
     render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
 
     expect(await screen.findByText("Fixture collector")).toBeInTheDocument();
-    expect(screen.getByText("已占用")).toBeInTheDocument();
+    expect(screen.getByText("devtok_1")).toBeInTheDocument();
+    expect(screen.getByText("fixture-mac")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "安装命令" })).toBeInTheDocument();
     expect(screen.queryByText("最近审计")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "复制安装命令" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("agt_device_secret_123"));
     await user.click(screen.getByRole("button", { name: "撤销" }));
 
-    expect(await screen.findByText("已撤销")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "撤销" })).toBeDisabled();
   });
 
   it("lists pending invitations and can resend invitation email", async () => {
     const user = userEvent.setup();
     let resent = false;
+    let revoked = false;
     globalThis.fetch = vi.fn(async (input, init) => {
       const url = input.toString();
       if (url === "/api/organizations/org_1/device-tokens") return jsonResponse({ deviceTokens: [] });
+      if (url === "/api/organizations/org_1/members") return jsonResponse({ members: [memberSummary()] });
       if (url === "/api/organizations/org_1/invitations") {
         return jsonResponse({
           invitations: [{
@@ -154,6 +173,21 @@ describe("OrganizationSettingsPage", () => {
             role: "admin",
             status: "available",
           }],
+        });
+      }
+      if (url === "/api/organizations/org_1/invitations/inv_1/revoke") {
+        expect(init?.method).toBe("POST");
+        revoked = true;
+        return jsonResponse({
+          invitation: {
+            createdAt: "2026-05-31T08:00:00.000Z",
+            email: "teammate@lorume.com",
+            expiresAt: "2026-06-07T08:00:00.000Z",
+            id: "inv_1",
+            organizationId: "org_1",
+            role: "admin",
+            status: "revoked",
+          },
         });
       }
       expect(url).toBe("/api/organizations/org_1/invitations/inv_1/resend");
@@ -182,6 +216,9 @@ describe("OrganizationSettingsPage", () => {
 
     expect(resent).toBe(true);
     expect(await screen.findByText("邀请已重新发送至 t***@lorume.com")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "撤销邀请" }));
+    expect(revoked).toBe(true);
   });
 
   it("hides invitation creation from regular members", () => {
@@ -211,6 +248,17 @@ function sessionWithRole(role: AuthMemberRole): AuthSessionContext {
       id: "user_1",
       updatedAt: new Date("2026-05-17T08:00:00.000Z"),
     },
+  };
+}
+
+function memberSummary() {
+  return {
+    email: "owner@lorume.com",
+    id: "membership_1",
+    joinedAt: "2026-05-17T08:00:00.000Z",
+    role: "admin",
+    status: "active",
+    userId: "user_1",
   };
 }
 

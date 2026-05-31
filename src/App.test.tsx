@@ -924,17 +924,22 @@ describe("Console shell", () => {
 
   it("filters Runs cards by date range without quick-range state", async () => {
     const user = userEvent.setup();
+    const selectedDate = new Date();
+    selectedDate.setHours(12, 0, 0, 0);
+    const olderDate = new Date(selectedDate);
+    olderDate.setDate(selectedDate.getDate() - 1);
+    const selectedDateLabel = `${selectedDate.getFullYear()}/${String(selectedDate.getMonth() + 1).padStart(2, "0")}/${String(selectedDate.getDate()).padStart(2, "0")}`;
     const tasks = [
       task({
         id: "fixture-old-task",
         status: "done",
-        updatedAt: "2026-05-20T10:00:00.000Z",
+        updatedAt: olderDate.toISOString(),
         userMessage: "Old task",
       }),
       task({
         id: "fixture-new-task",
         status: "done",
-        updatedAt: "2026-05-21T12:00:00.000Z",
+        updatedAt: selectedDate.toISOString(),
         userMessage: "New task",
       }),
     ];
@@ -956,15 +961,15 @@ describe("Console shell", () => {
     expect(screen.queryByRole("button", { name: "清除时间" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "日期范围" }));
-    const targetDay = document.querySelector<HTMLElement>('[role="gridcell"][data-day="2026-05-21"] button');
-    if (!targetDay) throw new Error("expected May 21 date range cell");
+    const targetDay = document.querySelector<HTMLElement>(`button[data-day="${selectedDate.toLocaleDateString()}"]`);
+    if (!targetDay) throw new Error("expected selected date range cell");
     await user.click(targetDay);
 
     await waitFor(() => {
       expect(within(lanes).queryByText("Old task")).not.toBeInTheDocument();
     });
     expect(within(lanes).getAllByText("New task").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent("2026/05/21");
+    expect(screen.getByRole("button", { name: "日期范围" })).toHaveTextContent(selectedDateLabel);
   });
 
   it("opens Runtime Fleet and renders runtime fixture data", async () => {

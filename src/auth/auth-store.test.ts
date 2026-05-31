@@ -129,12 +129,22 @@ describeDb("Postgres auth store", () => {
         const createdDeviceToken = await store.createDeviceToken({
           name: "gezilinll-claw collector",
           organizationId: organization.id,
+          tokenCiphertext: "encrypted-device-secret",
           tokenHash: deviceTokenHash,
           tokenPrefix: "agt_dev",
         });
         expect(createdDeviceToken).toMatchObject({
           deviceId: null,
+          id: expect.stringMatching(/^devtok_[0-9a-f-]{36}$/),
           status: "pending",
+        });
+        await expect(store.readDeviceTokenInstallSecret({
+          id: createdDeviceToken.id,
+          now,
+          organizationId: organization.id,
+        })).resolves.toMatchObject({
+          deviceToken: expect.objectContaining({ id: createdDeviceToken.id }),
+          tokenCiphertext: "encrypted-device-secret",
         });
         await expect(store.verifyDeviceToken(deviceTokenHash, now, "gezilinll-claw")).resolves.toMatchObject({
           deviceId: "gezilinll-claw",

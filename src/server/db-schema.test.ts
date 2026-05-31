@@ -105,6 +105,7 @@ describeDb("database schema baseline", () => {
           "device_id",
           "name",
           "token_hash",
+          "token_ciphertext",
           "token_prefix",
           "status",
           "expires_at",

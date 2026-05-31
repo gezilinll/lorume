@@ -57,13 +57,16 @@ async function sendSmtpLoginCode(input: { code: string; email: string }): Promis
 
 async function sendSmtpOrganizationInvitation(input: {
   email: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   inviteUrl: string;
   organizationName: string;
   role: string;
 }): Promise<void> {
   const { from, transporter } = createSmtpTransport();
   const roleLabel = input.role === "admin" ? "管理员" : "成员";
+  const expiryText = input.expiresAt
+    ? `邀请有效期至 ${input.expiresAt.toISOString()}。`
+    : "邀请不会自动过期。";
 
   await transporter.sendMail({
     from,
@@ -72,12 +75,12 @@ async function sendSmtpOrganizationInvitation(input: {
     text: [
       `${input.organizationName} 邀请你以${roleLabel}身份加入 Lorume。`,
       `打开邀请链接完成登录和加入：${input.inviteUrl}`,
-      `邀请有效期至 ${input.expiresAt.toISOString()}。若不是你本人预期的邀请，可以忽略这封邮件。`,
+      `${expiryText}若不是你本人预期的邀请，可以忽略这封邮件。`,
     ].join("\n"),
     html: [
       `<p>${escapeHtml(input.organizationName)} 邀请你以 <strong>${escapeHtml(roleLabel)}</strong> 身份加入 Lorume。</p>`,
       `<p><a href="${escapeHtml(input.inviteUrl)}">打开邀请链接</a> 完成登录和加入。</p>`,
-      `<p>邀请有效期至 ${escapeHtml(input.expiresAt.toISOString())}。若不是你本人预期的邀请，可以忽略这封邮件。</p>`,
+      `<p>${escapeHtml(expiryText)}若不是你本人预期的邀请，可以忽略这封邮件。</p>`,
     ].join(""),
   });
 }

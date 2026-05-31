@@ -9,6 +9,7 @@ import type {
   AuthLoginCode,
   AuthInvitableMemberRole,
   AuthMemberRole,
+  AuthOrganizationMemberSummary,
   AuthOrganizationMembership,
   AuthSessionContext,
   AuthStore,
@@ -25,7 +26,7 @@ afterEach(async () => {
 describe("auth HTTP API", () => {
   it("logs in with an email code, creates an organization, emails an invitation, accepts the invite, and logs out", async () => {
     const sentCodes: Array<{ code: string; email: string }> = [];
-    const sentInvitations: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }> = [];
+    const sentInvitations: Array<{ email: string; expiresAt: Date | null; inviteUrl: string; organizationName: string; role: string }> = [];
     const store = new MemoryAuthStore();
     const { baseUrl } = await startAuthApi(store, { sentCodes, sentInvitations });
 
@@ -152,7 +153,7 @@ describe("auth HTTP API", () => {
   });
 
   it("lists organization invitations and resends pending invitations with a new token", async () => {
-    const sentInvitations: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }> = [];
+    const sentInvitations: Array<{ email: string; expiresAt: Date | null; inviteUrl: string; organizationName: string; role: string }> = [];
     const store = new MemoryAuthStore();
     const { baseUrl } = await startAuthApi(store, { sentInvitations });
 
@@ -164,6 +165,7 @@ describe("auth HTTP API", () => {
 
     const inviteResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
       email: "teammate@gaoding.com",
+      expiresIn: "30d",
       role: "member",
     }, ownerCookie);
     expect(inviteResponse.status).toBe(201);
@@ -176,6 +178,7 @@ describe("auth HTTP API", () => {
       invitations: [
         expect.objectContaining({
           email: "teammate@gaoding.com",
+          expiresAt: "2026-06-11T10:00:00.000Z",
           id: "invitation-1",
           role: "member",
           status: "available",
@@ -194,8 +197,14 @@ describe("auth HTTP API", () => {
       },
     });
     expect(sentInvitations).toEqual([
-      expect.objectContaining({ inviteUrl: `${baseUrl}/invite/invite-token` }),
-      expect.objectContaining({ inviteUrl: `${baseUrl}/invite/invite-token-2` }),
+      expect.objectContaining({
+        expiresAt: new Date("2026-06-11T10:00:00.000Z"),
+        inviteUrl: `${baseUrl}/invite/invite-token`,
+      }),
+      expect.objectContaining({
+        expiresAt: new Date("2026-06-11T10:00:00.000Z"),
+        inviteUrl: `${baseUrl}/invite/invite-token-2`,
+      }),
     ]);
 
     const relistResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
@@ -206,6 +215,30 @@ describe("auth HTTP API", () => {
         expect.objectContaining({ id: "invitation-2", status: "available" }),
         expect.objectContaining({ id: "invitation-1", status: "revoked" }),
       ],
+    });
+
+    const neverExpiresResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      email: "never-expire@gaoding.com",
+      expiresIn: "never",
+      role: "admin",
+    }, ownerCookie);
+    expect(neverExpiresResponse.status).toBe(201);
+    await expect(neverExpiresResponse.json()).resolves.toMatchObject({
+      invitation: {
+        email: "never-expire@gaoding.com",
+        expiresAt: null,
+        role: "admin",
+      },
+    });
+
+    const revokeResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations/invitation-3/revoke`, {}, ownerCookie);
+    expect(revokeResponse.status).toBe(200);
+    await expect(revokeResponse.json()).resolves.toMatchObject({
+      invitation: {
+        email: "never-expire@gaoding.com",
+        id: "invitation-3",
+        status: "revoked",
+      },
     });
   });
 
@@ -220,21 +253,23 @@ describe("auth HTTP API", () => {
     const orgBody = await orgResponse.json() as { organization: { id: string } };
 
     const tokenResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens`, {
-      deviceId: "fixture-device",
       name: "Fixture collector",
     }, ownerCookie);
     const tokenBody = await tokenResponse.json() as {
-      deviceToken: { deviceId: string; name?: string; token?: string; tokenHash?: string; tokenPrefix: string };
+      deviceToken: { deviceId?: string | null; name?: string; token?: string; tokenHash?: string; tokenPrefix: string };
+      installCommand?: string;
     };
 
     expect(tokenResponse.status).toBe(201);
     expect(tokenBody.deviceToken).toMatchObject({
-      deviceId: "fixture-device",
+      deviceId: null,
       status: "pending",
       tokenPrefix: expect.stringMatching(/^agt_device_/),
     });
     expect(tokenBody.deviceToken.token).toEqual(expect.stringMatching(/^agt_device_/));
     expect(tokenBody.deviceToken.tokenHash).toBeUndefined();
+    expect(tokenBody.installCommand).toContain("--device-id 'Fixture collector'");
+    expect(tokenBody.installCommand).toContain(`--device-token '${tokenBody.deviceToken.token}'`);
     expect(store.createdDeviceTokens).toEqual([
       expect.not.objectContaining({ token: expect.any(String) }),
     ]);
@@ -264,7 +299,7 @@ describe("auth HTTP API", () => {
     expect(listBody).toMatchObject({
       deviceTokens: [
         expect.objectContaining({
-          deviceId: "fixture-device",
+          deviceId: null,
           name: "Fixture collector",
           status: "pending",
           tokenPrefix: expect.stringMatching(/^agt_device_/),
@@ -272,6 +307,14 @@ describe("auth HTTP API", () => {
       ],
     });
     expect(listBody.deviceTokens[0]).not.toHaveProperty("token");
+
+    const installCommandResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens/devtok-1/install-command`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(installCommandResponse.status).toBe(200);
+    await expect(installCommandResponse.json()).resolves.toMatchObject({
+      installCommand: expect.stringContaining(`--device-token '${tokenBody.deviceToken.token}'`),
+    });
 
     const revokeResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/device-tokens/devtok-1/revoke`, {
       reason: "rotated",
@@ -325,7 +368,7 @@ async function startAuthApi(
   store: AuthStore,
   captures: {
     sentCodes?: Array<{ code: string; email: string }>;
-    sentInvitations?: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }>;
+    sentInvitations?: Array<{ email: string; expiresAt: Date | null; inviteUrl: string; organizationName: string; role: string }>;
   } = {},
 ) {
   const sentCodes = captures.sentCodes ?? [];
@@ -342,8 +385,8 @@ async function startAuthApi(
       sendLoginCode: async ({ code, email }) => {
         sentCodes.push({ code, email });
       },
-      sendOrganizationInvitation: async ({ email, inviteUrl, organizationName, role }) => {
-        sentInvitations.push({ email, inviteUrl, organizationName, role });
+      sendOrganizationInvitation: async ({ email, expiresAt, inviteUrl, organizationName, role }) => {
+        sentInvitations.push({ email, expiresAt, inviteUrl, organizationName, role });
       },
     },
     now: () => new Date("2026-05-12T10:00:00.000Z"),
@@ -385,7 +428,7 @@ class MemoryAuthStore implements AuthStore {
     acceptedAt?: Date;
     createdAt: Date;
     email: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     id: string;
     invitedByUserId: string;
     organizationId: string;
@@ -397,6 +440,7 @@ class MemoryAuthStore implements AuthStore {
   private readonly organizations: Array<{ createdByUserId: string; id: string; name: string; slug: string }> = [];
   private readonly sessions: Array<{ expiresAt: Date; id: string; revokedAt?: Date; sessionHash: string; userId: string }> = [];
   private readonly users: AuthUser[] = [];
+  private readonly deviceTokenCiphertexts = new Map<string, string>();
   readonly createdDeviceTokens: AuthDeviceTokenSummary[] = [];
 
   async createLoginCode(input: { codeHash: string; email: string; expiresAt: Date }): Promise<AuthLoginCode> {
@@ -480,7 +524,7 @@ class MemoryAuthStore implements AuthStore {
 
   async createInvitation(input: {
     email: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     invitedByUserId: string;
     organizationId: string;
     role: AuthInvitableMemberRole;
@@ -518,7 +562,7 @@ class MemoryAuthStore implements AuthStore {
       organizationId: invitation.organizationId,
       organizationName: organization?.name ?? "Unknown",
       role: invitation.role,
-      status: invitation.revokedAt ? "revoked" as const : invitation.acceptedAt ? "accepted" as const : invitation.expiresAt <= input.now ? "expired" as const : "available" as const,
+      status: invitation.revokedAt ? "revoked" as const : invitation.acceptedAt ? "accepted" as const : invitation.expiresAt !== null && invitation.expiresAt <= input.now ? "expired" as const : "available" as const,
     };
   }
 
@@ -528,7 +572,7 @@ class MemoryAuthStore implements AuthStore {
       && item.email === normalizeEmail(input.email)
       && !item.acceptedAt
       && !item.revokedAt
-      && item.expiresAt > input.now
+      && (item.expiresAt === null || item.expiresAt > input.now)
     );
     if (!invitation) return null;
     invitation.acceptedAt = input.now;
@@ -552,11 +596,29 @@ class MemoryAuthStore implements AuthStore {
     if (invitation) invitation.revokedAt = input.now;
   }
 
+  async listOrganizationMembers(input: { organizationId: string }): Promise<AuthOrganizationMemberSummary[]> {
+    return this.memberships
+      .filter((membership) => membership.organizationId === input.organizationId)
+      .map((membership) => {
+        const userId = this.membershipUserIds.get(membership.id) ?? "";
+        const user = this.users.find((item) => item.id === userId);
+        return {
+          email: user?.email ?? "unknown@lorume.local",
+          id: membership.id,
+          joinedAt: new Date("2026-05-12T10:00:00.000Z"),
+          role: membership.role,
+          status: "active" as const,
+          userId,
+        };
+      });
+  }
+
   async createDeviceToken(input: {
     expiresAt?: Date | null;
     deviceId?: string | null;
     name: string;
     organizationId: string;
+    tokenCiphertext: string;
     tokenHash: string;
     tokenPrefix: string;
   }): Promise<AuthDeviceTokenSummary> {
@@ -568,9 +630,22 @@ class MemoryAuthStore implements AuthStore {
       status: "pending" as const,
       organizationId: input.organizationId,
       tokenPrefix: input.tokenPrefix,
+      canCopyInstallCommand: true,
     };
     this.createdDeviceTokens.push(token);
+    this.deviceTokenCiphertexts.set(token.id, input.tokenCiphertext);
     return token;
+  }
+
+  async readDeviceTokenInstallSecret(input: { id: string; now: Date; organizationId: string }) {
+    const token = this.createdDeviceTokens.find((item) => item.id === input.id && item.organizationId === input.organizationId);
+    if (!token) return null;
+    return {
+      deviceToken: token.status === "expired" || token.status === "revoked"
+        ? { ...token, canCopyInstallCommand: false }
+        : token,
+      tokenCiphertext: this.deviceTokenCiphertexts.get(token.id) ?? null,
+    };
   }
 
   async verifyDeviceToken(): Promise<AuthDeviceTokenVerification | null> {
@@ -624,7 +699,7 @@ function toInvitationSummary(invitation: {
   acceptedAt?: Date;
   createdAt: Date;
   email: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   id: string;
   invitedByUserId: string;
   organizationId: string;
@@ -642,6 +717,6 @@ function toInvitationSummary(invitation: {
     organizationId: invitation.organizationId,
     revokedAt: invitation.revokedAt ?? null,
     role: invitation.role,
-    status: invitation.revokedAt ? "revoked" : invitation.acceptedAt ? "accepted" : invitation.expiresAt <= now ? "expired" : "available",
+    status: invitation.revokedAt ? "revoked" : invitation.acceptedAt ? "accepted" : invitation.expiresAt !== null && invitation.expiresAt <= now ? "expired" : "available",
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createNumericCode, createSecretToken, hashSecret, verifySecret } from "./auth-crypto";
+import { createNumericCode, createSecretToken, decryptSecret, encryptSecret, hashSecret, verifySecret } from "./auth-crypto";
 
 describe("auth crypto helpers", () => {
   it("hashes login codes and tokens without exposing the original secret", () => {
@@ -14,5 +14,14 @@ describe("auth crypto helpers", () => {
   it("creates short numeric email codes and high-entropy bearer tokens", () => {
     expect(createNumericCode({ length: 6 })).toMatch(/^\d{6}$/);
     expect(createSecretToken("agt")).toMatch(/^agt_[A-Za-z0-9_-]{32,}$/);
+  });
+
+  it("encrypts recoverable secrets without storing plaintext", () => {
+    const encrypted = encryptSecret("agt_device_secret", "device-token", "test-pepper");
+
+    expect(encrypted).toMatch(/^v1\./);
+    expect(encrypted).not.toContain("agt_device_secret");
+    expect(decryptSecret(encrypted, "device-token", "test-pepper")).toBe("agt_device_secret");
+    expect(() => decryptSecret(encrypted, "session-token", "test-pepper")).toThrow("invalid_encrypted_secret");
   });
 });

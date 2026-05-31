@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createNumericCode, createSecretToken, hashSecret } from "./auth-crypto";
+import { createNumericCode, createSecretToken, decryptSecret, encryptSecret, hashSecret } from "./auth-crypto";
 import type {
   AuthAuditEventType,
   AuthDeviceTokenVerification,
@@ -18,7 +18,7 @@ export interface AuthEmailProvider {
   sendLoginCode: (input: { code: string; email: string }) => Promise<void>;
   sendOrganizationInvitation: (input: {
     email: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     inviteUrl: string;
     organizationName: string;
     role: AuthInvitableMemberRole;
@@ -163,6 +163,22 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       return;
     }
 
+    const organizationMembersMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/members$/);
+    if (request.method === "GET" && organizationMembersMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(organizationMembersMatch[1] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      sendJson(response, 200, {
+        members: await options.store.listOrganizationMembers({ organizationId }),
+      });
+      return;
+    }
+
     if (request.method === "POST" && requestUrl.pathname === "/api/organizations") {
       const session = await requireSession(request, response, options.store, now(), pepper);
       if (!session) return;
@@ -214,6 +230,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       const email = normalizeEmail(readString(body, "email"));
       const rawRole = readString(body, "role").trim();
       const role = normalizeInvitableRole(rawRole);
+      const expiresAt = resolveInvitationExpiresAt(readString(body, "expiresIn"), now());
       if (!email || !rawRole) {
         sendAuthError(response, 400, "invitation_email_and_role_required");
         return;
@@ -223,7 +240,6 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         return;
       }
       const token = createInvitationToken();
-      const expiresAt = new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000);
       const invitation = await options.store.createInvitation({
         email,
         expiresAt,
@@ -251,7 +267,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         eventType: "invitation.sent",
         metadata: {
           email: maskEmail(email),
-          expiresAt: expiresAt.toISOString(),
+          expiresAt: expiresAt ? expiresAt.toISOString() : null,
           role,
         },
         organizationId,
@@ -294,7 +310,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         return;
       }
       const token = createInvitationToken();
-      const expiresAt = new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000);
+      const expiresAt = resolveResentInvitationExpiresAt(previousInvitation, now());
       const invitation = await options.store.createInvitation({
         email: previousInvitation.email,
         expiresAt,
@@ -323,7 +339,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         eventType: "invitation.sent",
         metadata: {
           email: maskEmail(previousInvitation.email),
-          expiresAt: expiresAt.toISOString(),
+          expiresAt: expiresAt ? expiresAt.toISOString() : null,
           resendOf: previousInvitation.id,
           role,
         },
@@ -334,6 +350,49 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       sendJson(response, 200, {
         invitation: await options.store.readOrganizationInvitation({
           id: invitation.id,
+          now: now(),
+          organizationId,
+        }),
+      });
+      return;
+    }
+
+    const invitationRevokeMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/invitations\/([^/]+)\/revoke$/);
+    if (request.method === "POST" && invitationRevokeMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(invitationRevokeMatch[1] ?? "");
+      const invitationId = decodeURIComponent(invitationRevokeMatch[2] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      const invitation = await options.store.readOrganizationInvitation({
+        id: invitationId,
+        now: now(),
+        organizationId,
+      });
+      if (!invitation) {
+        sendAuthError(response, 404, "invitation_not_found");
+        return;
+      }
+      if (invitation.status === "accepted") {
+        sendAuthError(response, 409, "invitation_not_revocable");
+        return;
+      }
+      await options.store.revokeInvitation({ id: invitationId, now: now() });
+      await options.store.createAuditEvent({
+        actorUserId: session.user.id,
+        eventType: "invitation.rejected",
+        metadata: { email: maskEmail(invitation.email), reason: "revoked_by_admin" },
+        organizationId,
+        targetId: invitationId,
+        targetType: "invitation",
+      });
+      sendJson(response, 200, {
+        invitation: await options.store.readOrganizationInvitation({
+          id: invitationId,
           now: now(),
           organizationId,
         }),
@@ -405,6 +464,7 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         deviceId,
         name,
         organizationId,
+        tokenCiphertext: encryptSecret(token, "device-token", pepper),
         tokenHash: hashSecret(token, "device-token", pepper),
         tokenPrefix,
       });
@@ -419,7 +479,14 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
         targetId: deviceToken.id,
         targetType: "device_token",
       });
-      sendJson(response, 201, { deviceToken: { ...deviceToken, token } });
+      sendJson(response, 201, {
+        deviceToken: { ...deviceToken, token },
+        installCommand: buildInstallCommand({
+          deviceId: deviceToken.deviceId || name,
+          origin: originFromRequest(request),
+          token,
+        }),
+      });
       return;
     }
 
@@ -435,6 +502,51 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       }
       sendJson(response, 200, {
         deviceTokens: await options.store.listDeviceTokens({ now: now(), organizationId }),
+      });
+      return;
+    }
+
+    const deviceTokenInstallCommandMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/device-tokens\/([^/]+)\/install-command$/);
+    if (request.method === "GET" && deviceTokenInstallCommandMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(deviceTokenInstallCommandMatch[1] ?? "");
+      const tokenId = decodeURIComponent(deviceTokenInstallCommandMatch[2] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      const payload = await options.store.readDeviceTokenInstallSecret({
+        id: tokenId,
+        now: now(),
+        organizationId,
+      });
+      if (!payload) {
+        sendAuthError(response, 404, "device_token_not_found");
+        return;
+      }
+      if (payload.deviceToken.status === "revoked" || payload.deviceToken.status === "expired") {
+        sendAuthError(response, 409, "device_token_not_installable");
+        return;
+      }
+      if (!payload.tokenCiphertext) {
+        sendAuthError(response, 409, "device_token_secret_unavailable");
+        return;
+      }
+      let token: string;
+      try {
+        token = decryptSecret(payload.tokenCiphertext, "device-token", pepper);
+      } catch {
+        sendAuthError(response, 409, "device_token_secret_unavailable");
+        return;
+      }
+      sendJson(response, 200, {
+        installCommand: buildInstallCommand({
+          deviceId: payload.deviceToken.deviceId || payload.deviceToken.name,
+          origin: originFromRequest(request),
+          token,
+        }),
       });
       return;
     }
@@ -585,6 +697,44 @@ function canManageOrganization(role: AuthMemberRole): boolean {
 function normalizeInvitableRole(value: string): AuthInvitableMemberRole | null {
   if (value === "admin" || value === "member") return value;
   return null;
+}
+
+function resolveInvitationExpiresAt(value: string, now: Date): Date | null {
+  const normalized = value.trim();
+  if (normalized === "never") return null;
+  const days = normalized === "1d" ? 1 : normalized === "30d" ? 30 : 7;
+  return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function resolveResentInvitationExpiresAt(
+  previousInvitation: { createdAt: Date | string; expiresAt: Date | string | null },
+  now: Date,
+): Date | null {
+  if (previousInvitation.expiresAt === null) return null;
+  const createdAt = new Date(previousInvitation.createdAt).getTime();
+  const expiresAt = new Date(previousInvitation.expiresAt).getTime();
+  const defaultDuration = 7 * 24 * 60 * 60 * 1000;
+  const duration = Number.isFinite(createdAt) && Number.isFinite(expiresAt) && expiresAt > createdAt
+    ? expiresAt - createdAt
+    : defaultDuration;
+  return new Date(now.getTime() + duration);
+}
+
+function buildInstallCommand(input: { deviceId: string; origin: string; token: string }): string {
+  const installerUrl = `${input.origin}/api/device-collector/install.sh`;
+  return [
+    `curl -fsSL ${shellQuote(installerUrl)} | bash -s --`,
+    "--server-url",
+    shellQuote(input.origin),
+    "--device-id",
+    shellQuote(input.deviceId),
+    "--device-token",
+    shellQuote(input.token),
+  ].join(" ");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function normalizeAuditEventType(value: string): AuthAuditEventType | undefined {

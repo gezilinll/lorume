@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   device_id text,
   name text NOT NULL,
   token_hash text NOT NULL UNIQUE,
+  token_ciphertext text,
   token_prefix text NOT NULL,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'occupied', 'revoked', 'expired')),
   expires_at timestamptz,
@@ -92,6 +93,12 @@ ALTER TABLE device_tokens
 
 ALTER TABLE device_tokens
   ADD COLUMN IF NOT EXISTS occupied_at timestamptz;
+
+ALTER TABLE device_tokens
+  ADD COLUMN IF NOT EXISTS token_ciphertext text;
+
+ALTER TABLE organization_invitations
+  ALTER COLUMN expires_at DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_device_tokens_organization_id ON device_tokens(organization_id);
 CREATE INDEX IF NOT EXISTS idx_device_tokens_device_id ON device_tokens(device_id);

@@ -28,7 +28,7 @@ describe("OrganizationSettingsPage", () => {
     globalThis.fetch = vi.fn(async (input, init) => {
       const url = input.toString();
       if (url === "/api/organizations/org_1/device-tokens") return jsonResponse({ deviceTokens: [] });
-      if (url === "/api/organizations/org_1/audit-events?limit=20") return jsonResponse({ auditEvents: [] });
+      if (url === "/api/organizations/org_1/invitations" && init?.method !== "POST") return jsonResponse({ invitations: [] });
       expect(url).toBe("/api/organizations/org_1/invitations");
       expect(init?.method).toBe("POST");
       expect(JSON.parse(String(init?.body))).toEqual({ email: "teammate@lorume.com", role: "member" });
@@ -57,7 +57,7 @@ describe("OrganizationSettingsPage", () => {
       if (url === "/api/organizations/org_1/device-tokens" && init?.method !== "POST") {
         return jsonResponse({ deviceTokens: createdToken ? [createdToken] : [] });
       }
-      if (url === "/api/organizations/org_1/audit-events?limit=20") return jsonResponse({ auditEvents: [] });
+      if (url === "/api/organizations/org_1/invitations") return jsonResponse({ invitations: [] });
       expect(url).toBe("/api/organizations/org_1/device-tokens");
       expect(init?.method).toBe("POST");
       expect(JSON.parse(String(init?.body))).toEqual({ deviceId: "fixture-mac", name: "fixture-mac" });
@@ -79,7 +79,7 @@ describe("OrganizationSettingsPage", () => {
 
     render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
 
-    await user.type(screen.getByLabelText("Device ID"), "fixture-mac");
+    await user.type(screen.getByLabelText("Token 名称"), "fixture-mac");
     await user.click(screen.getByRole("button", { name: "生成安装命令" }));
 
     const tokenInput = await screen.findByLabelText("Device token");
@@ -111,9 +111,7 @@ describe("OrganizationSettingsPage", () => {
           }],
         });
       }
-      if (url === "/api/organizations/org_1/audit-events?limit=20") {
-        return jsonResponse({ auditEvents: [{ createdAt: "2026-05-31T08:00:00.000Z", eventType: "device_token.created", id: "aud_1", metadata: {} }] });
-      }
+      if (url === "/api/organizations/org_1/invitations") return jsonResponse({ invitations: [] });
       expect(url).toBe("/api/organizations/org_1/device-tokens/devtok_1/revoke");
       expect(init?.method).toBe("POST");
       status = "revoked";
@@ -133,10 +131,57 @@ describe("OrganizationSettingsPage", () => {
 
     expect(await screen.findByText("Fixture collector")).toBeInTheDocument();
     expect(screen.getByText("已占用")).toBeInTheDocument();
-    expect(screen.getByText("创建设备 Token")).toBeInTheDocument();
+    expect(screen.queryByText("最近审计")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "撤销" }));
 
     expect(await screen.findByText("已撤销")).toBeInTheDocument();
+  });
+
+  it("lists pending invitations and can resend invitation email", async () => {
+    const user = userEvent.setup();
+    let resent = false;
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const url = input.toString();
+      if (url === "/api/organizations/org_1/device-tokens") return jsonResponse({ deviceTokens: [] });
+      if (url === "/api/organizations/org_1/invitations") {
+        return jsonResponse({
+          invitations: [{
+            createdAt: "2026-05-31T08:00:00.000Z",
+            email: "teammate@lorume.com",
+            expiresAt: "2026-06-07T08:00:00.000Z",
+            id: "inv_1",
+            organizationId: "org_1",
+            role: "admin",
+            status: "available",
+          }],
+        });
+      }
+      expect(url).toBe("/api/organizations/org_1/invitations/inv_1/resend");
+      expect(init?.method).toBe("POST");
+      resent = true;
+      return jsonResponse({
+        invitation: {
+          createdAt: "2026-05-31T08:05:00.000Z",
+          email: "teammate@lorume.com",
+          expiresAt: "2026-06-07T08:05:00.000Z",
+          id: "inv_2",
+          organizationId: "org_1",
+          role: "admin",
+          status: "available",
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    render(<OrganizationSettingsPage session={sessionWithRole("admin")} />);
+
+    expect(await screen.findByRole("table", { name: "待加入邀请" })).toBeInTheDocument();
+    expect(screen.getByText("teammate@lorume.com")).toBeInTheDocument();
+    expect(screen.getByText("待接受")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "重发" }));
+
+    expect(resent).toBe(true);
+    expect(await screen.findByText("邀请已重新发送至 t***@lorume.com")).toBeInTheDocument();
   });
 
   it("hides invitation creation from regular members", () => {

@@ -285,7 +285,7 @@ function WorkspaceAccountMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton
-          aria-label="切换工作区和账号"
+          aria-label="切换组织和账号"
           className="h-11 gap-2 rounded-[10px] bg-sidebar-accent px-2 text-sidebar-foreground data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground hover:bg-sidebar-accent"
           size="lg"
           type="button"
@@ -300,7 +300,7 @@ function WorkspaceAccountMenu({
         </SidebarMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        aria-label="切换工作区和账号"
+        aria-label="切换组织和账号"
         align="start"
         side="bottom"
         sideOffset={8}
@@ -321,7 +321,7 @@ function WorkspaceAccountMenu({
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator className="m-0" />
-        <DropdownMenuLabel className="px-3 py-2 text-[12px] font-semibold text-muted-foreground">工作区</DropdownMenuLabel>
+        <DropdownMenuLabel className="px-3 py-2 text-[12px] font-semibold text-muted-foreground">组织</DropdownMenuLabel>
         <div className="grid gap-1 px-2 pb-2">
           {organizations.map((organization) => {
             const isActive = organization.organizationId === activeOrganization.organizationId;
@@ -350,7 +350,7 @@ function WorkspaceAccountMenu({
             disabled
           >
             <Plus className="size-4" aria-hidden="true" />
-            创建工作区
+            创建组织
           </DropdownMenuItem>
         </div>
         {onLogout ? (

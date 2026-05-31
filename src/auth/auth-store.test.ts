@@ -68,6 +68,23 @@ describeDb("Postgres auth store", () => {
           role: "admin",
           status: "available",
         });
+        const invitationList = await store.listOrganizationInvitations({ now, organizationId: organization.id });
+        expect(invitationList).toEqual([
+          expect.objectContaining({
+            email: "juanbai@gaoding.com",
+            maskedEmail: "j***@gaoding.com",
+            role: "admin",
+            status: "available",
+          }),
+        ]);
+        await expect(store.readOrganizationInvitation({
+          id: invitationList[0]?.id ?? "missing",
+          now,
+          organizationId: organization.id,
+        })).resolves.toMatchObject({
+          email: "juanbai@gaoding.com",
+          status: "available",
+        });
         const accepted = await store.acceptInvitation({
           email: "juanbai@gaoding.com",
           now,

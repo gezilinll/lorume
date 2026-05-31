@@ -362,7 +362,7 @@ describe("Console shell", () => {
     expect(within(nav).queryByRole("button", { name: "通知中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开主导航" })).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "切换工作区和账号" })).toHaveAttribute("data-sidebar", "menu-button");
+    expect(screen.getByRole("button", { name: "切换组织和账号" })).toHaveAttribute("data-sidebar", "menu-button");
     expect(screen.getByText("精选AI")).toBeInTheDocument();
     const workbar = screen.getByRole("banner");
     expect(workbar).toHaveAttribute("data-console-workbar", "true");
@@ -377,15 +377,15 @@ describe("Console shell", () => {
     expect(notificationsButton).toHaveAttribute("aria-expanded", "false");
 
     expect(screen.queryByRole("button", { name: "打开个人入口" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "切换工作区和账号" }));
-    const workspaceMenu = await screen.findByRole("menu", { name: "切换工作区和账号" });
+    await user.click(screen.getByRole("button", { name: "切换组织和账号" }));
+    const workspaceMenu = await screen.findByRole("menu", { name: "切换组织和账号" });
     expect(workspaceMenu).toHaveClass("bg-card", "text-card-foreground");
     expect(workspaceMenu).not.toHaveClass("dark");
     expect(within(workspaceMenu).getByText("Agent")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("agent@local.lorume")).toBeInTheDocument();
-    expect(within(workspaceMenu).getByText("工作区")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByText("组织")).toBeInTheDocument();
     expect(within(workspaceMenu).getByRole("menuitem", { name: /精选AI/ })).toHaveTextContent("owner");
-    expect(within(workspaceMenu).getByRole("menuitem", { name: "创建工作区" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(workspaceMenu).getByRole("menuitem", { name: "创建组织" })).toHaveAttribute("aria-disabled", "true");
     expect(within(workspaceMenu).getByRole("menuitem", { name: "退出登录" })).toHaveClass("text-destructive");
     await user.keyboard("{Escape}");
 

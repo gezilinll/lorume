@@ -186,6 +186,21 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
     }
 
     const invitationCreateMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/invitations$/);
+    if (request.method === "GET" && invitationCreateMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(invitationCreateMatch[1] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      sendJson(response, 200, {
+        invitations: await options.store.listOrganizationInvitations({ now: now(), organizationId }),
+      });
+      return;
+    }
+
     if (request.method === "POST" && invitationCreateMatch) {
       const session = await requireSession(request, response, options.store, now(), pepper);
       if (!session) return;
@@ -245,6 +260,83 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       });
       sendJson(response, 201, {
         invitation,
+      });
+      return;
+    }
+
+    const invitationResendMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/invitations\/([^/]+)\/resend$/);
+    if (request.method === "POST" && invitationResendMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(invitationResendMatch[1] ?? "");
+      const invitationId = decodeURIComponent(invitationResendMatch[2] ?? "");
+      const membership = session.organizations.find((item) => item.organizationId === organizationId);
+      if (!membership || !canManageOrganization(membership.role)) {
+        sendAuthError(response, 403, "forbidden");
+        return;
+      }
+      const previousInvitation = await options.store.readOrganizationInvitation({
+        id: invitationId,
+        now: now(),
+        organizationId,
+      });
+      if (!previousInvitation) {
+        sendAuthError(response, 404, "invitation_not_found");
+        return;
+      }
+      if (previousInvitation.status === "accepted") {
+        sendAuthError(response, 409, "invitation_not_resendable");
+        return;
+      }
+      const role = normalizeInvitableRole(previousInvitation.role);
+      if (!role) {
+        sendAuthError(response, 400, "invitation_role_not_allowed");
+        return;
+      }
+      const token = createInvitationToken();
+      const expiresAt = new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000);
+      const invitation = await options.store.createInvitation({
+        email: previousInvitation.email,
+        expiresAt,
+        invitedByUserId: session.user.id,
+        organizationId,
+        role,
+        tokenHash: hashSecret(token, "invitation-token", pepper),
+      });
+      const inviteUrl = `${originFromRequest(request)}/invite/${encodeURIComponent(token)}`;
+      try {
+        await options.emailProvider.sendOrganizationInvitation({
+          email: previousInvitation.email,
+          expiresAt,
+          inviteUrl,
+          organizationName: membership.name,
+          role,
+        });
+      } catch (error) {
+        await options.store.revokeInvitation({ id: invitation.id, now: now() });
+        sendAuthError(response, 503, "email_provider_unavailable");
+        return;
+      }
+      await options.store.revokeInvitation({ id: previousInvitation.id, now: now() });
+      await options.store.createAuditEvent({
+        actorUserId: session.user.id,
+        eventType: "invitation.sent",
+        metadata: {
+          email: maskEmail(previousInvitation.email),
+          expiresAt: expiresAt.toISOString(),
+          resendOf: previousInvitation.id,
+          role,
+        },
+        organizationId,
+        targetId: invitation.id,
+        targetType: "invitation",
+      });
+      sendJson(response, 200, {
+        invitation: await options.store.readOrganizationInvitation({
+          id: invitation.id,
+          now: now(),
+          organizationId,
+        }),
       });
       return;
     }

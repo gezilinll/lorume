@@ -15,6 +15,9 @@ export type AuthDeviceTokenStatus = "pending" | "occupied" | "revoked" | "expire
 /** Invitation preview state used by the invite login flow. */
 export type AuthInvitationPreviewStatus = "accepted" | "available" | "expired" | "not_found" | "revoked";
 
+/** Persisted organization invitation states visible to organization admins. */
+export type AuthInvitationStatus = Exclude<AuthInvitationPreviewStatus, "not_found">;
+
 /** Organization audit event type for security-sensitive auth/access actions. */
 export type AuthAuditEventType =
   | "auth.login_failed"
@@ -102,6 +105,21 @@ export interface AuthInvitationPreview {
   status: AuthInvitationPreviewStatus;
 }
 
+/** Organization invitation summary returned to owners and admins. */
+export interface AuthInvitationSummary {
+  acceptedAt?: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  invitedByUserId: string;
+  maskedEmail: string;
+  organizationId: string;
+  revokedAt?: Date | null;
+  role: AuthMemberRole;
+  status: AuthInvitationStatus;
+}
+
 /** Append-only security event visible to organization admins. */
 export interface AuthAuditEvent {
   actorUserId?: string | null;
@@ -134,6 +152,15 @@ export interface AuthStore {
     role: AuthInvitableMemberRole;
     tokenHash: string;
   }) => Promise<{ email: string; id: string; organizationId: string; role: AuthMemberRole }>;
+  listOrganizationInvitations: (input: {
+    now: Date;
+    organizationId: string;
+  }) => Promise<AuthInvitationSummary[]>;
+  readOrganizationInvitation: (input: {
+    id: string;
+    now: Date;
+    organizationId: string;
+  }) => Promise<AuthInvitationSummary | null>;
   readInvitationPreview: (input: {
     now: Date;
     tokenHash: string;
@@ -348,6 +375,44 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
         input.expiresAt,
       ]);
       return result.rows[0];
+    },
+    async listOrganizationInvitations(input) {
+      const result = await pool.query<InvitationSummaryRow>(`
+        SELECT
+          id,
+          organization_id AS "organizationId",
+          email,
+          role,
+          invited_by_user_id AS "invitedByUserId",
+          expires_at AS "expiresAt",
+          accepted_at AS "acceptedAt",
+          revoked_at AS "revokedAt",
+          created_at AS "createdAt"
+        FROM organization_invitations
+        WHERE organization_id = $1
+        ORDER BY created_at DESC, id DESC
+      `, [input.organizationId]);
+      return result.rows.map((row) => toInvitationSummary(row, input.now));
+    },
+    async readOrganizationInvitation(input) {
+      const result = await pool.query<InvitationSummaryRow>(`
+        SELECT
+          id,
+          organization_id AS "organizationId",
+          email,
+          role,
+          invited_by_user_id AS "invitedByUserId",
+          expires_at AS "expiresAt",
+          accepted_at AS "acceptedAt",
+          revoked_at AS "revokedAt",
+          created_at AS "createdAt"
+        FROM organization_invitations
+        WHERE organization_id = $1
+          AND id = $2
+        LIMIT 1
+      `, [input.organizationId, input.id]);
+      const row = result.rows[0];
+      return row ? toInvitationSummary(row, input.now) : null;
     },
     async readInvitationPreview(input) {
       const result = await pool.query<{
@@ -669,6 +734,18 @@ interface DeviceTokenRow {
   tokenPrefix: string;
 }
 
+interface InvitationSummaryRow {
+  acceptedAt?: Date | null;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  invitedByUserId: string;
+  organizationId: string;
+  revokedAt?: Date | null;
+  role: AuthMemberRole;
+}
+
 interface AuditEventRow {
   actorUserId?: string | null;
   createdAt: Date;
@@ -678,6 +755,22 @@ interface AuditEventRow {
   organizationId?: string | null;
   targetId?: string | null;
   targetType?: string | null;
+}
+
+function toInvitationSummary(row: InvitationSummaryRow, now: Date): AuthInvitationSummary {
+  return {
+    acceptedAt: row.acceptedAt ?? null,
+    createdAt: row.createdAt,
+    email: row.email,
+    expiresAt: row.expiresAt,
+    id: row.id,
+    invitedByUserId: row.invitedByUserId,
+    maskedEmail: maskEmail(row.email),
+    organizationId: row.organizationId,
+    revokedAt: row.revokedAt ?? null,
+    role: row.role,
+    status: row.revokedAt ? "revoked" : row.acceptedAt ? "accepted" : row.expiresAt <= now ? "expired" : "available",
+  };
 }
 
 function toDeviceTokenSummary(row: DeviceTokenRow, now = new Date()): AuthDeviceTokenSummary {

@@ -5,7 +5,9 @@ import type {
   AuthAuditEvent,
   AuthDeviceTokenSummary,
   AuthDeviceTokenVerification,
+  AuthInvitationSummary,
   AuthLoginCode,
+  AuthInvitableMemberRole,
   AuthMemberRole,
   AuthOrganizationMembership,
   AuthSessionContext,
@@ -149,6 +151,64 @@ describe("auth HTTP API", () => {
     });
   });
 
+  it("lists organization invitations and resends pending invitations with a new token", async () => {
+    const sentInvitations: Array<{ email: string; inviteUrl: string; organizationName: string; role: string }> = [];
+    const store = new MemoryAuthStore();
+    const { baseUrl } = await startAuthApi(store, { sentInvitations });
+
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "owner@gaoding.com" });
+    const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "owner@gaoding.com", code: "246810" });
+    const ownerCookie = ownerLogin.headers.get("set-cookie") ?? "";
+    const orgResponse = await postJson(`${baseUrl}/api/organizations`, { name: "Lorume" }, ownerCookie);
+    const orgBody = await orgResponse.json() as { organization: { id: string } };
+
+    const inviteResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      email: "teammate@gaoding.com",
+      role: "member",
+    }, ownerCookie);
+    expect(inviteResponse.status).toBe(201);
+
+    const listResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      invitations: [
+        expect.objectContaining({
+          email: "teammate@gaoding.com",
+          id: "invitation-1",
+          role: "member",
+          status: "available",
+        }),
+      ],
+    });
+
+    const resendResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations/invitation-1/resend`, {}, ownerCookie);
+    expect(resendResponse.status).toBe(200);
+    await expect(resendResponse.json()).resolves.toMatchObject({
+      invitation: {
+        email: "teammate@gaoding.com",
+        id: "invitation-2",
+        role: "member",
+        status: "available",
+      },
+    });
+    expect(sentInvitations).toEqual([
+      expect.objectContaining({ inviteUrl: `${baseUrl}/invite/invite-token` }),
+      expect.objectContaining({ inviteUrl: `${baseUrl}/invite/invite-token-2` }),
+    ]);
+
+    const relistResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      headers: { cookie: ownerCookie },
+    });
+    await expect(relistResponse.json()).resolves.toMatchObject({
+      invitations: [
+        expect.objectContaining({ id: "invitation-2", status: "available" }),
+        expect.objectContaining({ id: "invitation-1", status: "revoked" }),
+      ],
+    });
+  });
+
   it("creates device tokens only for organization admins and returns the plaintext token once", async () => {
     const store = new MemoryAuthStore();
     const { baseUrl } = await startAuthApi(store);
@@ -270,8 +330,12 @@ async function startAuthApi(
 ) {
   const sentCodes = captures.sentCodes ?? [];
   const sentInvitations = captures.sentInvitations ?? [];
+  let invitationTokenCounter = 0;
   const handler = createAuthHttpApiHandler({
-    createInvitationToken: () => "invite-token",
+    createInvitationToken: () => {
+      invitationTokenCounter += 1;
+      return invitationTokenCounter === 1 ? "invite-token" : `invite-token-${invitationTokenCounter}`;
+    },
     createLoginCode: () => "246810",
     createSessionToken: () => `session-${sentCodes.length + 1}`,
     emailProvider: {
@@ -319,6 +383,7 @@ class MemoryAuthStore implements AuthStore {
   private readonly codes: AuthLoginCode[] = [];
   private readonly invitations: Array<{
     acceptedAt?: Date;
+    createdAt: Date;
     email: string;
     expiresAt: Date;
     id: string;
@@ -418,12 +483,29 @@ class MemoryAuthStore implements AuthStore {
     expiresAt: Date;
     invitedByUserId: string;
     organizationId: string;
-    role: AuthMemberRole;
+    role: AuthInvitableMemberRole;
     tokenHash: string;
   }) {
-    const invitation = { ...input, email: normalizeEmail(input.email), id: `invitation-${++this.invitationCounter}` };
+    const invitation = {
+      ...input,
+      createdAt: new Date("2026-05-12T10:00:00.000Z"),
+      email: normalizeEmail(input.email),
+      id: `invitation-${++this.invitationCounter}`,
+    };
     this.invitations.push(invitation);
     return invitation;
+  }
+
+  async listOrganizationInvitations(input: { organizationId: string; now: Date }): Promise<AuthInvitationSummary[]> {
+    return this.invitations
+      .filter((item) => item.organizationId === input.organizationId)
+      .map((item) => toInvitationSummary(item, input.now))
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id));
+  }
+
+  async readOrganizationInvitation(input: { id: string; organizationId: string; now: Date }): Promise<AuthInvitationSummary | null> {
+    const invitation = this.invitations.find((item) => item.id === input.id && item.organizationId === input.organizationId);
+    return invitation ? toInvitationSummary(invitation, input.now) : null;
   }
 
   async readInvitationPreview(input: { now: Date; tokenHash: string }) {
@@ -536,4 +618,30 @@ function normalizeEmail(email: string): string {
 function maskEmail(email: string): string {
   const [local = "", domain = ""] = normalizeEmail(email).split("@");
   return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function toInvitationSummary(invitation: {
+  acceptedAt?: Date;
+  createdAt: Date;
+  email: string;
+  expiresAt: Date;
+  id: string;
+  invitedByUserId: string;
+  organizationId: string;
+  role: AuthMemberRole;
+  revokedAt?: Date;
+}, now: Date): AuthInvitationSummary {
+  return {
+    acceptedAt: invitation.acceptedAt ?? null,
+    createdAt: invitation.createdAt,
+    email: invitation.email,
+    expiresAt: invitation.expiresAt,
+    id: invitation.id,
+    invitedByUserId: invitation.invitedByUserId,
+    maskedEmail: maskEmail(invitation.email),
+    organizationId: invitation.organizationId,
+    revokedAt: invitation.revokedAt ?? null,
+    role: invitation.role,
+    status: invitation.revokedAt ? "revoked" : invitation.acceptedAt ? "accepted" : invitation.expiresAt <= now ? "expired" : "available",
+  };
 }

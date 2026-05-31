@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
-  AuthAuditEvent,
   AuthDeviceTokenStatus,
   AuthDeviceTokenSummary,
+  AuthInvitationSummary,
   AuthInvitableMemberRole,
   AuthMemberRole,
   AuthOrganizationMembership,
@@ -39,28 +39,30 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
   const [deviceId, setDeviceId] = useState("");
   const [deviceToken, setDeviceToken] = useState("");
   const [deviceTokens, setDeviceTokens] = useState<AuthDeviceTokenSummary[]>([]);
-  const [auditEvents, setAuditEvents] = useState<AuthAuditEvent[]>([]);
+  const [invitations, setInvitations] = useState<AuthInvitationSummary[]>([]);
   const [installCommand, setInstallCommand] = useState("");
   const [copiedInstallCommand, setCopiedInstallCommand] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [deviceErrorMessage, setDeviceErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCreatingDeviceToken, setIsCreatingDeviceToken] = useState(false);
+  const [resendingInvitationId, setResendingInvitationId] = useState("");
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   const canManage = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
+  const pendingInvitations = useMemo(() => invitations.filter((invitation) => invitation.status !== "accepted"), [invitations]);
 
   useEffect(() => {
     if (!organization || !canManage) {
       setDeviceTokens([]);
-      setAuditEvents([]);
+      setInvitations([]);
       return;
     }
     let isMounted = true;
-    void loadSecurityData(organization.organizationId).then(({ auditEvents: nextAuditEvents, deviceTokens: nextDeviceTokens }) => {
+    void loadOrganizationSettingsData(organization.organizationId).then(({ deviceTokens: nextDeviceTokens, invitations: nextInvitations }) => {
       if (!isMounted) return;
       setDeviceTokens(nextDeviceTokens);
-      setAuditEvents(nextAuditEvents);
+      setInvitations(nextInvitations);
     }).catch((error) => {
       if (isMounted) setDeviceErrorMessage(error instanceof Error ? error.message : "组织安全数据加载失败");
     });
@@ -96,11 +98,33 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
       }
       setInviteNotice(`邀请邮件已发送至 ${maskEmail(inviteEmail)}`);
       setInviteEmail("");
-      await refreshSecurityData();
+      await refreshOrganizationSettingsData();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "邀请创建失败");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function resendInvitation(invitation: AuthInvitationSummary) {
+    if (!organization) return;
+    setResendingInvitationId(invitation.id);
+    setErrorMessage("");
+    setInviteNotice("");
+    try {
+      const response = await fetch(`/api/organizations/${encodeURIComponent(organization.organizationId)}/invitations/${encodeURIComponent(invitation.id)}/resend`, {
+        method: "POST",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : `邀请重发失败: HTTP ${response.status}`);
+      }
+      setInviteNotice(`邀请已重新发送至 ${maskEmail(invitation.email)}`);
+      await refreshOrganizationSettingsData();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "邀请重发失败");
+    } finally {
+      setResendingInvitationId("");
     }
   }
 
@@ -134,7 +158,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
         origin: window.location.origin,
         token,
       }));
-      await refreshSecurityData();
+      await refreshOrganizationSettingsData();
     } catch (error) {
       setDeviceErrorMessage(error instanceof Error ? error.message : "设备 token 创建失败");
     } finally {
@@ -158,17 +182,17 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
       if (payload?.deviceToken) {
         setDeviceTokens((tokens) => tokens.map((item) => item.id === tokenId ? payload.deviceToken : item));
       }
-      await refreshSecurityData();
+      await refreshOrganizationSettingsData();
     } catch (error) {
       setDeviceErrorMessage(error instanceof Error ? error.message : "设备 token 撤销失败");
     }
   }
 
-  async function refreshSecurityData() {
+  async function refreshOrganizationSettingsData() {
     if (!organization || !canManage) return;
-    const data = await loadSecurityData(organization.organizationId);
+    const data = await loadOrganizationSettingsData(organization.organizationId);
     setDeviceTokens(data.deviceTokens);
-    setAuditEvents(data.auditEvents);
+    setInvitations(data.invitations);
   }
 
   async function copyInstallCommand() {
@@ -197,13 +221,13 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
   return (
     <div className="space-y-6">
       {hasConsoleWorkbar ? null : <h1 className="sr-only">组织设置</h1>}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-        <Card>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+        <Card className="self-start">
           <CardHeader>
             <CardTitle>组织概览</CardTitle>
             <CardDescription>当前 Console 使用的组织上下文。</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-3">
+          <CardContent className="grid gap-3 sm:grid-cols-3">
             <SummaryItem label="组织名称" value={organization.name} />
             <SummaryItem label="Slug" value={organization.slug} />
             <SummaryItem label="当前角色" value={<StatusBadge tone={canManage ? "success" : "neutral"}>{roleLabels[organization.role]}</StatusBadge>} />
@@ -219,14 +243,14 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
             {canManage ? (
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="device-id">Device ID</FieldLabel>
+                  <FieldLabel htmlFor="device-id">Token 名称</FieldLabel>
                   <Input
                     id="device-id"
                     value={deviceId}
                     onChange={(event) => setDeviceId(event.target.value)}
-                    placeholder="fixture-mac"
+                    placeholder="gezilinll-claw"
                   />
-                  <FieldDescription>使用稳定、可读的本机设备标识。</FieldDescription>
+                  <FieldDescription>用于识别这条安装 token，安装命令会作为默认 device id 传给 collector。</FieldDescription>
                 </Field>
                 <Button
                   className="w-fit"
@@ -294,7 +318,7 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
         <Card>
           <CardHeader>
             <CardTitle>成员与邀请</CardTitle>
@@ -370,10 +394,56 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                 ) : null}
                 {errorMessage ? (
                   <Alert variant="destructive">
-                    <AlertTitle>邀请创建失败</AlertTitle>
+                    <AlertTitle>邀请操作失败</AlertTitle>
                     <AlertDescription>{errorMessage}</AlertDescription>
                   </Alert>
                 ) : null}
+                <div className="space-y-2 border-t pt-4">
+                  <div>
+                    <p className="text-sm font-medium">待加入邀请</p>
+                    <p className="text-xs text-muted-foreground">展示尚未完成加入的邀请，可重新发送邮件。</p>
+                  </div>
+                  {pendingInvitations.length > 0 ? (
+                    <div className="overflow-hidden rounded-lg border">
+                      <Table aria-label="待加入邀请">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>邮箱</TableHead>
+                            <TableHead>角色</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead>过期时间</TableHead>
+                            <TableHead>操作</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingInvitations.map((invitation) => (
+                            <TableRow key={invitation.id}>
+                              <TableCell className="font-medium">{invitation.email}</TableCell>
+                              <TableCell>{roleLabels[invitation.role]}</TableCell>
+                              <TableCell>
+                                <StatusBadge tone={invitationStatusTone(invitation.status)}>{invitationStatusLabel(invitation.status)}</StatusBadge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">{formatDateTime(invitation.expiresAt)}</TableCell>
+                              <TableCell>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  type="button"
+                                  disabled={resendingInvitationId === invitation.id}
+                                  onClick={() => void resendInvitation(invitation)}
+                                >
+                                  重发
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">暂无待加入邀请。</p>
+                  )}
+                </div>
               </FieldGroup>
             ) : (
               <p className="text-sm text-muted-foreground">当前角色不能发送邀请邮件。</p>
@@ -383,8 +453,8 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
 
         <Card>
           <CardHeader>
-            <CardTitle>安装与审计</CardTitle>
-            <CardDescription>复制安装命令，并查看最近安全事件。</CardDescription>
+            <CardTitle>安装命令</CardTitle>
+            <CardDescription>复制当前创建结果，明文 token 不会被再次返回。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {installCommand ? (
@@ -417,25 +487,8 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
                 </div>
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">输入 Device ID 后生成一行安装命令。</p>
+              <p className="text-sm text-muted-foreground">输入 Token 名称后生成一行安装命令。</p>
             )}
-            {canManage ? (
-              <div className="space-y-2 border-t pt-4">
-                <p className="text-sm font-medium">最近审计</p>
-                {auditEvents.length > 0 ? (
-                  <div className="space-y-2">
-                    {auditEvents.slice(0, 6).map((event) => (
-                      <div key={event.id} className="rounded-lg border bg-[var(--surface-soft)] px-3 py-2">
-                        <p className="text-sm font-medium">{auditEventLabel(event.eventType)}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">暂无审计事件。</p>
-                )}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -443,21 +496,21 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
   );
 }
 
-async function loadSecurityData(organizationId: string): Promise<{
-  auditEvents: AuthAuditEvent[];
+async function loadOrganizationSettingsData(organizationId: string): Promise<{
   deviceTokens: AuthDeviceTokenSummary[];
+  invitations: AuthInvitationSummary[];
 }> {
-  const [deviceTokensResponse, auditEventsResponse] = await Promise.all([
+  const [deviceTokensResponse, invitationsResponse] = await Promise.all([
     fetch(`/api/organizations/${encodeURIComponent(organizationId)}/device-tokens`),
-    fetch(`/api/organizations/${encodeURIComponent(organizationId)}/audit-events?limit=20`),
+    fetch(`/api/organizations/${encodeURIComponent(organizationId)}/invitations`),
   ]);
   if (!deviceTokensResponse.ok) throw new Error(`设备 token 列表加载失败: HTTP ${deviceTokensResponse.status}`);
-  if (!auditEventsResponse.ok) throw new Error(`审计日志加载失败: HTTP ${auditEventsResponse.status}`);
+  if (!invitationsResponse.ok) throw new Error(`邀请列表加载失败: HTTP ${invitationsResponse.status}`);
   const deviceTokensPayload = await deviceTokensResponse.json().catch(() => ({}));
-  const auditEventsPayload = await auditEventsResponse.json().catch(() => ({}));
+  const invitationsPayload = await invitationsResponse.json().catch(() => ({}));
   return {
-    auditEvents: Array.isArray(auditEventsPayload?.auditEvents) ? auditEventsPayload.auditEvents : [],
     deviceTokens: Array.isArray(deviceTokensPayload?.deviceTokens) ? deviceTokensPayload.deviceTokens.map(stripPlaintextDeviceToken) : [],
+    invitations: Array.isArray(invitationsPayload?.invitations) ? invitationsPayload.invitations : [],
   };
 }
 
@@ -480,17 +533,18 @@ function deviceTokenStatusTone(status: AuthDeviceTokenStatus): "neutral" | "succ
   return "neutral";
 }
 
-function auditEventLabel(eventType: AuthAuditEvent["eventType"]): string {
-  if (eventType === "invitation.sent") return "发送邀请";
-  if (eventType === "invitation.accepted") return "接受邀请";
-  if (eventType === "invitation.rejected") return "拒绝邀请";
-  if (eventType === "device_token.created") return "创建设备 Token";
-  if (eventType === "device_token.occupied") return "设备 Token 绑定";
-  if (eventType === "device_token.reuse_rejected") return "设备 Token 复用被拒绝";
-  if (eventType === "device_token.revoked") return "撤销设备 Token";
-  if (eventType === "auth.login_failed") return "登录失败";
-  if (eventType === "auth.login_succeeded") return "登录成功";
-  return "退出登录";
+function invitationStatusLabel(status: AuthInvitationSummary["status"]): string {
+  if (status === "available") return "待接受";
+  if (status === "expired") return "已过期";
+  if (status === "revoked") return "已撤销";
+  return "已加入";
+}
+
+function invitationStatusTone(status: AuthInvitationSummary["status"]): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (status === "available") return "warning";
+  if (status === "expired") return "neutral";
+  if (status === "revoked") return "danger";
+  return "success";
 }
 
 function formatDateTime(value: Date | string): string {

@@ -232,7 +232,7 @@ CREATE INDEX IF NOT EXISTS idx_collector_ingestions_received_at ON collector_ing
 CREATE TABLE IF NOT EXISTS operations (
   id text PRIMARY KEY,
   organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('notification_delivery')),
+  type text NOT NULL CHECK (type IN ('notification_delivery', 'collector_upgrade')),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN (
     'queued',
     'running',
@@ -261,11 +261,16 @@ CREATE INDEX IF NOT EXISTS idx_operations_organization_status ON operations(orga
 CREATE INDEX IF NOT EXISTS idx_operations_resource ON operations(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_operations_target ON operations(target_type, target_id);
 
+ALTER TABLE operations
+  DROP CONSTRAINT IF EXISTS operations_type_check;
+ALTER TABLE operations
+  ADD CONSTRAINT operations_type_check CHECK (type IN ('notification_delivery', 'collector_upgrade'));
+
 CREATE TABLE IF NOT EXISTS operation_jobs (
   id text PRIMARY KEY,
   operation_id text NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
   organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('notification_in_app', 'notification_email')),
+  type text NOT NULL CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device')),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN (
     'queued',
     'running',
@@ -292,6 +297,11 @@ CREATE INDEX IF NOT EXISTS idx_operation_jobs_claim
   ON operation_jobs(status, run_after, created_at)
   WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_operation_jobs_operation_id ON operation_jobs(operation_id);
+
+ALTER TABLE operation_jobs
+  DROP CONSTRAINT IF EXISTS operation_jobs_type_check;
+ALTER TABLE operation_jobs
+  ADD CONSTRAINT operation_jobs_type_check CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device'));
 
 CREATE TABLE IF NOT EXISTS notification_events (
   id text PRIMARY KEY,

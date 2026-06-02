@@ -90,6 +90,75 @@ describe("ConsoleUtilityDrawer", () => {
     expect(within(detailDialog).getByText("目标: notification_thread · thread_1")).toBeInTheDocument();
   });
 
+  it("loads collector upgrade job progress in the Operation detail dialog", async () => {
+    const fetchMock = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/operations/op_upgrade")) {
+        return jsonResponse({
+          jobs: [{
+            createdAt: "2026-06-02T08:20:00.000Z",
+            id: "opjob_upgrade",
+            operationId: "op_upgrade",
+            payload: {
+              currentVersion: "0.0.9",
+              message: "Downloading collector package",
+              stage: "downloading",
+              targetVersion: "0.1.0",
+            },
+            status: "running",
+            type: "collector_upgrade_device",
+            updatedAt: "2026-06-02T08:22:00.000Z",
+          }],
+          operation: operationItem({
+            id: "op_upgrade",
+            resourceId: "fixture-mac",
+            resourceType: "device",
+            status: "running",
+            summary: "Upgrade collector on fixture-mac to 0.1.0",
+            targetId: "0.1.0",
+            targetType: "collector",
+            type: "collector_upgrade",
+          }),
+        });
+      }
+      if (url.includes("/api/operations")) {
+        return jsonResponse({
+          operations: [operationItem({
+            id: "op_upgrade",
+            resourceId: "fixture-mac",
+            resourceType: "device",
+            status: "running",
+            summary: "Upgrade collector on fixture-mac to 0.1.0",
+            targetId: "0.1.0",
+            targetType: "collector",
+            type: "collector_upgrade",
+          })],
+        });
+      }
+      return jsonResponse({ error: "unexpected request" }, 500);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    render(
+      <ConsoleUtilityDrawer
+        organizationId="org_1"
+        view="operations"
+        onClose={vi.fn()}
+        onViewChange={vi.fn()}
+      />,
+    );
+
+    const operation = await screen.findByRole("button", { name: /Upgrade collector on fixture-mac/ });
+    await userEvent.click(operation);
+
+    const detailDialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(within(detailDialog).getByText("类型: collector_upgrade")).toBeInTheDocument();
+    expect(await within(detailDialog).findByText("阶段: downloading")).toBeInTheDocument();
+    expect(within(detailDialog).getByText("消息: Downloading collector package")).toBeInTheDocument();
+    expect(within(detailDialog).getByText("目标版本: 0.1.0")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/operations/op_upgrade?limit=100");
+  });
+
   it("marks notification threads as read and opens details in a dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input, init) => {

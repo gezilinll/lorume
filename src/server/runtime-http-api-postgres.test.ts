@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPostgresAuthStore } from "../auth/auth-store";
 import { createPostgresNotificationStore } from "../notifications/notification-store";
+import { createPostgresOperationStore } from "../operations/operation-store";
+import { normalizeDeviceStateSnapshot } from "../runtime/runtime-model";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createPostgresStore, type PostgresStore } from "./postgres-store";
@@ -781,11 +783,213 @@ describeDb("runtime HTTP API with Postgres store", () => {
       await database.drop();
     }
   });
+
+  it("creates a collector upgrade operation for an online upgrade-capable device", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("collector-upgrade-owner@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Collector Upgrade Owners",
+          slug: "collector-upgrade-owners",
+        });
+        await postgresStore.upsertDeviceStateSnapshot(createPersistableDeviceStateSnapshot({
+          collectedAt: "2026-06-02T08:00:00.000Z",
+          deviceId: "upgrade-device",
+        }), { organizationId: organization.id });
+        const { baseUrl, store } = await startRuntimeApi(postgresStore, {
+          auth: {
+            requireUserSession: async () => ({
+              id: "session-owner",
+              organizations: await authStore.listOrganizationsForUser(user.id),
+              user,
+            }),
+          },
+          operationStore,
+        });
+        store.writeDeviceConnection({
+          collectorUpgrade: { protocolVersion: 1, supported: true },
+          collectorVersion: "0.0.9",
+          deviceId: "upgrade-device",
+          status: "online",
+        });
+
+        const response = await postJson(`${baseUrl}/api/devices/upgrade-device/collector-upgrade?organizationId=${organization.id}`, {});
+        const body = await response.json();
+        const operations = await operationStore.listOperations({
+          organizationId: organization.id,
+          resourceId: "upgrade-device",
+          resourceType: "device",
+        });
+        const jobs = await operationStore.listJobs({ operationId: body.operationId });
+
+        expect(response.status).toBe(202);
+        expect(body).toMatchObject({
+          operationId: expect.any(String),
+          status: "queued",
+          targetVersion: "0.1.0",
+        });
+        expect(operations).toEqual([
+          expect.objectContaining({
+            metadata: expect.objectContaining({
+              currentVersion: "0.0.9",
+              deviceId: "upgrade-device",
+              targetVersion: "0.1.0",
+            }),
+            resourceId: "upgrade-device",
+            resourceType: "device",
+            status: "queued",
+            targetId: "0.1.0",
+            targetType: "collector",
+            type: "collector_upgrade",
+          }),
+        ]);
+        expect(jobs).toEqual([
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              currentVersion: "0.0.9",
+              deviceId: "upgrade-device",
+              nonce: expect.stringMatching(/^upgrade_/),
+              stage: "queued",
+              targetVersion: "0.1.0",
+            }),
+            status: "queued",
+            type: "collector_upgrade_device",
+          }),
+        ]);
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close(), postgresStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("rejects collector upgrade creation for non-admin members and cross-organization devices", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("collector-upgrade-denied@example.com");
+        const firstOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "First Upgrade Team",
+          slug: "first-upgrade-team",
+        });
+        const secondOrganization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Second Upgrade Team",
+          slug: "second-upgrade-team",
+        });
+        await postgresStore.upsertDeviceStateSnapshot(createPersistableDeviceStateSnapshot({
+          deviceId: "first-org-device",
+        }), { organizationId: firstOrganization.id });
+        await postgresStore.upsertDeviceStateSnapshot(createPersistableDeviceStateSnapshot({
+          deviceId: "second-org-device",
+        }), { organizationId: secondOrganization.id });
+        let role: "admin" | "member" = "member";
+        const { baseUrl } = await startRuntimeApi(postgresStore, {
+          auth: {
+            requireUserSession: async () => ({
+              id: "session-member",
+              organizations: [{ organizationId: firstOrganization.id, role }],
+              user: { id: "user_member" },
+            }),
+          },
+          operationStore,
+        });
+
+        const memberResponse = await postJson(`${baseUrl}/api/devices/first-org-device/collector-upgrade?organizationId=${firstOrganization.id}`, {});
+        role = "admin";
+        const crossOrgResponse = await postJson(`${baseUrl}/api/devices/second-org-device/collector-upgrade?organizationId=${firstOrganization.id}`, {});
+
+        expect(memberResponse.status).toBe(403);
+        await expect(memberResponse.json()).resolves.toMatchObject({ error: "forbidden" });
+        expect(crossOrgResponse.status).toBe(403);
+        await expect(crossOrgResponse.json()).resolves.toMatchObject({ error: "forbidden" });
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close(), postgresStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("creates terminal collector upgrade operations for latest or unsupported devices", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("collector-upgrade-terminal@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Terminal Upgrade Team",
+          slug: "terminal-upgrade-team",
+        });
+        await postgresStore.upsertDeviceStateSnapshot(createPersistableDeviceStateSnapshot({
+          deviceId: "latest-device",
+        }), { organizationId: organization.id });
+        await postgresStore.upsertDeviceStateSnapshot(createPersistableDeviceStateSnapshot({
+          deviceId: "legacy-device",
+        }), { organizationId: organization.id });
+        const { baseUrl, store } = await startRuntimeApi(postgresStore, {
+          auth: {
+            requireUserSession: async () => ({
+              id: "session-admin",
+              organizations: [{ organizationId: organization.id, role: "admin" }],
+              user,
+            }),
+          },
+          operationStore,
+        });
+        store.writeDeviceConnection({
+          collectorUpgrade: { protocolVersion: 1, supported: true },
+          collectorVersion: "0.1.0",
+          deviceId: "latest-device",
+          status: "online",
+        });
+        store.writeDeviceConnection({
+          collectorVersion: "0.0.8",
+          deviceId: "legacy-device",
+          status: "online",
+        });
+
+        const latestResponse = await postJson(`${baseUrl}/api/devices/latest-device/collector-upgrade?organizationId=${organization.id}`, {});
+        const legacyResponse = await postJson(`${baseUrl}/api/devices/legacy-device/collector-upgrade?organizationId=${organization.id}`, {});
+
+        expect(latestResponse.status).toBe(200);
+        await expect(latestResponse.json()).resolves.toMatchObject({
+          status: "succeeded",
+          targetVersion: "0.1.0",
+        });
+        expect(legacyResponse.status).toBe(202);
+        await expect(legacyResponse.json()).resolves.toMatchObject({
+          status: "requires_manual_step",
+          targetVersion: "0.1.0",
+        });
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close(), postgresStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
 });
 
 async function startRuntimeApi(
   postgresStore: PostgresStore,
-  options: Pick<Parameters<typeof createRuntimeHttpApiHandler>[0], "auth" | "collectorNotifications"> = {},
+  options: Pick<Parameters<typeof createRuntimeHttpApiHandler>[0], "auth" | "collectorNotifications" | "operationStore"> = {},
 ) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-runtime-api-postgres-"));
   const store = createRuntimeDeviceStateStore({
@@ -798,6 +1002,7 @@ async function startRuntimeApi(
     controlChannel,
     postgresStore,
     collectorNotifications: options.collectorNotifications,
+    operationStore: options.operationStore,
   });
   const server = createServer((request, response) => {
     void handler(request, response, () => {
@@ -872,6 +1077,12 @@ function createDeviceStateSnapshot(options: {
       updatedAt: collectedAt,
     }],
   };
+}
+
+function createPersistableDeviceStateSnapshot(options: Parameters<typeof createDeviceStateSnapshot>[0] = {}) {
+  const snapshot = normalizeDeviceStateSnapshot(createDeviceStateSnapshot(options));
+  if (!snapshot) throw new Error("test device-state snapshot should normalize");
+  return snapshot;
 }
 
 function createSlockDeviceStateSnapshot() {

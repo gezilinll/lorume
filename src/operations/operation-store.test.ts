@@ -256,6 +256,171 @@ describeDb("Postgres operation store", () => {
     }
   });
 
+  it("persists collector upgrade progress and completes from an external device event", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("collector-upgrade@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Collector Upgrade Team",
+          slug: "collector-upgrade-team",
+        });
+        const operation = await operationStore.createOperation({
+          metadata: {
+            currentVersion: "0.1.0",
+            deviceId: "fixture-mac",
+            targetVersion: "0.1.2",
+          },
+          organizationId: organization.id,
+          requestedByUserId: user.id,
+          summary: "Upgrade collector on fixture-mac to 0.1.2",
+          targetId: "fixture-mac",
+          targetType: "device",
+          type: "collector_upgrade",
+        });
+        const job = await operationStore.enqueueJob({
+          maxAttempts: 1,
+          operationId: operation.id,
+          organizationId: organization.id,
+          payload: {
+            currentVersion: "0.1.0",
+            deviceId: "fixture-mac",
+            stage: "queued",
+            targetVersion: "0.1.2",
+          },
+          type: "collector_upgrade_device",
+        });
+
+        await operationStore.claimNextJob({
+          leaseMs: 30_000,
+          now: new Date("2026-06-02T09:00:00.000Z"),
+          runnerId: "upgrade-runner",
+        });
+        const progressing = await operationStore.updateJobPayload({
+          jobId: job.id,
+          now: new Date("2026-06-02T09:00:02.000Z"),
+          payloadPatch: {
+            message: "Downloading collector package",
+            stage: "downloading",
+          },
+        });
+        const completedJob = await operationStore.completeExternalJob({
+          jobId: job.id,
+          now: new Date("2026-06-02T09:00:30.000Z"),
+          payloadPatch: {
+            collectorVersion: "0.1.2",
+            stage: "succeeded",
+          },
+          status: "succeeded",
+        });
+        const completedOperation = await operationStore.readOperation({ operationId: operation.id });
+
+        expect(progressing).toMatchObject({
+          id: job.id,
+          payload: expect.objectContaining({
+            currentVersion: "0.1.0",
+            message: "Downloading collector package",
+            stage: "downloading",
+            targetVersion: "0.1.2",
+          }),
+        });
+        expect(completedJob).toMatchObject({
+          finishedAt: expect.any(Date),
+          id: job.id,
+          lockedBy: null,
+          payload: expect.objectContaining({
+            collectorVersion: "0.1.2",
+            stage: "succeeded",
+          }),
+          status: "succeeded",
+        });
+        expect(completedOperation).toMatchObject({
+          id: operation.id,
+          status: "succeeded",
+        });
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
+  it("fails collector upgrade jobs externally without retrying", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("collector-upgrade-fail@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Collector Upgrade Failure Team",
+          slug: "collector-upgrade-failure-team",
+        });
+        const operation = await operationStore.createOperation({
+          organizationId: organization.id,
+          requestedByUserId: user.id,
+          summary: "Upgrade collector on fixture-mac to 0.1.2",
+          targetId: "fixture-mac",
+          targetType: "device",
+          type: "collector_upgrade",
+        });
+        const job = await operationStore.enqueueJob({
+          maxAttempts: 1,
+          operationId: operation.id,
+          organizationId: organization.id,
+          payload: {
+            deviceId: "fixture-mac",
+            stage: "installing",
+            targetVersion: "0.1.2",
+          },
+          type: "collector_upgrade_device",
+        });
+        await operationStore.claimNextJob({
+          leaseMs: 30_000,
+          now: new Date("2026-06-02T10:00:00.000Z"),
+          runnerId: "upgrade-runner",
+        });
+
+        const failedJob = await operationStore.completeExternalJob({
+          errorSummary: "Collector reported hash mismatch",
+          jobId: job.id,
+          now: new Date("2026-06-02T10:00:30.000Z"),
+          payloadPatch: {
+            errorCode: "hash_mismatch",
+            stage: "failed",
+          },
+          status: "failed",
+        });
+        const failedOperation = await operationStore.readOperation({ operationId: operation.id });
+
+        expect(failedJob).toMatchObject({
+          attemptCount: 1,
+          lastErrorSummary: "Collector reported hash mismatch",
+          payload: expect.objectContaining({
+            errorCode: "hash_mismatch",
+            stage: "failed",
+          }),
+          status: "failed",
+        });
+        expect(failedOperation).toMatchObject({
+          errorSummary: "Collector reported hash mismatch",
+          status: "failed",
+        });
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("requeues failed jobs until max attempts and then fails the operation", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

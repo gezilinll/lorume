@@ -23,6 +23,7 @@ interface OperationListItem {
   createdAt: string;
   errorSummary?: string | null;
   id: string;
+  manualInstruction?: string | null;
   resourceId?: string | null;
   resourceType?: string | null;
   status: OperationStatus;
@@ -31,6 +32,18 @@ interface OperationListItem {
   targetType?: string | null;
   type: string;
   updatedAt: string;
+}
+
+interface OperationJobListItem {
+  createdAt?: string;
+  finishedAt?: string | null;
+  id: string;
+  lastErrorSummary?: string | null;
+  payload?: Record<string, unknown>;
+  startedAt?: string | null;
+  status: OperationStatus;
+  type: string;
+  updatedAt?: string;
 }
 
 type NotificationSeverity = "info" | "warning" | "critical";
@@ -215,6 +228,9 @@ export function ConsoleUtilityDrawer({ organizationId, utilityDataEnabled = true
 function OperationsDrawer({ organizationId, utilityDataEnabled }: { organizationId?: string; utilityDataEnabled: boolean }) {
   const [operations, setOperations] = useState<OperationListItem[]>([]);
   const [detailOperation, setDetailOperation] = useState<OperationListItem | null>(null);
+  const [detailJobs, setDetailJobs] = useState<OperationJobListItem[]>([]);
+  const [detailErrorMessage, setDetailErrorMessage] = useState("");
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -244,6 +260,24 @@ function OperationsDrawer({ organizationId, utilityDataEnabled }: { organization
       window.clearInterval(timer);
     };
   }, [organizationId, utilityDataEnabled]);
+
+  async function selectOperation(operation: OperationListItem) {
+    setDetailOperation(operation);
+    setDetailJobs([]);
+    setDetailErrorMessage("");
+    setIsDetailLoading(true);
+    try {
+      const response = await fetch(`/api/operations/${encodeURIComponent(operation.id)}?limit=100`);
+      if (!response.ok) throw new Error(`任务详情读取失败: HTTP ${response.status}`);
+      const payload = await response.json() as { jobs?: unknown[]; operation?: OperationListItem };
+      setDetailOperation(payload.operation ?? operation);
+      setDetailJobs(normalizeOperationJobs(payload.jobs));
+    } catch (error) {
+      setDetailErrorMessage(error instanceof Error ? error.message : "任务详情读取失败");
+    } finally {
+      setIsDetailLoading(false);
+    }
+  }
 
   const summary = useMemo(() => ({
     active: operations.filter((operation) => activeOperationStatuses.has(operation.status)).length,
@@ -282,7 +316,7 @@ function OperationsDrawer({ organizationId, utilityDataEnabled }: { organization
                 key={operation.id}
                 variant="outline"
                 type="button"
-                onClick={() => setDetailOperation(operation)}
+                onClick={() => void selectOperation(operation)}
               >
                 <span className="flex w-full items-start justify-between gap-2">
                   <strong className="font-medium text-foreground">{operation.summary}</strong>
@@ -298,10 +332,17 @@ function OperationsDrawer({ organizationId, utilityDataEnabled }: { organization
         )}
       </section>
       <OperationDetailDialog
+        errorMessage={detailErrorMessage}
+        isLoading={isDetailLoading}
+        jobs={detailJobs}
         operation={detailOperation}
         open={Boolean(detailOperation)}
         onOpenChange={(open) => {
-          if (!open) setDetailOperation(null);
+          if (!open) {
+            setDetailOperation(null);
+            setDetailJobs([]);
+            setDetailErrorMessage("");
+          }
         }}
       />
     </div>
@@ -423,10 +464,16 @@ function NotificationsDrawer({ organizationId, utilityDataEnabled }: { organizat
 }
 
 function OperationDetailDialog({
+  errorMessage,
+  isLoading,
+  jobs,
   operation,
   open,
   onOpenChange,
 }: {
+  errorMessage: string;
+  isLoading: boolean;
+  jobs: OperationJobListItem[];
   operation: OperationListItem | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -460,6 +507,23 @@ function OperationDetailDialog({
         <p>创建时间: {formatDateTime(operation.createdAt)}</p>
         <p>更新时间: {formatDateTime(operation.updatedAt)}</p>
         <p>错误: {operation.errorSummary ?? "无"}</p>
+        <p>人工处理: {operation.manualInstruction ?? "无"}</p>
+      </DetailSection>
+      <DetailSection title="Job 进度">
+        {errorMessage ? <p>{errorMessage}</p> : null}
+        {isLoading ? <p>读取中</p> : null}
+        {!isLoading && !errorMessage && jobs.length === 0 ? <p>暂无 Job 详情</p> : null}
+        {!isLoading && !errorMessage ? jobs.map((job) => (
+          <div className="rounded-lg border border-border/80 px-3 py-2" key={job.id}>
+            <p>Job: {job.type}</p>
+            <p>状态: {operationStatusLabels[job.status] ?? job.status}</p>
+            {jobProgressItems(job).map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+            <p>更新时间: {formatDateTime(job.updatedAt)}</p>
+            <p>错误: {job.lastErrorSummary ?? "无"}</p>
+          </div>
+        )) : null}
       </DetailSection>
     </DetailSurface>
   );
@@ -529,12 +593,81 @@ function UtilityMetric({ label, value, tone }: { label: string; value: number; t
   );
 }
 
+function normalizeOperationJobs(value: unknown[] | undefined): OperationJobListItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeOperationJob).filter((job): job is OperationJobListItem => Boolean(job));
+}
+
+function normalizeOperationJob(value: unknown): OperationJobListItem | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const id = readString(candidate.id);
+  const type = readString(candidate.type);
+  const status = normalizeOperationStatus(candidate.status);
+  if (!id || !type || !status) return null;
+  const job: OperationJobListItem = { id, status, type };
+  const createdAt = readString(candidate.createdAt);
+  const updatedAt = readString(candidate.updatedAt);
+  const startedAt = readNullableString(candidate.startedAt);
+  const finishedAt = readNullableString(candidate.finishedAt);
+  const lastErrorSummary = readNullableString(candidate.lastErrorSummary);
+  if (createdAt) job.createdAt = createdAt;
+  if (updatedAt) job.updatedAt = updatedAt;
+  if (startedAt !== undefined) job.startedAt = startedAt;
+  if (finishedAt !== undefined) job.finishedAt = finishedAt;
+  if (lastErrorSummary !== undefined) job.lastErrorSummary = lastErrorSummary;
+  if (isRecord(candidate.payload)) job.payload = candidate.payload;
+  return job;
+}
+
+function normalizeOperationStatus(value: unknown): OperationStatus | null {
+  return value === "queued"
+    || value === "running"
+    || value === "succeeded"
+    || value === "failed"
+    || value === "unsupported"
+    || value === "requires_manual_step"
+    || value === "cancelled"
+    ? value
+    : null;
+}
+
+function jobProgressItems(job: OperationJobListItem): string[] {
+  const payload = job.payload ?? {};
+  return [
+    progressItem(payload, "阶段", "stage"),
+    progressItem(payload, "消息", "message"),
+    progressItem(payload, "当前版本", "currentVersion"),
+    progressItem(payload, "目标版本", "targetVersion"),
+    progressItem(payload, "Collector 版本", "collectorVersion"),
+  ].filter((item): item is string => Boolean(item));
+}
+
+function progressItem(payload: Record<string, unknown>, label: string, key: string): string | null {
+  const value = readString(payload[key]);
+  return value ? `${label}: ${value}` : null;
+}
+
+function readNullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return readString(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function formatOptionalPair(type?: string | null, id?: string | null): string {
   if (!type && !id) return "无";
   return [type, id].filter(Boolean).join(" · ");
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value?: string | null): string {
+  if (!value) return "未知";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "未知";
   return new Intl.DateTimeFormat("zh-CN", {

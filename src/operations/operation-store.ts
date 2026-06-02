@@ -25,12 +25,14 @@ export type OperationJobStatus =
 
 /** Operation type currently supported by Lorume. */
 export type OperationType =
-  | "notification_delivery";
+  | "notification_delivery"
+  | "collector_upgrade";
 
 /** Operation job type currently supported by Lorume. */
 export type OperationJobType =
   | "notification_in_app"
-  | "notification_email";
+  | "notification_email"
+  | "collector_upgrade_device";
 
 /** Persisted operation row. */
 export interface OperationRow {
@@ -114,11 +116,24 @@ export interface OperationStore {
   listOperations: (input: ListOperationsInput) => Promise<OperationRow[]>;
   listJobs: (input: { operationId: string; limit?: number }) => Promise<OperationJobRow[]>;
   claimNextJob: (input: { runnerId: string; now: Date; leaseMs: number }) => Promise<OperationJobRow | null>;
+  updateJobPayload: (input: {
+    jobId: string;
+    now?: Date;
+    payloadPatch: Record<string, unknown>;
+  }) => Promise<OperationJobRow | null>;
   completeJob: (input: {
     jobId: string;
     manualInstruction?: string;
     now: Date;
     status: "succeeded" | "unsupported" | "requires_manual_step";
+  }) => Promise<OperationJobRow | null>;
+  completeExternalJob: (input: {
+    jobId: string;
+    now: Date;
+    status: "succeeded" | "failed" | "unsupported" | "requires_manual_step";
+    errorSummary?: string;
+    manualInstruction?: string;
+    payloadPatch?: Record<string, unknown>;
   }) => Promise<OperationJobRow | null>;
   failJob: (input: { jobId: string; now: Date; errorSummary: string; retryAfterMs?: number }) => Promise<OperationJobRow | null>;
   updateOperationStatus: (input: {
@@ -263,6 +278,18 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
         return job;
       });
     },
+    async updateJobPayload(input) {
+      const now = input.now ?? new Date();
+      const result = await pool.query<OperationJobRow>(`
+        UPDATE operation_jobs
+        SET
+          payload = payload || $2::jsonb,
+          updated_at = $3
+        WHERE id = $1
+        RETURNING ${jobColumns}
+      `, [input.jobId, JSON.stringify(input.payloadPatch), now]);
+      return result.rows[0] ?? null;
+    },
     async completeJob(input) {
       return withTransaction(pool, async (client) => {
         const result = await client.query<OperationJobRow>(`
@@ -279,6 +306,41 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
         const job = result.rows[0] ?? null;
         if (job) {
           await refreshOperationStatus(client, job.operationId, input.now, undefined, input.manualInstruction);
+        }
+        return job;
+      });
+    },
+    async completeExternalJob(input) {
+      return withTransaction(pool, async (client) => {
+        const errorSummary = input.errorSummary ? sanitizeSummary(input.errorSummary) : null;
+        const result = await client.query<OperationJobRow>(`
+          UPDATE operation_jobs
+          SET
+            status = $2,
+            payload = payload || $3::jsonb,
+            locked_by = NULL,
+            locked_until = NULL,
+            last_error_summary = CASE WHEN $2 = 'failed' THEN $4 ELSE last_error_summary END,
+            finished_at = $5,
+            updated_at = $5
+          WHERE id = $1
+          RETURNING ${jobColumns}
+        `, [
+          input.jobId,
+          input.status,
+          JSON.stringify(input.payloadPatch ?? {}),
+          errorSummary,
+          input.now,
+        ]);
+        const job = result.rows[0] ?? null;
+        if (job) {
+          await refreshOperationStatus(
+            client,
+            job.operationId,
+            input.now,
+            errorSummary ?? undefined,
+            input.manualInstruction,
+          );
         }
         return job;
       });

@@ -72,7 +72,7 @@ Collector 版本状态单独展示：
 | `待升级` | 当前 collector version 低于服务端 manifest version，且设备支持升级协议。 |
 | `升级中` | 存在进行中的 `collector_upgrade` Operation / Job。 |
 | `升级失败` | 最近一次 collector upgrade Operation / Job 失败。 |
-| `需手动重装` | 设备未声明升级协议能力，不能自动升级。 |
+| `需手动升级` | 设备未声明升级协议能力、当前不在线，或最近升级 Operation 需要 owner/admin 手动处理。 |
 | `未上报` | 后端没有可用 collector version。 |
 
 ## 最近活跃
@@ -121,9 +121,9 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-v
 
 - 列表/卡片使用 `users.html` 的团队动态节奏展示 device id、hostname、collection status、最近活跃、Runtime 数和 Agent 数。
 - 详情展示基础信息、网络、collector、已注册 Runtime。
-- Collector 详情展示当前版本、服务端最新版本、升级协议能力、最近升级 Operation、最近升级时间和失败摘要。
-- `升级 Collector` / `重试升级` 操作只在用户有 owner / admin 权限且后端返回可升级状态时显示；点击后创建 Operation，不直接向设备发消息。
-- `查看任务` 打开 Operations 抽屉或跳转 `/operations` 深链查看对应 Operation。
+- Collector 详情展示当前版本、服务端最新版本和升级状态。升级协议能力、最近 progress message、失败摘要和人工处理说明通过 Operations 任务详情查看。
+- `升级 Collector` 操作在前端已有服务端最新版本、且当前不是 `最新` / `升级中` 时可点击；后端仍必须独立校验 owner / admin 权限、组织归属、设备在线状态和升级协议能力。点击后创建 Operation，不直接向设备发消息。
+- Operations 抽屉是查看 collector upgrade 任务进度和结果的入口；详情读取 `GET /api/operations/:operationId` 并展示 Job stage、progress message、当前版本、目标版本和失败摘要。
 - 网络详情展示去噪后的本机局域网 IP 和公网 IP。`localIps` 只展示 collector 认为对用户有解释价值的地址，不展示 link-local IPv6、虚拟网桥、Docker/VM/VPN 噪音地址。
 - 不展示由 Runtime/Agent/Task 推导出的工作状态。
 
@@ -157,8 +157,13 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - `agents`: Agent 数组。
 - `taskSummary`: 由 active non-stale Task 派生的计数摘要。
 - `summary`: 顶部统计。
-- `collectorSummary`: 服务端 collector 最新版本、待升级设备数和进行中升级数。
-- `collectorUpgradeByDeviceId`: 每台设备的版本状态、升级协议能力和最近 Operation 摘要。
+
+Collector 版本治理由 Runtime Fleet 前端组合以下 API 得出，不要求 `GET /api/runtime-fleet` 返回额外 collector summary 字段：
+
+- `GET /api/device-collector/manifest.json`：服务端 collector 最新版本。
+- `GET /api/operations?resourceType=device&targetType=collector`：最近 collector upgrade Operation。
+- `POST /api/devices/:deviceId/collector-upgrade`：创建单设备升级 Operation。
+- `GET /api/operations/:operationId`：读取 Operation 和 Job stage/progress 详情。
 
 `taskSummary` 必须至少包含：
 
@@ -178,7 +183,7 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
 - Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。`不可见` badge hover/focus 时展示解释：`该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。`
-- Device collector 版本状态只显示 `最新 / 待升级 / 升级中 / 升级失败 / 需手动重装 / 未上报`，不能改写 Device collection status。
+- Device collector 版本状态只显示 `最新 / 待升级 / 升级中 / 升级失败 / 需手动升级 / 未上报`，不能改写 Device collection status。
 - 单设备 `升级 Collector` 会创建 Operation，并由 Operations 抽屉展示进度和结果。
 - Runtime 行级 Skill 入口跳转到 `/skills?runtimeId=...`；Agent 行级 Skill 入口跳转到 `/skills?runtimeId=...&agentId=...`。
 - `不可见` Agent 的行级 Skill 仓库入口禁用，避免把最新清单中已缺失的 Agent 作为当前可用 Agent 过滤目标。

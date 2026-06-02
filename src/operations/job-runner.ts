@@ -4,7 +4,7 @@ import type { OperationJobRow, OperationJobType, OperationRow, OperationStatus, 
 /** Handler result for a claimed operation job. */
 export interface OperationJobHandlerResult {
   manualInstruction?: string;
-  status: "succeeded" | "unsupported" | "requires_manual_step";
+  status: "succeeded" | "unsupported" | "requires_manual_step" | "external_running";
 }
 
 /** Handler for one executable operation job type. */
@@ -28,7 +28,7 @@ export type OperationJobRunResult =
     status: "handled";
     jobId: string;
     jobType: OperationJobType;
-    outcome: "succeeded" | "unsupported" | "requires_manual_step";
+    outcome: "succeeded" | "unsupported" | "requires_manual_step" | "external_running";
   }
   | { status: "failed"; jobId: string; jobType: OperationJobType; errorSummary: string };
 
@@ -70,6 +70,14 @@ export function createOperationJobRunner(options: OperationJobRunnerOptions): Op
 
       try {
         const result = await handler(claimedJob);
+        if (result.status === "external_running") {
+          return {
+            jobId: claimedJob.id,
+            jobType: claimedJob.type,
+            outcome: "external_running",
+            status: "handled",
+          };
+        }
         await options.operationStore.completeJob({
           jobId: claimedJob.id,
           manualInstruction: result.manualInstruction,

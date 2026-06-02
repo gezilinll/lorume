@@ -153,6 +153,8 @@ describeDb("database schema baseline", () => {
           "created_at",
           "updated_at",
         ]);
+        await expect(readCheckConstraintDefinition(client, "operations", "operations_type_check")).resolves.toContain("collector_upgrade");
+        await expect(readCheckConstraintDefinition(client, "operation_jobs", "operation_jobs_type_check")).resolves.toContain("collector_upgrade_device");
       } finally {
         await client.end();
       }
@@ -193,4 +195,18 @@ async function readColumnNullable(client: Client, tableName: string, columnName:
       AND column_name = $2
   `, [tableName, columnName]);
   return result.rows[0]?.is_nullable === "YES";
+}
+
+async function readCheckConstraintDefinition(client: Client, tableName: string, constraintName: string): Promise<string> {
+  const result = await client.query<{ definition: string }>(`
+    SELECT pg_get_constraintdef(pg_constraint.oid) AS definition
+    FROM pg_constraint
+    INNER JOIN pg_class table_class ON table_class.oid = pg_constraint.conrelid
+    INNER JOIN pg_namespace namespace ON namespace.oid = table_class.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND table_class.relname = $1
+      AND pg_constraint.conname = $2
+    LIMIT 1
+  `, [tableName, constraintName]);
+  return result.rows[0]?.definition ?? "";
 }

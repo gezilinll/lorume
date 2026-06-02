@@ -30,6 +30,15 @@ const publicChecks = [
       'download "lorume.mjs"',
     ].every((fragment) => body.includes(fragment)) && !body.includes("--device-name"),
   },
+  {
+    name: "collector manifest",
+    path: "/api/device-collector/manifest.json",
+    type: "json",
+    validate: (body) => body?.schemaVersion === "collector-package-v1"
+      && typeof body?.version === "string"
+      && Array.isArray(body?.files)
+      && body.files.some((file) => file?.fileName === "lorume-device-collector.mjs" && /^[a-f0-9]{64}$/.test(file?.sha256 ?? "")),
+  },
 ];
 
 const authenticatedChecks = [

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import {
+  createCollectorPackageManifest,
   deviceInstallerPackageManifest,
   findDeviceInstallerPackageFile,
 } from "./device-installer-manifest";
@@ -21,6 +22,11 @@ export function createDeviceInstallerHttpApiHandler() {
 
     if (requestUrl.pathname === "/api/device-collector/install.sh") {
       sendText(response, 200, "text/x-shellscript; charset=utf-8", remoteInstallerScript());
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/device-collector/manifest.json") {
+      sendJson(response, 200, await createCollectorPackageManifest());
       return;
     }
 
@@ -95,4 +101,8 @@ function sendText(response: ServerResponse, statusCode: number, contentType: str
   response.setHeader("cache-control", "no-store");
   response.setHeader("content-type", contentType);
   response.end(body);
+}
+
+function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
+  sendText(response, statusCode, "application/json; charset=utf-8", JSON.stringify(body));
 }

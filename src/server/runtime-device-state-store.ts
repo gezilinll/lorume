@@ -40,6 +40,19 @@ export interface RuntimeDeviceStateSnapshot {
 export type RuntimeDeviceConnectionStatus = "online" | "stale" | "offline";
 
 /** Latest known connection metadata for one registered device. */
+export interface RuntimeCollectorUpgradeCapability {
+  /** Collector supports the restricted self-upgrade protocol. */
+  supported: true;
+  /** Upgrade protocol version supported by the collector. */
+  protocolVersion: number;
+  /** Optional collector install path reported by the device, used only for diagnostics. */
+  installPath?: string;
+  /** Latest local upgrade job id remembered by the collector. */
+  lastUpgradeJobId?: string;
+  /** Latest local upgrade result remembered by the collector. */
+  lastUpgradeStatus?: "succeeded" | "failed" | "rolled_back";
+}
+
 export interface RuntimeDeviceConnection {
   /** Stable Lorume device id. */
   deviceId: string;
@@ -53,6 +66,8 @@ export interface RuntimeDeviceConnection {
   lastDisconnectedAt?: string;
   /** Collector version reported by the device agent. */
   collectorVersion?: string;
+  /** Collector self-upgrade capability reported by the device agent. */
+  collectorUpgrade?: RuntimeCollectorUpgradeCapability;
   /** Hostname reported by the device agent. */
   hostname?: string;
   /** Small load/status summary reported by heartbeat. */

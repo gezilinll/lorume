@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { compareCollectorVersions } from "../collector/collector-upgrade-model";
 import type { RuntimeControlChannel } from "./runtime-control-channel";
 import type { RuntimeDeviceStateStore } from "./runtime-device-state-store";
 import type { PostgresStore } from "./postgres-store";
+import { createCollectorPackageManifest } from "../backend/device-installer-manifest";
 import type { CreateNotificationEventInput } from "../notifications/notification-store";
+import type { OperationStore, OperationStatus } from "../operations/operation-store";
 import { createErrorResponse, normalizeErrorCode } from "../errors/error-catalog";
 import type { StructuredLogger } from "../logging/structured-logger";
 import {
@@ -27,7 +31,8 @@ type CollectorSnapshotType = "device_state" | "task_batch";
 type RuntimeOrganizationId = string | undefined;
 
 interface RuntimeUserSessionLike {
-  organizations?: Array<{ organizationId?: unknown }>;
+  organizations?: Array<{ organizationId?: unknown; role?: unknown }>;
+  user?: { id?: unknown };
 }
 
 /** Dependencies for the Runtime Fleet local HTTP API. */
@@ -44,6 +49,8 @@ export interface RuntimeHttpApiHandlerOptions {
   controlChannel: RuntimeControlChannel;
   /** Optional Postgres-backed formal repository. */
   postgresStore?: PostgresStore;
+  /** Optional Operation repository for platform Operations created by Runtime APIs. */
+  operationStore?: OperationStore;
   /** Optional notification integration for collector ingestion health events. */
   collectorNotifications?: {
     createNotificationEvent: (input: CreateNotificationEventInput) => Promise<unknown>;
@@ -303,6 +310,18 @@ export function createRuntimeHttpApiHandler(options: RuntimeHttpApiHandlerOption
       return;
     }
 
+    const collectorUpgradeMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/collector-upgrade$/);
+    if (request.method === "POST" && collectorUpgradeMatch) {
+      await createCollectorUpgradeOperation(
+        options,
+        request,
+        response,
+        decodeURIComponent(collectorUpgradeMatch[1] ?? ""),
+        requestUrl.searchParams,
+      );
+      return;
+    }
+
     const diagnosticsMatch = requestUrl.pathname.match(/^\/api\/devices\/([^/]+)\/diagnostics$/);
     if (request.method === "GET" && diagnosticsMatch) {
       const organizationId = await authorizeOrganizationRead(options, request, response, requestUrl.searchParams);
@@ -346,6 +365,133 @@ function parseChannelKindFilters(searchParams: URLSearchParams): string[] {
     ...(searchParams.get("channelKinds")?.split(",") ?? []),
   ].map((value) => value.trim()).filter(Boolean);
   return Array.from(new Set(values));
+}
+
+async function createCollectorUpgradeOperation(
+  options: RuntimeHttpApiHandlerOptions,
+  request: IncomingMessage,
+  response: ServerResponse,
+  deviceId: string,
+  searchParams: URLSearchParams,
+): Promise<void> {
+  const session = await authorizeUserRead(options, request, response);
+  if (session === null) return;
+  if (!session) {
+    sendJson(response, 401, { error: "unauthorized" });
+    return;
+  }
+  if (!options.postgresStore || !options.operationStore) {
+    sendJson(response, 503, { error: "operation_store_unavailable" });
+    return;
+  }
+
+  const organizationId = resolveRequestedOrganizationId(searchParams, session);
+  if (!organizationId || organizationId === null) {
+    sendJson(response, 403, { error: "forbidden" });
+    return;
+  }
+  if (!canManageCollectorUpgrade(session, organizationId)) {
+    sendJson(response, 403, { error: "forbidden" });
+    return;
+  }
+
+  const fleet = await options.postgresStore.readRuntimeFleet({ organizationId });
+  const device = fleet.devices.find((candidate) => candidate.id === deviceId);
+  if (!device) {
+    sendJson(response, 403, { error: "forbidden" });
+    return;
+  }
+
+  const manifest = await createCollectorPackageManifest();
+  const connection = options.store.readDeviceConnection(deviceId);
+  const currentVersion = connection?.collectorVersion ?? readDeviceCollectorVersion(device);
+  const targetVersion = manifest.version;
+  const operation = await options.operationStore.createOperation({
+    metadata: {
+      currentVersion,
+      deviceId,
+      requestedManifestVersion: manifest.version,
+      targetVersion,
+    },
+    organizationId,
+    requestedByUserId: readSessionUserId(session),
+    resourceId: deviceId,
+    resourceType: "device",
+    summary: `Upgrade collector on ${deviceId} to ${targetVersion}`,
+    targetId: targetVersion,
+    targetType: "collector",
+    type: "collector_upgrade",
+  });
+  const deadlineAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const job = await options.operationStore.enqueueJob({
+    maxAttempts: 3,
+    operationId: operation.id,
+    organizationId,
+    payload: {
+      currentVersion,
+      deadlineAt,
+      deviceId,
+      nonce: `upgrade_${randomUUID()}`,
+      requestedManifestVersion: manifest.version,
+      stage: "queued",
+      status: "running",
+      targetVersion,
+    },
+    type: "collector_upgrade_device",
+  });
+
+  const currentVersionIsLatest = currentVersion
+    ? compareCollectorVersions(currentVersion, targetVersion) >= 0
+    : false;
+  if (currentVersionIsLatest) {
+    await options.operationStore.completeExternalJob({
+      jobId: job.id,
+      now: new Date(),
+      payloadPatch: {
+        collectorVersion: currentVersion,
+        message: "Collector already at target version",
+        stage: "succeeded",
+        status: "succeeded",
+      },
+      status: "succeeded",
+    });
+    sendJson(response, 200, {
+      jobId: job.id,
+      operationId: operation.id,
+      status: "succeeded",
+      targetVersion,
+    });
+    return;
+  }
+
+  const manualInstruction = manualCollectorUpgradeInstruction(connection, manifest.minUpgradeProtocolVersion);
+  if (manualInstruction) {
+    await options.operationStore.completeExternalJob({
+      jobId: job.id,
+      manualInstruction,
+      now: new Date(),
+      payloadPatch: {
+        message: manualInstruction,
+        stage: "failed",
+        status: "requires_manual_step",
+      },
+      status: "requires_manual_step",
+    });
+    sendJson(response, 202, {
+      jobId: job.id,
+      operationId: operation.id,
+      status: "requires_manual_step",
+      targetVersion,
+    });
+    return;
+  }
+
+  sendJson(response, 202, {
+    jobId: job.id,
+    operationId: operation.id,
+    status: "queued" satisfies OperationStatus,
+    targetVersion,
+  });
 }
 
 interface AgentSkillProbeSnapshotContext {
@@ -636,6 +782,55 @@ function listSessionOrganizationIds(session: unknown): string[] {
     .map((organization) => organization.organizationId)
     .filter((organizationId): organizationId is string => typeof organizationId === "string" && Boolean(organizationId.trim()))
     .map((organizationId) => organizationId.trim());
+}
+
+function canManageCollectorUpgrade(session: unknown, organizationId: string): boolean {
+  const membership = readSessionOrganizationMembership(session, organizationId);
+  return membership?.role === "owner" || membership?.role === "admin";
+}
+
+function readSessionOrganizationMembership(
+  session: unknown,
+  organizationId: string,
+): { organizationId: string; role?: string } | null {
+  if (!session || typeof session !== "object") return null;
+  const organizations = (session as RuntimeUserSessionLike).organizations;
+  if (!Array.isArray(organizations)) return null;
+  const membership = organizations.find((candidate) => candidate.organizationId === organizationId);
+  if (!membership || typeof membership.organizationId !== "string") return null;
+  return {
+    organizationId: membership.organizationId,
+    ...(typeof membership.role === "string" ? { role: membership.role } : {}),
+  };
+}
+
+function readSessionUserId(session: unknown): string | null {
+  if (!session || typeof session !== "object") return null;
+  const user = (session as RuntimeUserSessionLike).user;
+  return typeof user?.id === "string" && user.id.trim() ? user.id : null;
+}
+
+function readDeviceCollectorVersion(device: unknown): string | undefined {
+  if (!isRecord(device)) return undefined;
+  const collector = device.collector;
+  if (!isRecord(collector)) return undefined;
+  return typeof collector.version === "string" && collector.version.trim() ? collector.version : undefined;
+}
+
+function manualCollectorUpgradeInstruction(
+  connection: ReturnType<RuntimeDeviceStateStore["readDeviceConnection"]>,
+  minUpgradeProtocolVersion: number,
+): string | null {
+  if (!connection || connection.status !== "online") {
+    return "设备当前不在线，请先让 collector 连接服务端，或手动重装支持升级协议的 collector。";
+  }
+  if (!connection.collectorUpgrade?.supported) {
+    return "当前 collector 未声明自升级能力，请先手动重装支持升级协议的 collector。";
+  }
+  if (connection.collectorUpgrade.protocolVersion < minUpgradeProtocolVersion) {
+    return "当前 collector 升级协议版本过旧，请先手动重装最新版 collector。";
+  }
+  return null;
 }
 
 async function authorizeDeviceWrite(

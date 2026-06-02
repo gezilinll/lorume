@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import type { CollectorPackageManifest } from "../collector/collector-upgrade-model";
+
 export interface DeviceInstallerPackageFile {
   readonly fileName: string;
   readonly sourcePath: string;
@@ -63,4 +68,37 @@ export const deviceInstallerRuntimeFiles = [
 
 export function findDeviceInstallerPackageFile(fileName: string): DeviceInstallerPackageFile | undefined {
   return deviceInstallerPackageManifest.find((entry) => entry.fileName === fileName);
+}
+
+export async function createCollectorPackageManifest(options: {
+  readonly createdAt?: string;
+  readonly version?: string;
+} = {}): Promise<CollectorPackageManifest> {
+  const files = await Promise.all(deviceInstallerRuntimeFiles.map(async (entry) => {
+    const body = await readFile(path.join(process.cwd(), entry.sourcePath));
+    return {
+      bytes: body.byteLength,
+      fileName: entry.fileName,
+      mode: entry.mode,
+      path: entry.fileName,
+      sha256: createHash("sha256").update(body).digest("hex"),
+    };
+  }));
+
+  return {
+    schemaVersion: "collector-package-v1",
+    version: options.version ?? await readCurrentPackageVersion(),
+    createdAt: options.createdAt ?? new Date().toISOString(),
+    minUpgradeProtocolVersion: 1,
+    files,
+  };
+}
+
+async function readCurrentPackageVersion(): Promise<string> {
+  const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as {
+    readonly version?: unknown;
+  };
+  return typeof packageJson.version === "string" && packageJson.version.trim() !== ""
+    ? packageJson.version
+    : "0.0.0";
 }

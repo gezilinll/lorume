@@ -13,6 +13,7 @@ import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
 import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createLorumeBackendServer, type LorumeBackendServer } from "./backend-server";
 import {
+  createCollectorPackageManifest,
   deviceInstallerPackageManifest,
   deviceInstallerRuntimeFiles,
 } from "./device-installer-manifest";
@@ -44,6 +45,26 @@ describe("standalone Lorume backend server", () => {
       "local-ip-normalization.mjs",
       "lorume.mjs",
     ]);
+  });
+
+  it("creates a collector package manifest from runtime files", async () => {
+    const manifest = await createCollectorPackageManifest({
+      createdAt: "2026-06-02T00:00:00.000Z",
+      version: "0.1.2",
+    });
+
+    expect(manifest).toMatchObject({
+      schemaVersion: "collector-package-v1",
+      version: "0.1.2",
+      createdAt: "2026-06-02T00:00:00.000Z",
+      minUpgradeProtocolVersion: 1,
+    });
+    expect(manifest.files.map((file) => file.fileName)).toEqual(deviceInstallerRuntimeFiles.map((file) => file.fileName));
+    for (const file of manifest.files) {
+      expect(file.path).toBe(file.fileName);
+      expect(file.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(file.bytes).toBeGreaterThan(0);
+    }
   });
 
   it("keeps the device control websocket available outside Vite", async () => {
@@ -169,6 +190,26 @@ describe("standalone Lorume backend server", () => {
 
     const missingResponse = await fetch(`${backend.url}/api/device-collector/files/not-allowed.txt`);
     expect(missingResponse.status).toBe(404);
+  });
+
+  it("serves the collector package manifest", async () => {
+    const backend = await startBackend();
+
+    const response = await fetch(`${backend.url}/api/device-collector/manifest.json`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toMatchObject({
+      schemaVersion: "collector-package-v1",
+      version: "0.1.0",
+      files: expect.arrayContaining([
+        expect.objectContaining({
+          fileName: "lorume-device-collector.mjs",
+          path: "lorume-device-collector.mjs",
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+      ]),
+    });
   });
 });
 

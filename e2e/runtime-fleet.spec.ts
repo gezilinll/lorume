@@ -76,6 +76,11 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
     await expect(page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ })).toBeVisible();
+    await expect(page.getByLabel("设备").getByRole("button", { name: /Collector 0\.1\.0 · 最新/ })).toBeVisible();
+    await page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ }).click();
+    const deviceDetail = page.getByRole("complementary", { name: "运行资产详情" });
+    await expect(deviceDetail).toContainText("最新版本: 0.1.0");
+    await expect(deviceDetail.getByRole("button", { name: "已是最新" })).toBeDisabled();
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("在线");

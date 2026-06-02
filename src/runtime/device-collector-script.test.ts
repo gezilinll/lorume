@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -400,6 +401,139 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
     } finally {
       await collector.stop();
       controlServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("self-upgrades from a restricted collector upgrade request", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-self-upgrade-"));
+    const installDir = path.join(tempDir, "collector");
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(installDir, "config.json");
+    const taskSyncCachePath = path.join(tempDir, "task-cache.json");
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(fakeCli, `console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("upgrade-device"))}));\n`);
+    chmodSync(fakeCli, 0o755);
+    for (const file of deviceInstallerRuntimeFiles) {
+      writeFileSync(path.join(installDir, file.fileName), `// old ${file.fileName}\n`);
+    }
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "upgrade-device",
+      deviceToken: "upgrade-token",
+      installDir,
+      serverUrl: "http://127.0.0.1:0",
+      taskSyncCachePath,
+    }));
+    writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
+    const packageFiles = createUpgradePackageFiles("0.1.1");
+    const upgradeServer = await startCollectorUpgradeServer({
+      deviceId: "upgrade-device",
+      packageFiles,
+      targetVersion: "0.1.1",
+    });
+    const collector = createCollectorProcessTracker();
+
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8"));
+      writeFileSync(configPath, JSON.stringify({ ...config, serverUrl: upgradeServer.baseUrl }, null, 2));
+      collector.child = spawn(process.execPath, [
+        collectorScript,
+        "--config",
+        configPath,
+        "--interval-ms",
+        "100",
+      ], {
+        cwd: repoRoot,
+        env: { ...process.env, LORUME_CLI_PATH: fakeCli },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => upgradeServer.progressMessages().some((message) => message.stage === "restart_pending"),
+        "collector restart_pending upgrade progress",
+        4_000,
+      );
+      await waitForProcessExit(collector.child, 2_000);
+
+      for (const file of deviceInstallerRuntimeFiles) {
+        expect(readFileSync(path.join(installDir, file.fileName), "utf8")).toBe(packageFiles[file.fileName]);
+        expect(existsSync(path.join(installDir, ".previous", "opjob_upgrade", file.fileName))).toBe(true);
+      }
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+        deviceId: "upgrade-device",
+        deviceToken: "upgrade-token",
+        installDir,
+      });
+      expect(readFileSync(taskSyncCachePath, "utf8")).toContain("\"tasks\"");
+      expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
+        jobId: "opjob_upgrade",
+        stage: "restart_pending",
+        targetVersion: "0.1.1",
+      });
+    } finally {
+      await collector.stop();
+      upgradeServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects unsafe collector package manifest paths without replacing files", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-self-upgrade-unsafe-"));
+    const installDir = path.join(tempDir, "collector");
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(installDir, "config.json");
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(fakeCli, `console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("unsafe-upgrade-device"))}));\n`);
+    chmodSync(fakeCli, 0o755);
+    for (const file of deviceInstallerRuntimeFiles) {
+      writeFileSync(path.join(installDir, file.fileName), `// old ${file.fileName}\n`);
+    }
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "unsafe-upgrade-device",
+      deviceToken: "upgrade-token",
+      installDir,
+    }));
+    const packageFiles = createUpgradePackageFiles("0.1.1");
+    const upgradeServer = await startCollectorUpgradeServer({
+      deviceId: "unsafe-upgrade-device",
+      manifestOverride: {
+        fileName: "lorume-device-collector.mjs",
+        path: "../config.json",
+      },
+      packageFiles,
+      targetVersion: "0.1.1",
+    });
+    const collector = createCollectorProcessTracker();
+
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8"));
+      writeFileSync(configPath, JSON.stringify({ ...config, serverUrl: upgradeServer.baseUrl }, null, 2));
+      collector.child = spawn(process.execPath, [
+        collectorScript,
+        "--config",
+        configPath,
+        "--interval-ms",
+        "100",
+      ], {
+        cwd: repoRoot,
+        env: { ...process.env, LORUME_CLI_PATH: fakeCli },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => upgradeServer.progressMessages().some((message) => message.stage === "failed"),
+        "collector failed upgrade progress",
+        4_000,
+      );
+
+      expect(readFileSync(path.join(installDir, "lorume-device-collector.mjs"), "utf8")).toBe("// old lorume-device-collector.mjs\n");
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+        deviceId: "unsafe-upgrade-device",
+        deviceToken: "upgrade-token",
+      });
+    } finally {
+      await collector.stop();
+      upgradeServer.close();
       rmSync(tempDir, { force: true, recursive: true });
     }
   });
@@ -1332,6 +1466,145 @@ async function startControlAndSnapshotServer(): Promise<{
     heartbeatBeforeFirstSnapshot: () => heartbeatBeforeSnapshot,
     messages: () => [...controlMessages],
   };
+}
+
+function createUpgradePackageFiles(version: string): Record<string, string> {
+  return {
+    "local-ip-normalization.mjs": `export function normalizeLocalIpsForDisplay(entries) { return entries.map((entry) => entry.address).filter(Boolean); }\n// upgraded ${version}\n`,
+    "lorume-device-collector.mjs": `#!/usr/bin/env node\nconsole.log("upgraded collector ${version}");\n`,
+    "lorume-runtime-adapters.mjs": `export function createRuntimeAdapters() { return []; }\n// upgraded ${version}\n`,
+    "lorume.mjs": `#!/usr/bin/env node\nconsole.log("upgraded lorume ${version}");\n`,
+  };
+}
+
+async function startCollectorUpgradeServer(options: {
+  deviceId: string;
+  manifestOverride?: { fileName: string; path: string };
+  packageFiles: Record<string, string>;
+  targetVersion: string;
+}): Promise<{
+  baseUrl: string;
+  close: () => void;
+  progressMessages: () => Array<Record<string, unknown>>;
+}> {
+  const progressMessages: Array<Record<string, unknown>> = [];
+  let baseUrl = "";
+  const server = createServer((request, response) => {
+    const requestUrl = new URL(request.url || "/", "http://127.0.0.1");
+    if (requestUrl.pathname === "/api/device-state-snapshots" || requestUrl.pathname === "/api/device-task-batches") {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true, acked: [] }));
+      });
+      return;
+    }
+    if (requestUrl.pathname === "/api/device-collector/manifest.json") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(createUpgradeManifest(options)));
+      return;
+    }
+    const fileMatch = requestUrl.pathname.match(/^\/api\/device-collector\/files\/([^/]+)$/);
+    if (fileMatch) {
+      const fileName = decodeURIComponent(fileMatch[1] ?? "");
+      const body = options.packageFiles[fileName];
+      if (!body) {
+        response.statusCode = 404;
+        response.end("not found");
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+      response.end(body);
+      return;
+    }
+    response.statusCode = 404;
+    response.end("not found");
+  });
+  const webSocketServer = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    if (request.url !== "/api/device-control/ws") {
+      socket.destroy();
+      return;
+    }
+    webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+      webSocketServer.emit("connection", webSocket, request);
+    });
+  });
+  webSocketServer.on("connection", (webSocket) => {
+    webSocket.on("message", (data) => {
+      const message = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (message.type === "hello") {
+        webSocket.send(JSON.stringify({ type: "hello.ack", deviceId: message.deviceId }));
+        webSocket.send(JSON.stringify({
+          type: "collector.upgrade.request",
+          currentVersion: "0.1.0",
+          deadlineAt: "2026-06-02T09:05:00.000Z",
+          deviceId: options.deviceId,
+          jobId: "opjob_upgrade",
+          manifestUrl: `${baseUrl}/api/device-collector/manifest.json`,
+          nonce: "upgrade_nonce",
+          operationId: "op_upgrade",
+          packageBaseUrl: `${baseUrl}/api/device-collector/files`,
+          protocolVersion: 1,
+          targetVersion: options.targetVersion,
+        }));
+      } else if (message.type === "collector.upgrade.progress") {
+        progressMessages.push(message);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  baseUrl = `http://127.0.0.1:${address.port}`;
+  return {
+    baseUrl,
+    close() {
+      webSocketServer.close();
+      server.close();
+    },
+    progressMessages: () => [...progressMessages],
+  };
+}
+
+function createUpgradeManifest(options: {
+  manifestOverride?: { fileName: string; path: string };
+  packageFiles: Record<string, string>;
+  targetVersion: string;
+}) {
+  return {
+    schemaVersion: "collector-package-v1",
+    version: options.targetVersion,
+    createdAt: "2026-06-02T09:00:00.000Z",
+    minUpgradeProtocolVersion: 1,
+    files: deviceInstallerRuntimeFiles.map((file) => {
+      const body = options.packageFiles[file.fileName];
+      const pathOverride = options.manifestOverride?.fileName === file.fileName
+        ? options.manifestOverride.path
+        : file.fileName;
+      return {
+        bytes: Buffer.byteLength(body),
+        fileName: file.fileName,
+        mode: file.mode,
+        path: pathOverride,
+        sha256: createHash("sha256").update(body).digest("hex"),
+      };
+    }),
+  };
+}
+
+function waitForProcessExit(child: ReturnType<typeof spawn> | undefined, timeoutMs: number): Promise<void> {
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("collector process did not exit"));
+    }, timeoutMs);
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 async function startRecordingSnapshotServer(options: { expectedAuthorization?: string } = {}): Promise<{

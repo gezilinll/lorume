@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  collectorVersionPostureLabels,
   collectionStatusLabels,
+  deriveCollectorVersionPosture,
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
@@ -11,6 +13,7 @@ import {
   runtimeFleetRuntimeLastActiveAt,
   runtimeDisplayName,
   runtimeFleetSnapshotFromQueryResponse,
+  summarizeCollectorVersions,
   summarizeRuntimeFleet,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
@@ -110,6 +113,123 @@ describe("runtime fleet query", () => {
     }, runtime)).toBe("online");
     expect(deriveAgentFleetStatus(snapshot, agent)).toBe("online");
     expect(deriveAgentFleetStatus(snapshot, { ...agent, collectionStatus: "invisible" })).toBe("invisible");
+  });
+
+  it("derives collector version posture from latest package version and upgrade operations", () => {
+    expect(collectorVersionPostureLabels).toEqual({
+      failed: "升级失败",
+      latest: "最新",
+      not_reported: "未上报",
+      outdated: "待升级",
+      requires_manual_step: "需手动升级",
+      unknown: "未知",
+      upgrading: "升级中",
+    });
+    expect(deriveCollectorVersionPosture({ currentVersion: "0.1.0", latestVersion: "0.1.0" })).toBe("latest");
+    expect(deriveCollectorVersionPosture({ currentVersion: "0.0.9", latestVersion: "0.1.0" })).toBe("outdated");
+    expect(deriveCollectorVersionPosture({ currentVersion: undefined, latestVersion: "0.1.0" })).toBe("not_reported");
+    expect(deriveCollectorVersionPosture({ currentVersion: "0.1.0", latestVersion: undefined })).toBe("unknown");
+    expect(deriveCollectorVersionPosture({
+      currentVersion: "0.0.9",
+      latestVersion: "0.1.0",
+      operationStatus: "running",
+    })).toBe("upgrading");
+    expect(deriveCollectorVersionPosture({
+      currentVersion: "0.0.9",
+      latestVersion: "0.1.0",
+      operationStatus: "failed",
+    })).toBe("failed");
+    expect(deriveCollectorVersionPosture({
+      currentVersion: "0.0.9",
+      latestVersion: "0.1.0",
+      operationStatus: "requires_manual_step",
+    })).toBe("requires_manual_step");
+  });
+
+  it("summarizes collector versions per Device using the latest relevant Operation", () => {
+    const summary = summarizeCollectorVersions({
+      ...snapshot,
+      devices: [
+        snapshot.devices[0],
+        {
+          ...snapshot.devices[0],
+          collector: { version: "0.1.0" },
+          id: "latest-device",
+        },
+        {
+          ...snapshot.devices[0],
+          collector: undefined,
+          id: "manual-device",
+        },
+      ],
+    }, "0.1.0", [
+      {
+        createdAt: "2026-05-21T09:30:00.000Z",
+        id: "op_old",
+        resourceId: "fixture-mac",
+        resourceType: "device",
+        status: "failed",
+        targetId: "0.1.0",
+        targetType: "collector",
+        type: "collector_upgrade",
+        updatedAt: "2026-05-21T09:40:00.000Z",
+      },
+      {
+        createdAt: "2026-05-21T09:50:00.000Z",
+        id: "op_running",
+        resourceId: "fixture-mac",
+        resourceType: "device",
+        status: "running",
+        targetId: "0.1.0",
+        targetType: "collector",
+        type: "collector_upgrade",
+        updatedAt: "2026-05-21T09:55:00.000Z",
+      },
+      {
+        createdAt: "2026-05-21T09:59:00.000Z",
+        id: "op_manual",
+        resourceId: "manual-device",
+        resourceType: "device",
+        status: "requires_manual_step",
+        targetId: "0.1.0",
+        targetType: "collector",
+        type: "collector_upgrade",
+        updatedAt: "2026-05-21T09:59:00.000Z",
+      },
+    ]);
+
+    expect(summary.latestVersion).toBe("0.1.0");
+    expect(summary.byDeviceId["fixture-mac"]).toMatchObject({
+      currentVersion: "0.1.0",
+      deviceId: "fixture-mac",
+      label: "升级中",
+      operationId: "op_running",
+      operationStatus: "running",
+      posture: "upgrading",
+      targetVersion: "0.1.0",
+    });
+    expect(summary.byDeviceId["latest-device"]).toMatchObject({
+      currentVersion: "0.1.0",
+      label: "最新",
+      posture: "latest",
+    });
+    expect(summary.byDeviceId["manual-device"]).toMatchObject({
+      label: "需手动升级",
+      operationId: "op_manual",
+      operationStatus: "requires_manual_step",
+      posture: "requires_manual_step",
+    });
+    expect(summary.counts).toEqual({
+      failed: 0,
+      latest: 1,
+      not_reported: 0,
+      outdated: 0,
+      requires_manual_step: 1,
+      unknown: 0,
+      upgrading: 1,
+    });
+    expect(summary.actionableCount).toBe(1);
+    expect(summary.activeCount).toBe(1);
   });
 
   it("resolves device detail with only device facts, collector facts, and derived task counts", () => {

@@ -13,6 +13,7 @@ import {
   createEmptyTaskStatusCounts,
   TASK_CHANNEL_KIND_LABELS,
 } from "./runtime-model";
+import { compareCollectorVersions } from "../collector/collector-upgrade-model";
 import type { DeviceCollectionHealth } from "./runtime-collection-health";
 import type { DeviceHealthStatus, DeviceHealthStatusResult } from "./runtime-device-health";
 
@@ -41,6 +42,73 @@ export const runtimeFleetObjectStatusLabels = collectionStatusLabels;
 
 /** Normalized Runtime Fleet object status. */
 export type RuntimeFleetObjectStatus = CollectionStatus | AgentCollectionStatus;
+
+/** User-visible Operation status values read by Runtime Fleet without importing backend modules. */
+export type RuntimeFleetOperationStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "unsupported"
+  | "requires_manual_step"
+  | "cancelled";
+
+/** Minimal Operation list item needed to fold collector upgrade progress into Runtime Fleet. */
+export interface RuntimeFleetOperationListItem {
+  createdAt?: string;
+  id: string;
+  metadata?: Record<string, unknown>;
+  resourceId?: string | null;
+  resourceType?: string | null;
+  status: RuntimeFleetOperationStatus;
+  targetId?: string | null;
+  targetType?: string | null;
+  type: string;
+  updatedAt?: string;
+}
+
+/** Per-device collector version posture shown beside Runtime Fleet Device health. */
+export type CollectorVersionPosture =
+  | "latest"
+  | "outdated"
+  | "upgrading"
+  | "failed"
+  | "requires_manual_step"
+  | "not_reported"
+  | "unknown";
+
+/** Product labels for collector version posture. */
+export const collectorVersionPostureLabels: Record<CollectorVersionPosture, string> = {
+  failed: "升级失败",
+  latest: "最新",
+  not_reported: "未上报",
+  outdated: "待升级",
+  requires_manual_step: "需手动升级",
+  unknown: "未知",
+  upgrading: "升级中",
+};
+
+/** Per-device collector version row derived from Device snapshot plus latest upgrade Operation. */
+export interface CollectorVersionDeviceSummary {
+  currentVersion?: string;
+  deviceId: string;
+  label: string;
+  latestVersion?: string;
+  operationId?: string;
+  operationStatus?: RuntimeFleetOperationStatus;
+  posture: CollectorVersionPosture;
+  targetVersion?: string;
+  updatedAt?: string;
+}
+
+/** Fleet-level collector version summary for Runtime Fleet. */
+export interface CollectorVersionSummary {
+  actionableCount: number;
+  activeCount: number;
+  byDeviceId: Record<string, CollectorVersionDeviceSummary>;
+  counts: Record<CollectorVersionPosture, number>;
+  latestVersion?: string;
+}
 
 /** Backend/UI Runtime Fleet snapshot built from the four top-level product objects. */
 export interface RuntimeFleetSnapshot {
@@ -75,6 +143,74 @@ export interface RuntimeFleetSummary {
   agents: number;
   /** Total task count represented by the snapshot. */
   tasks: number;
+}
+
+/** Derive one Device collector posture from versions and optional latest Operation status. */
+export function deriveCollectorVersionPosture(input: {
+  currentVersion?: string;
+  latestVersion?: string;
+  operationStatus?: RuntimeFleetOperationStatus;
+}): CollectorVersionPosture {
+  if (input.operationStatus === "queued" || input.operationStatus === "running") return "upgrading";
+  if (input.operationStatus === "failed") return "failed";
+  if (input.operationStatus === "requires_manual_step") return "requires_manual_step";
+
+  const currentVersion = input.currentVersion?.trim();
+  const latestVersion = input.latestVersion?.trim();
+  if (!currentVersion) return "not_reported";
+  if (!latestVersion) return "unknown";
+  return compareCollectorVersions(currentVersion, latestVersion) >= 0 ? "latest" : "outdated";
+}
+
+/** Summarize collector versions and latest upgrade Operation status for every Device. */
+export function summarizeCollectorVersions(
+  snapshot: RuntimeFleetSnapshot,
+  latestVersion?: string,
+  operations: RuntimeFleetOperationListItem[] = [],
+): CollectorVersionSummary {
+  const byDeviceId: Record<string, CollectorVersionDeviceSummary> = {};
+  const counts = createCollectorVersionPostureCounts();
+
+  for (const device of snapshot.devices) {
+    const operation = latestCollectorUpgradeOperationForDevice(device.id, operations);
+    const targetVersion = operationTargetVersion(operation) ?? latestVersion;
+    const currentVersion = device.collector?.version;
+    const posture = deriveCollectorVersionPosture({
+      currentVersion,
+      latestVersion,
+      operationStatus: operation?.status,
+    });
+    counts[posture] += 1;
+    byDeviceId[device.id] = {
+      currentVersion,
+      deviceId: device.id,
+      label: collectorVersionPostureLabels[posture],
+      latestVersion,
+      operationId: operation?.id,
+      operationStatus: operation?.status,
+      posture,
+      targetVersion,
+      updatedAt: operation?.updatedAt ?? operation?.createdAt,
+    };
+  }
+
+  return {
+    actionableCount: Object.values(byDeviceId).filter(isActionableCollectorVersionSummary).length,
+    activeCount: Object.values(byDeviceId).filter((entry) => entry.posture === "upgrading").length,
+    byDeviceId,
+    counts,
+    latestVersion,
+  };
+}
+
+/** Parse Operation list API payloads into the minimal Runtime Fleet operation shape. */
+export function runtimeFleetOperationsFromQueryResponse(value: unknown): RuntimeFleetOperationListItem[] {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { operations?: unknown[] }).operations)) {
+    return [];
+  }
+  return ((value as { operations: unknown[] }).operations)
+    .map(normalizeRuntimeFleetOperation)
+    .filter((operation): operation is RuntimeFleetOperationListItem => Boolean(operation));
 }
 
 /** Detail panel model for device, runtime, or agent selections. */
@@ -238,6 +374,7 @@ export function getRuntimeFleetDetail(
   id: string,
   collectionHealthByDeviceId?: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>,
   deviceHealthByDeviceId?: DeviceHealthById,
+  collectorVersionSummary?: CollectorVersionSummary,
 ): RuntimeFleetDetail | null {
   if (kind === "device") {
     const device = snapshot.devices.find((candidate) => candidate.id === id);
@@ -280,7 +417,7 @@ export function getRuntimeFleetDetail(
           title: "运行资产",
           items: [
             `状态: ${statusLabel}`,
-            `Collector: ${device.collector?.version ?? "未上报"}`,
+            ...collectorVersionDetailItems(device, collectorVersionSummary?.byDeviceId[device.id]),
             `Runtime 数量: ${runtimes.length}`,
             `Agent 数量: ${agents.length}`,
             `Task 数量: ${taskCounts.total}`,
@@ -441,6 +578,104 @@ export function runtimeFleetSnapshotFromQueryResponse(value: unknown): RuntimeFl
   };
 }
 
+function createCollectorVersionPostureCounts(): Record<CollectorVersionPosture, number> {
+  return {
+    failed: 0,
+    latest: 0,
+    not_reported: 0,
+    outdated: 0,
+    requires_manual_step: 0,
+    unknown: 0,
+    upgrading: 0,
+  };
+}
+
+function isActionableCollectorVersionSummary(entry: CollectorVersionDeviceSummary): boolean {
+  if (!entry.latestVersion) return false;
+  return entry.posture === "outdated"
+    || entry.posture === "failed"
+    || entry.posture === "requires_manual_step"
+    || entry.posture === "not_reported";
+}
+
+function latestCollectorUpgradeOperationForDevice(
+  deviceId: string,
+  operations: RuntimeFleetOperationListItem[],
+): RuntimeFleetOperationListItem | undefined {
+  return operations
+    .filter((operation) => (
+      operation.type === "collector_upgrade"
+      && operation.resourceType === "device"
+      && operation.resourceId === deviceId
+      && operation.targetType === "collector"
+    ))
+    .sort((left, right) => operationUpdatedAtMs(right) - operationUpdatedAtMs(left))[0];
+}
+
+function operationUpdatedAtMs(operation: RuntimeFleetOperationListItem): number {
+  const timestamp = Date.parse(operation.updatedAt ?? operation.createdAt ?? "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function operationTargetVersion(operation?: RuntimeFleetOperationListItem): string | undefined {
+  if (!operation) return undefined;
+  const targetId = operation.targetId?.trim();
+  if (targetId) return targetId;
+  return readOperationMetadataString(operation.metadata, "targetVersion")
+    ?? readOperationMetadataString(operation.metadata, "requestedManifestVersion");
+}
+
+function normalizeRuntimeFleetOperation(input: unknown): RuntimeFleetOperationListItem | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const candidate = input as Record<string, unknown>;
+  const id = readOperationString(candidate.id);
+  const type = readOperationString(candidate.type);
+  const status = normalizeRuntimeFleetOperationStatus(candidate.status);
+  if (!id || !type || !status) return null;
+  return {
+    createdAt: readOperationString(candidate.createdAt),
+    id,
+    metadata: isRuntimeFleetRecord(candidate.metadata) ? candidate.metadata : undefined,
+    resourceId: readNullableOperationString(candidate.resourceId),
+    resourceType: readNullableOperationString(candidate.resourceType),
+    status,
+    targetId: readNullableOperationString(candidate.targetId),
+    targetType: readNullableOperationString(candidate.targetType),
+    type,
+    updatedAt: readOperationString(candidate.updatedAt),
+  };
+}
+
+function normalizeRuntimeFleetOperationStatus(value: unknown): RuntimeFleetOperationStatus | null {
+  return value === "queued"
+    || value === "running"
+    || value === "succeeded"
+    || value === "failed"
+    || value === "unsupported"
+    || value === "requires_manual_step"
+    || value === "cancelled"
+    ? value
+    : null;
+}
+
+function readOperationMetadataString(metadata: Record<string, unknown> | undefined, key: string): string | undefined {
+  if (!metadata) return undefined;
+  return readOperationString(metadata[key]);
+}
+
+function readNullableOperationString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return readOperationString(value);
+}
+
+function readOperationString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRuntimeFleetRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizeCollectionStatus(value: unknown): CollectionStatus {
   return value === "online" || value === "offline" || value === "error" || value === "syncing"
     ? value
@@ -458,6 +693,15 @@ function deviceForRuntime(snapshot: RuntimeFleetSnapshot, runtime: Runtime): Dev
 
 function deviceDisplayLabel(device: Device): string {
   return device.id;
+}
+
+function collectorVersionDetailItems(device: Device, entry?: CollectorVersionDeviceSummary): string[] {
+  if (!entry) return [`Collector: ${device.collector?.version ?? "未上报"}`];
+  return [
+    `Collector: ${entry.currentVersion ?? "未上报"}`,
+    `最新版本: ${entry.latestVersion ?? "未获取"}`,
+    `升级状态: ${entry.label}`,
+  ];
 }
 
 function registeredRuntimeLabels(runtimes: Runtime[]): string[] {

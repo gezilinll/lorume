@@ -157,6 +157,9 @@ function installRuntimeFleetFetch(snapshot = fleetSnapshot) {
   globalThis.fetch = vi.fn(async (input) => {
     const url = requestUrl(input);
     if (url.includes("/api/runtime-fleet")) return jsonResponse(runtimeFleetQueryResponse(snapshot));
+    if (url.includes("/api/device-collector/manifest.json")) {
+      return jsonResponse({ schemaVersion: "collector-package-v1", version: snapshot.devices[0].collector?.version ?? "0.1.0" });
+    }
     if (url.includes(`/api/devices/${snapshot.devices[0].id}/collection-health`)) {
       return jsonResponse(collectionHealthResponse(snapshot));
     }

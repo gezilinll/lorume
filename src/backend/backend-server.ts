@@ -10,6 +10,7 @@ import {
 import { createPostgresAuthStore, type AuthStore } from "../auth/auth-store";
 import { createNotificationHttpApiHandler } from "../notifications/notification-http-api";
 import { createPostgresNotificationStore, type NotificationStore } from "../notifications/notification-store";
+import { applyCollectorUpgradeProgress, dispatchCollectorUpgradeJob } from "../operations/collector-upgrade";
 import { createOperationHttpApiHandler } from "../operations/operation-http-api";
 import { createOperationJobRunner } from "../operations/job-runner";
 import { createPostgresOperationStore, type OperationStore } from "../operations/operation-store";
@@ -81,9 +82,6 @@ export function createLorumeBackendServer(
     snapshotPath: options.deviceStateSnapshotPath,
     staleAfterMs: options.staleAfterMs,
   });
-  const controlChannel = createRuntimeControlChannel({
-    store,
-  });
   const ownedPostgresStore = options.postgresStore
     ? null
     : createPostgresStore({ connectionString: options.databaseUrl });
@@ -102,13 +100,34 @@ export function createLorumeBackendServer(
     : createPostgresNotificationStore({ connectionString: options.databaseUrl });
   const notificationStore = options.notificationStore ?? ownedNotificationStore;
   const logger = options.logger ?? createStructuredLogger({ service: "lorume-backend" });
+  const controlChannel = createRuntimeControlChannel({
+    store,
+    onCollectorUpgradeProgress: (message) => {
+      if (!operationStore) return;
+      void applyCollectorUpgradeProgress({
+        operationStore,
+      }, message).catch((error) => {
+        logger.warn({
+          error: error instanceof Error ? error.message : "unknown error",
+          jobId: message.jobId,
+          operationId: message.operationId,
+        }, "collector upgrade progress update failed");
+      });
+    },
+  });
   const operationRunnerEnabled = options.operationRunnerEnabled
     ?? Boolean(options.databaseUrl ?? process.env.DATABASE_URL);
   const operationRunnerIntervalMs = options.operationRunnerIntervalMs
     ?? Number(process.env.LORUME_OPERATION_RUNNER_INTERVAL_MS ?? 1_000);
   const operationRunner = operationRunnerEnabled && operationStore
     ? createOperationJobRunner({
-      handlers: {},
+      handlers: {
+        collector_upgrade_device: (job) => dispatchCollectorUpgradeJob({
+          backendBaseUrl: () => process.env.LORUME_PUBLIC_BASE_URL || baseUrl,
+          controlChannel,
+          operationStore,
+        }, job),
+      },
       notificationStore: notificationStore ?? undefined,
       operationStore,
       runnerId: process.env.LORUME_OPERATION_RUNNER_ID ?? "lorume-backend",
@@ -133,6 +152,7 @@ export function createLorumeBackendServer(
     store,
     controlChannel,
     postgresStore: postgresStore ?? undefined,
+    operationStore: operationStore ?? undefined,
     collectorNotifications: authStore && notificationStore
       ? {
         createNotificationEvent: notificationStore.createNotificationEvent,

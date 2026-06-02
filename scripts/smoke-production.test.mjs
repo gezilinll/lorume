@@ -21,6 +21,14 @@ describe("production smoke script", () => {
         ].join("\n"));
         return;
       }
+      if (request.url === "/api/device-collector/manifest.json") {
+        sendJson(response, 200, {
+          schemaVersion: "collector-package-v1",
+          version: "0.1.0",
+          files: [{ fileName: "lorume-device-collector.mjs", sha256: "a".repeat(64) }],
+        });
+        return;
+      }
       sendJson(response, 401, { error: "unauthorized" });
     });
     try {
@@ -35,6 +43,7 @@ describe("production smoke script", () => {
         "/healthz",
         "/readyz",
         "/api/device-collector/install.sh",
+        "/api/device-collector/manifest.json",
       ]);
     } finally {
       await server.close();
@@ -57,6 +66,14 @@ describe("production smoke script", () => {
           'download "lorume-runtime-adapters.mjs"',
           'download "lorume.mjs"',
         ].join("\n"));
+        return;
+      }
+      if (request.url === "/api/device-collector/manifest.json") {
+        sendJson(response, 200, {
+          schemaVersion: "collector-package-v1",
+          version: "0.1.0",
+          files: [{ fileName: "lorume-device-collector.mjs", sha256: "a".repeat(64) }],
+        });
         return;
       }
       if (request.headers.cookie !== "lorume_session=test-session") {

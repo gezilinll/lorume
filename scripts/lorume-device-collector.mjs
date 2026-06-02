@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
@@ -22,6 +22,13 @@ const DEFAULT_LOCK_STALE_GRACE_MS = 60_000;
 const DEFAULT_TASK_BATCH_MAX_BYTES = 512 * 1024;
 const DEFAULT_TASK_BATCH_MAX_TASKS = 1000;
 const TASK_SYNC_SCHEMA_VERSION = "device-state-v3";
+const UPGRADE_PROTOCOL_VERSION = 1;
+const COLLECTOR_PACKAGE_FILES = new Map([
+  ["lorume-device-collector.mjs", "0755"],
+  ["lorume-runtime-adapters.mjs", "0644"],
+  ["local-ip-normalization.mjs", "0644"],
+  ["lorume.mjs", "0755"],
+]);
 const COLLECTOR_LOG_SECRET_KEYS = new Set([
   "authorization",
   "bearertoken",
@@ -989,6 +996,42 @@ function resolveWsUrl(config, args) {
   }
 }
 
+function resolveCollectorInstallDir(config = {}) {
+  return path.resolve(config.installDir || SCRIPT_DIR);
+}
+
+function resolveUpgradeStatePath(config = {}) {
+  return path.join(resolveCollectorInstallDir(config), "upgrade-state.json");
+}
+
+function readUpgradeState(config = {}) {
+  try {
+    const parsed = JSON.parse(readFileSync(resolveUpgradeStatePath(config), "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeUpgradeState(config, state) {
+  const statePath = resolveUpgradeStatePath(config);
+  mkdirSync(path.dirname(statePath), { recursive: true });
+  writeFileSync(statePath, `${JSON.stringify(redactCollectorLogFields(state), null, 2)}\n`, "utf8");
+}
+
+function collectorUpgradeCapability(config) {
+  const state = readUpgradeState(config);
+  return {
+    supported: true,
+    protocolVersion: UPGRADE_PROTOCOL_VERSION,
+    installPath: resolveCollectorInstallDir(config),
+    ...(typeof state.jobId === "string" ? { lastUpgradeJobId: state.jobId } : {}),
+    ...(state.stage === "succeeded" || state.stage === "failed" || state.stage === "rolled_back"
+      ? { lastUpgradeStatus: state.stage }
+      : {}),
+  };
+}
+
 function sendControlMessage(socket, message) {
   if (!isControlSocketOpen(socket)) return;
   socket.send(JSON.stringify({ sentAt: isoNow(), ...message }));
@@ -1002,6 +1045,7 @@ function heartbeatPayload(config, args) {
     deviceId: device.id,
     hostname: device.hostname,
     collectorVersion: COLLECTOR_VERSION,
+    upgrade: collectorUpgradeCapability(config),
   };
 }
 
@@ -1023,6 +1067,268 @@ function createControlDevice(config, args, observedAt) {
   return createDevice(mergedControlConfig(config, args), observedAt);
 }
 
+function sendCollectorUpgradeProgress(socket, request, stage, status, message, extra = {}) {
+  sendControlMessage(socket, {
+    type: "collector.upgrade.progress",
+    protocolVersion: UPGRADE_PROTOCOL_VERSION,
+    operationId: request.operationId,
+    jobId: request.jobId,
+    deviceId: request.deviceId,
+    nonce: request.nonce,
+    stage,
+    status,
+    currentVersion: COLLECTOR_VERSION,
+    targetVersion: request.targetVersion,
+    message,
+    observedAt: isoNow(),
+    ...extra,
+  });
+}
+
+async function handleControlMessage(socket, rawMessage, config, args, logger) {
+  let message;
+  try {
+    message = JSON.parse(await controlMessageDataToText(rawMessage));
+  } catch {
+    return;
+  }
+  if (message?.type !== "collector.upgrade.request") return;
+  try {
+    await performCollectorUpgrade(socket, message, config, args, logger);
+  } catch (error) {
+    const request = normalizeCollectorUpgradeRequest(message, config, args);
+    if (request) {
+      sendCollectorUpgradeProgress(socket, request, "failed", "failed", collectorErrorMessage(error));
+      writeUpgradeState(config, {
+        operationId: request.operationId,
+        jobId: request.jobId,
+        deviceId: request.deviceId,
+        nonce: request.nonce,
+        targetVersion: request.targetVersion,
+        stage: "failed",
+        status: "failed",
+        errorSummary: collectorErrorMessage(error),
+        updatedAt: isoNow(),
+      });
+    }
+    logger.warn({
+      errorCode: "collector_upgrade_failed",
+      event: "collector_upgrade_failed",
+      jobId: request?.jobId,
+      operationId: request?.operationId,
+    }, collectorErrorMessage(error));
+  }
+}
+
+async function controlMessageDataToText(rawMessage) {
+  if (typeof rawMessage === "string") return rawMessage;
+  if (Buffer.isBuffer(rawMessage)) return rawMessage.toString("utf8");
+  if (rawMessage instanceof ArrayBuffer) return Buffer.from(rawMessage).toString("utf8");
+  if (ArrayBuffer.isView(rawMessage)) {
+    return Buffer.from(rawMessage.buffer, rawMessage.byteOffset, rawMessage.byteLength).toString("utf8");
+  }
+  if (typeof rawMessage?.text === "function") return rawMessage.text();
+  return String(rawMessage);
+}
+
+async function performCollectorUpgrade(socket, message, config, args, logger) {
+  const request = normalizeCollectorUpgradeRequest(message, config, args);
+  if (!request) throw new Error("invalid collector upgrade request");
+  if (compareCollectorVersions(COLLECTOR_VERSION, request.targetVersion) === 0) {
+    sendCollectorUpgradeProgress(socket, request, "succeeded", "succeeded", "Collector already at target version", {
+      collectorVersion: COLLECTOR_VERSION,
+    });
+    return;
+  }
+  if (compareCollectorVersions(COLLECTOR_VERSION, request.targetVersion) > 0) {
+    throw new Error("collector downgrade is not supported");
+  }
+
+  const lock = await acquireCollectorUpgradeRunLock(config, createRunId());
+  if (!lock.acquired) {
+    sendCollectorUpgradeProgress(socket, request, "failed", "requires_manual_step", "Collector is busy; retry upgrade after current collection finishes.");
+    return;
+  }
+
+  const installDir = resolveCollectorInstallDir(config);
+  const upgradeDir = path.join(installDir, ".upgrade", request.jobId);
+  const backupDir = path.join(installDir, ".previous", request.jobId);
+  try {
+    writeUpgradeState(config, {
+      operationId: request.operationId,
+      jobId: request.jobId,
+      deviceId: request.deviceId,
+      nonce: request.nonce,
+      targetVersion: request.targetVersion,
+      stage: "acknowledged",
+      status: "running",
+      startedAt: isoNow(),
+    });
+    sendCollectorUpgradeProgress(socket, request, "acknowledged", "running", "Collector accepted upgrade request");
+    sendCollectorUpgradeProgress(socket, request, "downloading", "running", "Downloading collector package manifest");
+    const manifest = normalizeCollectorPackageManifest(await fetchJson(request.manifestUrl));
+    if (!manifest) throw new Error("invalid collector package manifest");
+    if (manifest.version !== request.targetVersion) throw new Error("collector package manifest version mismatch");
+
+    rmSync(upgradeDir, { force: true, recursive: true });
+    mkdirSync(upgradeDir, { recursive: true });
+    sendCollectorUpgradeProgress(socket, request, "verifying", "running", "Verifying collector package manifest");
+    for (const file of manifest.files) {
+      const body = await fetchArrayBuffer(new URL(encodeURIComponent(file.fileName), `${request.packageBaseUrl.replace(/\/+$/g, "")}/`).toString());
+      verifyCollectorPackageFile(file, body);
+      writeFileSync(path.join(upgradeDir, file.fileName), Buffer.from(body));
+    }
+
+    sendCollectorUpgradeProgress(socket, request, "installing", "running", "Installing collector package");
+    mkdirSync(backupDir, { recursive: true });
+    for (const file of manifest.files) {
+      const destinationPath = path.join(installDir, file.fileName);
+      if (existsSync(destinationPath)) copyFileSync(destinationPath, path.join(backupDir, file.fileName));
+    }
+    for (const file of manifest.files) {
+      const stagedPath = path.join(upgradeDir, file.fileName);
+      const destinationPath = path.join(installDir, file.fileName);
+      renameSync(stagedPath, destinationPath);
+      chmodSync(destinationPath, file.mode === "0755" ? 0o755 : 0o644);
+    }
+
+    writeUpgradeState(config, {
+      operationId: request.operationId,
+      jobId: request.jobId,
+      deviceId: request.deviceId,
+      nonce: request.nonce,
+      targetVersion: request.targetVersion,
+      stage: "restart_pending",
+      status: "running",
+      updatedAt: isoNow(),
+    });
+    logger.info({
+      event: "collector_upgrade_restart_pending",
+      jobId: request.jobId,
+      operationId: request.operationId,
+      targetVersion: request.targetVersion,
+    }, "Collector upgrade installed; exiting for service restart.");
+    sendCollectorUpgradeProgress(socket, request, "restart_pending", "running", "Collector package installed; restarting collector");
+    setTimeout(() => process.exit(0), 25);
+  } catch (error) {
+    rollbackCollectorUpgrade(installDir, backupDir);
+    writeUpgradeState(config, {
+      operationId: request.operationId,
+      jobId: request.jobId,
+      deviceId: request.deviceId,
+      nonce: request.nonce,
+      targetVersion: request.targetVersion,
+      stage: "failed",
+      status: "failed",
+      errorSummary: collectorErrorMessage(error),
+      updatedAt: isoNow(),
+    });
+    throw error;
+  } finally {
+    releaseCollectorRunLock(lock);
+  }
+}
+
+async function acquireCollectorUpgradeRunLock(config, runId) {
+  const deadline = Date.now() + 2_000;
+  let lock = acquireCollectorRunLock(config, runId, "upgrade");
+  while (!lock.acquired && Date.now() < deadline) {
+    await sleep(50);
+    lock = acquireCollectorRunLock(config, runId, "upgrade");
+  }
+  return lock;
+}
+
+function normalizeCollectorUpgradeRequest(message, config, args) {
+  if (!message || typeof message !== "object") return null;
+  const device = createControlDevice(config, args, isoNow());
+  if (message.type !== "collector.upgrade.request") return null;
+  if (message.protocolVersion !== UPGRADE_PROTOCOL_VERSION) return null;
+  if (message.deviceId !== device.id) return null;
+  for (const key of ["operationId", "jobId", "nonce", "targetVersion", "manifestUrl", "packageBaseUrl", "deadlineAt"]) {
+    if (typeof message[key] !== "string" || !message[key].trim()) return null;
+  }
+  const manifestUrl = new URL(message.manifestUrl);
+  const packageBaseUrl = new URL(message.packageBaseUrl);
+  if (manifestUrl.origin !== packageBaseUrl.origin) return null;
+  return {
+    operationId: message.operationId,
+    jobId: message.jobId,
+    deviceId: message.deviceId,
+    nonce: message.nonce,
+    targetVersion: message.targetVersion,
+    manifestUrl: manifestUrl.toString(),
+    packageBaseUrl: packageBaseUrl.toString(),
+    deadlineAt: message.deadlineAt,
+  };
+}
+
+function normalizeCollectorPackageManifest(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value.schemaVersion !== "collector-package-v1") return null;
+  if (typeof value.version !== "string" || !value.version.trim()) return null;
+  if (!Number.isInteger(value.minUpgradeProtocolVersion) || value.minUpgradeProtocolVersion > UPGRADE_PROTOCOL_VERSION) return null;
+  if (!Array.isArray(value.files) || value.files.length === 0) return null;
+  const seen = new Set();
+  const files = [];
+  for (const entry of value.files) {
+    if (!entry || typeof entry !== "object") return null;
+    if (!COLLECTOR_PACKAGE_FILES.has(entry.fileName)) return null;
+    if (entry.path !== entry.fileName) return null;
+    if (COLLECTOR_PACKAGE_FILES.get(entry.fileName) !== entry.mode) return null;
+    if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.sha256)) return null;
+    if (!Number.isInteger(entry.bytes) || entry.bytes < 0) return null;
+    if (seen.has(entry.fileName)) return null;
+    seen.add(entry.fileName);
+    files.push({
+      fileName: entry.fileName,
+      path: entry.path,
+      mode: entry.mode,
+      sha256: entry.sha256.toLowerCase(),
+      bytes: entry.bytes,
+    });
+  }
+  return { version: value.version, files };
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`collector package manifest download failed: HTTP ${response.status}`);
+  return response.json();
+}
+
+async function fetchArrayBuffer(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`collector package file download failed: HTTP ${response.status}`);
+  return response.arrayBuffer();
+}
+
+function verifyCollectorPackageFile(file, body) {
+  const buffer = Buffer.from(body);
+  const actualHash = createHash("sha256").update(buffer).digest("hex");
+  if (actualHash !== file.sha256) throw new Error(`collector package file hash mismatch: ${file.fileName}`);
+  if (buffer.byteLength !== file.bytes) throw new Error(`collector package file size mismatch: ${file.fileName}`);
+}
+
+function rollbackCollectorUpgrade(installDir, backupDir) {
+  if (!existsSync(backupDir)) return;
+  for (const fileName of COLLECTOR_PACKAGE_FILES.keys()) {
+    const backupPath = path.join(backupDir, fileName);
+    if (existsSync(backupPath)) copyFileSync(backupPath, path.join(installDir, fileName));
+  }
+}
+
+function compareCollectorVersions(left, right) {
+  const leftParts = String(left || "").split(/[+-]/, 1)[0].split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = String(right || "").split(/[+-]/, 1)[0].split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const count = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < count; index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
 class MinimalWebSocketClient {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -1034,6 +1340,7 @@ class MinimalWebSocketClient {
     this.readyState = MinimalWebSocketClient.CONNECTING;
     this.events = new EventEmitter();
     this.socket = undefined;
+    this.frameBuffer = Buffer.alloc(0);
     queueMicrotask(() => this.connect());
   }
 
@@ -1083,7 +1390,11 @@ class MinimalWebSocketClient {
     if (secure) socket.on("secureConnect", sendHandshake);
     else socket.on("connect", sendHandshake);
     socket.on("data", (chunk) => {
-      if (upgraded) return;
+      if (upgraded) {
+        this.frameBuffer = Buffer.concat([this.frameBuffer, chunk]);
+        this.drainFrames();
+        return;
+      }
       handshakeBuffer = Buffer.concat([handshakeBuffer, chunk]);
       const headerEnd = handshakeBuffer.indexOf("\r\n\r\n");
       if (headerEnd === -1) return;
@@ -1113,6 +1424,43 @@ class MinimalWebSocketClient {
     if (this.readyState === MinimalWebSocketClient.CLOSED) return;
     this.readyState = MinimalWebSocketClient.CLOSED;
     this.events.emit("close");
+  }
+
+  drainFrames() {
+    while (this.frameBuffer.length >= 2) {
+      const first = this.frameBuffer[0];
+      const second = this.frameBuffer[1];
+      const opcode = first & 0x0f;
+      let offset = 2;
+      let length = second & 0x7f;
+      if (length === 126) {
+        if (this.frameBuffer.length < 4) return;
+        length = this.frameBuffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (this.frameBuffer.length < 10) return;
+        const bigLength = this.frameBuffer.readBigUInt64BE(2);
+        if (bigLength > BigInt(Number.MAX_SAFE_INTEGER)) {
+          this.emitError(new Error("WebSocket frame too large"));
+          this.close();
+          return;
+        }
+        length = Number(bigLength);
+        offset = 10;
+      }
+      const masked = Boolean(second & 0x80);
+      const maskLength = masked ? 4 : 0;
+      if (this.frameBuffer.length < offset + maskLength + length) return;
+      const mask = masked ? this.frameBuffer.subarray(offset, offset + 4) : null;
+      const bodyStart = offset + maskLength;
+      const body = Buffer.from(this.frameBuffer.subarray(bodyStart, bodyStart + length));
+      this.frameBuffer = this.frameBuffer.subarray(bodyStart + length);
+      if (mask) {
+        for (let index = 0; index < body.length; index += 1) body[index] ^= mask[index % 4];
+      }
+      if (opcode === 0x1) this.events.emit("message", { data: body.toString("utf8") });
+      else if (opcode === 0x8) this.close();
+    }
   }
 }
 
@@ -1188,7 +1536,7 @@ function isControlSocketOpen(socket) {
   return socket.readyState === openState;
 }
 
-function startControlChannel(config, args) {
+function startControlChannel(config, args, logger = createCollectorLogger(config)) {
   const wsUrl = resolveWsUrl(config, args);
   const WebSocketClient = resolveWebSocketClient();
   if (!wsUrl || !WebSocketClient) return;
@@ -1213,11 +1561,17 @@ function startControlChannel(config, args) {
         ...(resolveDeviceToken(config, args) ? { deviceToken: resolveDeviceToken(config, args) } : {}),
         hostname: device.hostname,
         collectorVersion: COLLECTOR_VERSION,
+        upgrade: collectorUpgradeCapability(config),
       });
       sendControlMessage(socket, heartbeatPayload(config, args));
+      sendPendingUpgradeStartupProgress(socket, config, args);
       heartbeatTimer = setInterval(() => {
         sendControlMessage(socket, heartbeatPayload(config, args));
       }, Math.min(Number(args.intervalMs || config.intervalMs || DEFAULT_INTERVAL_MS), 30_000));
+    });
+
+    socket.addEventListener("message", (event) => {
+      handleControlMessage(socket, event?.data, config, args, logger);
     });
 
     socket.addEventListener("close", () => {
@@ -1238,6 +1592,31 @@ function startControlChannel(config, args) {
   };
 }
 
+function sendPendingUpgradeStartupProgress(socket, config, args) {
+  const state = readUpgradeState(config);
+  if (state.stage !== "restart_pending") return;
+  if (state.targetVersion !== COLLECTOR_VERSION) return;
+  const device = createControlDevice(config, args, isoNow());
+  if (state.deviceId && state.deviceId !== device.id) return;
+  const request = {
+    operationId: state.operationId,
+    jobId: state.jobId,
+    deviceId: device.id,
+    nonce: state.nonce,
+    targetVersion: state.targetVersion,
+  };
+  if (!request.operationId || !request.jobId || !request.nonce || !request.targetVersion) return;
+  sendCollectorUpgradeProgress(socket, request, "succeeded", "succeeded", "Collector restarted with target version", {
+    collectorVersion: COLLECTOR_VERSION,
+  });
+  writeUpgradeState(config, {
+    ...state,
+    stage: "succeeded",
+    status: "succeeded",
+    updatedAt: isoNow(),
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = loadConfig(args.configPath);
@@ -1250,7 +1629,7 @@ async function main() {
     }
 
     const refresh = createRefreshRunner(config, args);
-    startControlChannel(config, args);
+    startControlChannel(config, args, logger);
     await refresh();
     setInterval(() => {
       refresh().catch((error) => {

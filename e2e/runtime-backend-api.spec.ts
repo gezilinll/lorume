@@ -115,6 +115,106 @@ test.describe("Runtime backend API", () => {
     await expectDeviceDiagnostics(request, "fixture-mac");
   });
 
+  test("creates collector upgrade Operation and completes it from device progress", async ({ request }) => {
+    await expect((await request.get("/healthz")).ok()).toBe(true);
+    const { deviceToken, organizationId } = await createLoggedInOrganizationAndDeviceToken(request);
+    const manifestResponse = await request.get("/api/device-collector/manifest.json");
+    expect(manifestResponse.status()).toBe(200);
+    const manifest = await manifestResponse.json() as { version?: string };
+    expect(manifest.version).toBeTruthy();
+
+    const authHeaders = { authorization: `Bearer ${deviceToken}` };
+    const oldCollectorSnapshot = {
+      ...deviceStateSnapshot,
+      device: {
+        ...deviceStateSnapshot.device,
+        collector: {
+          installPath: "/tmp/lorume-upgrade-e2e",
+          version: "0.0.0",
+        },
+      },
+      tasks: [],
+    };
+    const deviceStateResponse = await request.post("/api/device-state-snapshots", {
+      data: oldCollectorSnapshot,
+      headers: authHeaders,
+    });
+    expect(deviceStateResponse.status()).toBe(201);
+
+    const socket = new WebSocket(`${backendBaseUrl.replace(/^http/, "ws")}/api/device-control/ws`);
+    await waitForSocketOpen(socket);
+    socket.send(JSON.stringify({
+      type: "hello",
+      deviceId: "fixture-mac",
+      deviceToken,
+      collectorVersion: "0.0.0",
+      upgrade: {
+        installPath: "/tmp/lorume-upgrade-e2e",
+        protocolVersion: 1,
+        supported: true,
+      },
+    }));
+    await waitForSocketMessage(socket, (message) => message.type === "hello.ack");
+
+    const upgradeResponse = await request.post(`/api/devices/fixture-mac/collector-upgrade?organizationId=${organizationId}`, {
+      data: {},
+    });
+    expect(upgradeResponse.status()).toBe(202);
+    const upgradeBody = await upgradeResponse.json() as {
+      jobId?: string;
+      operationId?: string;
+      status?: string;
+      targetVersion?: string;
+    };
+    expect(upgradeBody).toMatchObject({
+      status: "queued",
+      targetVersion: manifest.version,
+    });
+
+    const upgradeRequest = await waitForSocketMessage(socket, (message) => message.type === "collector.upgrade.request");
+    expect(upgradeRequest).toMatchObject({
+      deviceId: "fixture-mac",
+      jobId: upgradeBody.jobId,
+      operationId: upgradeBody.operationId,
+      targetVersion: manifest.version,
+    });
+
+    socket.send(JSON.stringify({
+      type: "collector.upgrade.progress",
+      protocolVersion: 1,
+      operationId: upgradeRequest.operationId,
+      jobId: upgradeRequest.jobId,
+      deviceId: "fixture-mac",
+      nonce: upgradeRequest.nonce,
+      stage: "downloading",
+      status: "running",
+      currentVersion: "0.0.0",
+      targetVersion: manifest.version,
+      message: "Downloading collector package",
+    }));
+    socket.send(JSON.stringify({
+      type: "collector.upgrade.progress",
+      protocolVersion: 1,
+      operationId: upgradeRequest.operationId,
+      jobId: upgradeRequest.jobId,
+      deviceId: "fixture-mac",
+      nonce: upgradeRequest.nonce,
+      stage: "succeeded",
+      status: "succeeded",
+      collectorVersion: manifest.version,
+      targetVersion: manifest.version,
+      message: "Collector restarted with target version",
+    }));
+
+    await expectOperationDetail(request, String(upgradeBody.operationId), {
+      jobStage: "succeeded",
+      jobStatus: "succeeded",
+      operationStatus: "succeeded",
+      targetVersion: manifest.version,
+    });
+    socket.close();
+  });
+
   test("accepts device-state uploaded by a real collector process", async ({ request }) => {
     await expect((await request.get("/healthz")).ok()).toBe(true);
     const deviceId = "collector-e2e-device";
@@ -759,6 +859,91 @@ async function readLatestLoginCode(email: string): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("login code was not written by backend E2E email provider");
+}
+
+function waitForSocketOpen(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("device websocket open timed out"));
+    }, 5_000);
+    socket.once("open", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+function waitForSocketMessage(
+  socket: WebSocket,
+  predicate: (message: Record<string, unknown>) => boolean,
+  timeoutMs = 10_000,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error("device websocket message timed out"));
+    }, timeoutMs);
+
+    function onMessage(data: WebSocket.RawData) {
+      const message = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (!predicate(message)) return;
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      resolve(message);
+    }
+
+    socket.on("message", onMessage);
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      reject(error);
+    });
+  });
+}
+
+async function expectOperationDetail(
+  request: APIRequestContext,
+  operationId: string,
+  expected: {
+    jobStage: string;
+    jobStatus: string;
+    operationStatus: string;
+    targetVersion?: string;
+  },
+): Promise<void> {
+  let lastDetail: unknown = null;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 10_000) {
+    const response = await request.get(`/api/operations/${encodeURIComponent(operationId)}`);
+    if (response.ok()) {
+      const detail = await response.json() as {
+        jobs?: Array<{ payload?: Record<string, unknown>; status?: string }>;
+        operation?: { status?: string };
+      };
+      lastDetail = detail;
+      const job = detail.jobs?.[0];
+      if (
+        detail.operation?.status === expected.operationStatus &&
+        job?.status === expected.jobStatus &&
+        job.payload?.stage === expected.jobStage &&
+        (!expected.targetVersion || job.payload?.targetVersion === expected.targetVersion)
+      ) {
+        expect(detail.operation.status).toBe(expected.operationStatus);
+        expect(job.status).toBe(expected.jobStatus);
+        expect(job.payload).toMatchObject({
+          stage: expected.jobStage,
+          targetVersion: expected.targetVersion,
+        });
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`operation ${operationId} did not reach expected state\nlast detail:\n${JSON.stringify(lastDetail, null, 2)}`);
 }
 
 async function expectDeviceHeartbeatAccepted(deviceToken: string): Promise<void> {

@@ -134,6 +134,29 @@ describe("operation job runner", () => {
     ]);
   });
 
+  it("leaves external-running jobs open after the handler dispatches work", async () => {
+    const job = createJob({ type: "collector_upgrade_device" });
+    const store = createFakeOperationStore(job);
+    const runner = createOperationJobRunner({
+      handlers: {
+        collector_upgrade_device: () => ({ status: "external_running" }),
+      },
+      leaseMs: 30_000,
+      now: () => new Date("2026-06-02T12:00:00.000Z"),
+      operationStore: store,
+      runnerId: "runner-a",
+    });
+
+    await expect(runner.runDueJobOnce()).resolves.toEqual({
+      jobId: "job_1",
+      jobType: "collector_upgrade_device",
+      outcome: "external_running",
+      status: "handled",
+    });
+    expect(store.completed).toEqual([]);
+    expect(store.failed).toEqual([]);
+  });
+
   it("returns idle when no due job can be claimed", async () => {
     const store = createFakeOperationStore(null);
     const runner = createOperationJobRunner({
@@ -288,12 +311,14 @@ function createNotificationResult(input: CreateNotificationEventInput): CreateNo
 function createFakeOperationStore(claimedJob: OperationJobRow | null, initialOperation?: OperationRow): OperationStore & {
   claims: number;
   completed: Array<{ jobId: string; manualInstruction?: string; status: "succeeded" | "unsupported" | "requires_manual_step" }>;
+  completedExternal: Array<{ jobId: string; status: "succeeded" | "failed" | "unsupported" | "requires_manual_step" }>;
   failed: Array<{ jobId: string; errorSummary: string; retryAfterMs?: number }>;
   operation?: OperationRow;
 } {
   return {
     claims: 0,
     completed: [],
+    completedExternal: [],
     failed: [],
     operation: initialOperation,
     createOperation: async () => {
@@ -306,6 +331,9 @@ function createFakeOperationStore(claimedJob: OperationJobRow | null, initialOpe
     listJobs: async () => [],
     async claimNextJob() {
       this.claims += 1;
+      return claimedJob;
+    },
+    async updateJobPayload() {
       return claimedJob;
     },
     async completeJob(input) {
@@ -327,6 +355,13 @@ function createFakeOperationStore(claimedJob: OperationJobRow | null, initialOpe
           updatedAt: input.now,
         };
       }
+      return claimedJob ? { ...claimedJob, status: input.status } : null;
+    },
+    async completeExternalJob(input) {
+      this.completedExternal.push({
+        jobId: input.jobId,
+        status: input.status,
+      });
       return claimedJob ? { ...claimedJob, status: input.status } : null;
     },
     async failJob(input) {

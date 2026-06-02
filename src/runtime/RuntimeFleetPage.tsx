@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Copy, Cpu, Monitor, Server } from "lucide-react";
+import { Bot, Copy, Cpu, Monitor, Server, UploadCloud } from "lucide-react";
 import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { useConsoleWorkbar, useHasConsoleWorkbar } from "@/components/layout/Con
 import { consoleDetailInspectorClass } from "@/components/layout/inspector-styles";
 import { toast } from "sonner";
 import {
+  collectorVersionPostureLabels,
   deriveAgentFleetStatus,
   deriveDeviceFleetStatus,
   deriveRuntimeFleetStatus,
@@ -28,11 +29,17 @@ import {
   getRuntimeFleetDetail,
   runtimeFleetAgentLastActiveAt,
   runtimeFleetDeviceLastActiveAt,
+  runtimeFleetOperationsFromQueryResponse,
   runtimeFleetObjectStatusLabels,
   runtimeFleetRuntimeLastActiveAt,
   runtimeFleetSnapshotFromQueryResponse,
   runtimeFleetStatusFromDeviceHealth,
+  summarizeCollectorVersions,
+  type CollectorVersionDeviceSummary,
+  type CollectorVersionPosture,
+  type CollectorVersionSummary,
   type RuntimeFleetDetail,
+  type RuntimeFleetOperationListItem,
   type RuntimeFleetObjectStatus,
   type RuntimeFleetSnapshot,
 } from "./runtime-fleet-query";
@@ -71,10 +78,13 @@ export function RuntimeFleetPage({
   );
   const [collectionHealth, setCollectionHealth] = useState<DeviceCollectionHealth[]>([]);
   const [deviceDiagnostics, setDeviceDiagnostics] = useState<DeviceHealthStatusResult[]>([]);
+  const [latestCollectorVersion, setLatestCollectorVersion] = useState("");
+  const [collectorUpgradeOperations, setCollectorUpgradeOperations] = useState<RuntimeFleetOperationListItem[]>([]);
   const [isLoading, setIsLoading] = useState(!allowFixtureFallback);
   const [loadError, setLoadError] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState("");
   const [selection, setSelection] = useState<RuntimeFleetSelection | null>(null);
+  const [upgradeRequestDeviceId, setUpgradeRequestDeviceId] = useState<string | null>(null);
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   async function fetchLatestSnapshot(): Promise<RuntimeFleetSnapshot | null> {
@@ -85,6 +95,24 @@ export function RuntimeFleetPage({
     const querySnapshot = runtimeFleetSnapshotFromQueryResponse(await queryResponse.json());
     if (!querySnapshot) throw new Error("runtime fleet query returned an invalid payload");
     return querySnapshot;
+  }
+
+  async function fetchLatestCollectorVersion(): Promise<string> {
+    const response = await fetch(createRuntimeFleetUrl("/api/device-collector/manifest.json"));
+    if (!response.ok) return "";
+    const payload = await response.json() as { version?: unknown };
+    return typeof payload.version === "string" ? payload.version.trim() : "";
+  }
+
+  async function fetchCollectorUpgradeOperations(): Promise<RuntimeFleetOperationListItem[]> {
+    if (!organizationId?.trim()) return [];
+    const requestUrl = createRuntimeFleetUrl("/api/operations", organizationId);
+    requestUrl.searchParams.set("resourceType", "device");
+    requestUrl.searchParams.set("targetType", "collector");
+    requestUrl.searchParams.set("limit", "100");
+    const response = await fetch(requestUrl);
+    if (!response.ok) return [];
+    return runtimeFleetOperationsFromQueryResponse(await response.json());
   }
 
   async function fetchCollectionHealth(deviceId: string): Promise<DeviceCollectionHealth | null> {
@@ -121,10 +149,14 @@ export function RuntimeFleetPage({
     latestSnapshot: RuntimeFleetSnapshot,
     latestCollectionHealth: DeviceCollectionHealth[],
     latestDeviceDiagnostics: DeviceHealthStatusResult[],
+    collectorVersion: string,
+    upgradeOperations: RuntimeFleetOperationListItem[],
   ) {
     setSnapshot(latestSnapshot);
     setCollectionHealth(latestCollectionHealth);
     setDeviceDiagnostics(latestDeviceDiagnostics);
+    setLatestCollectorVersion(collectorVersion);
+    setCollectorUpgradeOperations(upgradeOperations);
     setLoadError("");
     setLastLoadedAt(new Date().toISOString());
   }
@@ -134,11 +166,13 @@ export function RuntimeFleetPage({
     try {
       const latestSnapshot = await fetchLatestSnapshot();
       if (!latestSnapshot) return;
-      const [latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
+      const [latestCollectionHealth, latestDeviceDiagnostics, collectorVersion, upgradeOperations] = await Promise.all([
         fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
         fetchDeviceDiagnosticsForDevices(latestSnapshot).catch(() => []),
+        fetchLatestCollectorVersion().catch(() => ""),
+        fetchCollectorUpgradeOperations().catch(() => []),
       ]);
-      applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics);
+      applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics, collectorVersion, upgradeOperations);
     } catch {
       if (!allowFixtureFallback) {
         setLoadError("后端查询失败，无法读取正式运行资产");
@@ -156,12 +190,14 @@ export function RuntimeFleetPage({
       try {
         const latestSnapshot = await fetchLatestSnapshot();
         if (!latestSnapshot) return;
-        const [latestCollectionHealth, latestDeviceDiagnostics] = await Promise.all([
+        const [latestCollectionHealth, latestDeviceDiagnostics, collectorVersion, upgradeOperations] = await Promise.all([
           fetchCollectionHealthForDevices(latestSnapshot).catch(() => []),
           fetchDeviceDiagnosticsForDevices(latestSnapshot).catch(() => []),
+          fetchLatestCollectorVersion().catch(() => ""),
+          fetchCollectorUpgradeOperations().catch(() => []),
         ]);
         if (!cancelled) {
-          applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics);
+          applySnapshot(latestSnapshot, latestCollectionHealth, latestDeviceDiagnostics, collectorVersion, upgradeOperations);
         }
       } catch {
         if (!allowFixtureFallback && !cancelled) {
@@ -190,6 +226,14 @@ export function RuntimeFleetPage({
     () => new Map(deviceDiagnostics.map((diagnostic) => [diagnostic.deviceId, diagnostic])),
     [deviceDiagnostics],
   );
+  const collectorVersionSummary = useMemo(
+    () => summarizeCollectorVersions(
+      snapshot,
+      latestCollectorVersion || undefined,
+      collectorUpgradeOperations,
+    ),
+    [collectorUpgradeOperations, latestCollectorVersion, snapshot],
+  );
   const detail = selection
     ? getRuntimeFleetDetail(
       snapshot,
@@ -197,8 +241,44 @@ export function RuntimeFleetPage({
       selection.id,
       collectionHealthByDeviceId,
       deviceDiagnosticsByDeviceId,
+      collectorVersionSummary,
     )
     : null;
+
+  async function requestCollectorUpgrade(deviceId: string) {
+    if (!organizationId?.trim()) {
+      toast.error("缺少组织上下文，无法创建升级任务");
+      return;
+    }
+    setUpgradeRequestDeviceId(deviceId);
+    try {
+      const response = await fetch(
+        createRuntimeFleetUrl(`/api/devices/${encodeURIComponent(deviceId)}/collector-upgrade`, organizationId),
+        {
+          body: "{}",
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+      const payload = await readJsonObject(response);
+      if (!response.ok) {
+        throw new Error(errorMessageFromResponse(payload) ?? "Collector 升级任务创建失败");
+      }
+      const status = typeof payload.status === "string" ? payload.status : "";
+      if (status === "succeeded") {
+        toast.success("Collector 已是最新版本");
+      } else if (status === "requires_manual_step") {
+        toast.warning("Collector 升级需要手动处理，请在任务抽屉查看详情");
+      } else {
+        toast.success("Collector 升级任务已创建，可在任务抽屉查看进度");
+      }
+      await loadLatestRuntimeFleet();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Collector 升级任务创建失败");
+    } finally {
+      setUpgradeRequestDeviceId(null);
+    }
+  }
 
   useConsoleWorkbar({
     meta: (
@@ -206,6 +286,9 @@ export function RuntimeFleetPage({
         <span>{snapshot.summary.deviceCount} 设备</span>
         <span>{snapshot.summary.runtimeCount} Runtime</span>
         <span>{snapshot.summary.agentCount} Agent</span>
+        <span>Collector 最新 {latestCollectorVersion || "未获取"}</span>
+        {collectorVersionSummary.actionableCount ? <span>待升级 {collectorVersionSummary.actionableCount}</span> : null}
+        {collectorVersionSummary.activeCount ? <span>升级中 {collectorVersionSummary.activeCount}</span> : null}
         {lastLoadedAt ? <span>更新 {formatRuntimeTimestamp(lastLoadedAt)}</span> : null}
       </>
     ),
@@ -221,6 +304,9 @@ export function RuntimeFleetPage({
   }, [
     isLoading,
     lastLoadedAt,
+    latestCollectorVersion,
+    collectorVersionSummary.actionableCount,
+    collectorVersionSummary.activeCount,
     snapshot.summary.agentCount,
     snapshot.summary.deviceCount,
     snapshot.summary.runtimeCount,
@@ -256,6 +342,7 @@ export function RuntimeFleetPage({
         <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
           <div className="min-w-0 space-y-4">
             <DevicePanel
+              collectorVersionSummary={collectorVersionSummary}
               collectionHealthByDeviceId={collectionHealthByDeviceId}
               deviceDiagnosticsByDeviceId={deviceDiagnosticsByDeviceId}
               devices={snapshot.devices}
@@ -287,7 +374,12 @@ export function RuntimeFleetPage({
               }}
             />
           </div>
-          <RuntimeDetail detail={detail} />
+          <RuntimeDetail
+            collectorVersion={detail?.kind === "device" ? collectorVersionSummary.byDeviceId[detail.id] : undefined}
+            detail={detail}
+            isCollectorUpgradeSubmitting={Boolean(detail?.kind === "device" && upgradeRequestDeviceId === detail.id)}
+            onUpgradeCollector={requestCollectorUpgrade}
+          />
         </section>
       )}
     </section>
@@ -395,7 +487,29 @@ function taskTotalForAgent(snapshot: RuntimeFleetSnapshot, agentId: string): num
   return snapshot.taskSummary.byAgentId[agentId]?.total ?? 0;
 }
 
+function collectorVersionLine(summary: CollectorVersionDeviceSummary): string {
+  return `Collector ${summary.currentVersion ?? "未上报"} · ${summary.label}`;
+}
+
+function canRequestCollectorUpgrade(summary: CollectorVersionDeviceSummary): boolean {
+  return Boolean(summary.latestVersion)
+    && summary.posture !== "latest"
+    && summary.posture !== "upgrading"
+    && summary.posture !== "unknown";
+}
+
+function collectorUpgradeButtonLabel(
+  summary: CollectorVersionDeviceSummary,
+  isSubmitting: boolean,
+): string {
+  if (isSubmitting) return "提交中";
+  if (summary.posture === "upgrading") return "升级中";
+  if (summary.posture === "latest") return "已是最新";
+  return "升级 Collector";
+}
+
 function DevicePanel({
+  collectorVersionSummary,
   collectionHealthByDeviceId,
   deviceDiagnosticsByDeviceId,
   devices,
@@ -403,6 +517,7 @@ function DevicePanel({
   selectedId,
   onSelect,
 }: {
+  collectorVersionSummary: CollectorVersionSummary;
   collectionHealthByDeviceId: ReadonlyMap<string, Pick<DeviceCollectionHealth, "status">>;
   deviceDiagnosticsByDeviceId: ReadonlyMap<string, Pick<DeviceHealthStatusResult, "label" | "status">>;
   devices: RuntimeFleetSnapshot["devices"];
@@ -433,6 +548,7 @@ function DevicePanel({
               const lastActiveAt = runtimeFleetDeviceLastActiveAt(snapshot, device.id);
               const runtimeCount = runtimeCountForDevice(snapshot, device.id);
               const agentCount = agentCountForDevice(snapshot, device.id);
+              const collectorVersion = collectorVersionSummary.byDeviceId[device.id];
               return (
                 <Button
                   className="h-auto w-full flex-col items-stretch justify-start gap-3 rounded-[14px] border-border bg-[var(--surface-soft)] px-3 py-3 text-left whitespace-normal shadow-none data-[active=true]:border-[var(--brand-border)] data-[active=true]:bg-[var(--brand-soft)] sm:flex-row sm:items-center sm:justify-between"
@@ -454,10 +570,16 @@ function DevicePanel({
                       <span className="block truncate text-xs text-muted-foreground">
                         最近活跃 {formatRelativeActivityTime(lastActiveAt)}
                       </span>
+                      {collectorVersion ? (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {collectorVersionLine(collectorVersion)}
+                        </span>
+                      ) : null}
                     </span>
                   </span>
-                  <span className="self-start sm:self-auto">
+                  <span className="flex shrink-0 flex-wrap items-center gap-1.5 self-start sm:self-auto sm:justify-end">
                     <FleetStatusBadge label={label} status={status} />
+                    {collectorVersion ? <CollectorPostureBadge posture={collectorVersion.posture} /> : null}
                   </span>
                 </Button>
               );
@@ -700,9 +822,15 @@ function AgentTable({
 }
 
 function RuntimeDetail({
+  collectorVersion,
   detail,
+  isCollectorUpgradeSubmitting,
+  onUpgradeCollector,
 }: {
+  collectorVersion?: CollectorVersionDeviceSummary;
   detail: RuntimeFleetDetail | null;
+  isCollectorUpgradeSubmitting: boolean;
+  onUpgradeCollector: (deviceId: string) => void;
 }) {
   if (!detail) {
     return (
@@ -732,6 +860,18 @@ function RuntimeDetail({
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <FleetStatusBadge label={detail.statusLabel} status={detail.status} />
+              {detail.kind === "device" && collectorVersion ? (
+                <Button
+                  disabled={!canRequestCollectorUpgrade(collectorVersion) || isCollectorUpgradeSubmitting}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => onUpgradeCollector(detail.id)}
+                >
+                  <UploadCloud aria-hidden="true" className="size-3.5" />
+                  {collectorUpgradeButtonLabel(collectorVersion, isCollectorUpgradeSubmitting)}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 type="button"
@@ -782,6 +922,22 @@ function copyTextWithTextarea(value: string): boolean {
   } finally {
     document.body.removeChild(textArea);
   }
+}
+
+async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
+  try {
+    const payload = await response.json();
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function errorMessageFromResponse(payload: Record<string, unknown>): string | null {
+  const message = payload.message ?? payload.error;
+  return typeof message === "string" && message.trim() ? message.trim() : null;
 }
 
 function DetailBlock({ title, children }: { title: string; children: string }) {
@@ -860,9 +1016,25 @@ function FleetStatusBadge({ label, status }: { label: string; status: RuntimeFle
   );
 }
 
+function CollectorPostureBadge({ posture }: { posture: CollectorVersionPosture }) {
+  return (
+    <AppStatusBadge tone={collectorPostureTone(posture)}>
+      {collectorVersionPostureLabels[posture]}
+    </AppStatusBadge>
+  );
+}
+
 function fleetStatusTone(status: RuntimeFleetObjectStatus): "neutral" | "success" | "warning" | "danger" | "info" {
   if (status === "online") return "success";
   if (status === "offline" || status === "invisible") return "neutral";
   if (status === "error") return "danger";
   return "info";
+}
+
+function collectorPostureTone(posture: CollectorVersionPosture): "neutral" | "success" | "warning" | "danger" | "info" {
+  if (posture === "latest") return "success";
+  if (posture === "failed") return "danger";
+  if (posture === "outdated" || posture === "requires_manual_step") return "warning";
+  if (posture === "upgrading") return "info";
+  return "neutral";
 }

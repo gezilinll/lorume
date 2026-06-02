@@ -107,10 +107,72 @@ describe("Runtime Fleet Skill warehouse entry", () => {
   });
 });
 
-function renderRuntimeFleetPage(onOpenSkillWarehouse: (filters: { runtimeId?: string; agentId?: string }) => void) {
+describe("Runtime Fleet collector upgrade management", () => {
+  it("shows collector latest version posture and starts a device upgrade task", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = input.toString();
+      if (url.includes("/api/runtime-fleet")) {
+        return jsonResponse({
+          ...fixtureSnapshot,
+          devices: fixtureSnapshot.devices.map((device) => ({
+            ...device,
+            collector: { installPath: "/opt/lorume", version: "0.0.9" },
+          })),
+        });
+      }
+      if (url.includes("/api/device-collector/manifest.json")) {
+        return jsonResponse({ schemaVersion: "collector-package-v1", version: "0.1.0" });
+      }
+      if (url.includes("/api/operations")) {
+        return jsonResponse({ operations: [] });
+      }
+      if (url.includes("/api/devices/fixture-mac/collector-upgrade") && init?.method === "POST") {
+        return jsonResponse({ operationId: "op_upgrade", status: "queued", targetVersion: "0.1.0" }, 202);
+      }
+      if (url.includes("/collection-health") || url.includes("/diagnostics")) {
+        return jsonResponse({}, 404);
+      }
+      return jsonResponse({ error: "unexpected request", url }, 500);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderRuntimeFleetPage(vi.fn(), "org_1");
+
+    expect(await screen.findByText("Collector 0.0.9 · 待升级")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /fixture-mac/ }));
+    expect(await screen.findByText("最新版本: 0.1.0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "升级 Collector" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/api/devices/fixture-mac/collector-upgrade",
+        search: "?organizationId=org_1",
+      }),
+      expect.objectContaining({
+        body: "{}",
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+  });
+});
+
+function renderRuntimeFleetPage(
+  onOpenSkillWarehouse: (filters: { runtimeId?: string; agentId?: string }) => void,
+  organizationId?: string,
+) {
   return render(
     <TooltipProvider delayDuration={0}>
-      <RuntimeFleetPage onOpenSkillWarehouse={onOpenSkillWarehouse} />
+      <RuntimeFleetPage organizationId={organizationId} onOpenSkillWarehouse={onOpenSkillWarehouse} />
     </TooltipProvider>,
   );
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }

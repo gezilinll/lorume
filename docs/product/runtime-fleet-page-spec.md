@@ -1,6 +1,6 @@
 # Runtime Fleet Page Spec
 
-版本：TinySpec v1.4
+版本：TinySpec v1.5
 
 Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理页面。页面只展示后端已有的四对象模型：`Device`、`Runtime`、`Agent` 和由 `Task` 派生出的计数/上下文。
 
@@ -15,14 +15,14 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 
 ## 目标
 
-- 展示设备的 device id、hostname、OS、架构、Task 派生的最近活跃、本地 / 出口 IP 和 collector 元信息。
+- 展示设备的 device id、hostname、OS、架构、Task 派生的最近活跃、本地 / 出口 IP、collector 元信息和 collector 版本状态。
 - 展示设备上的 Runtime；Runtime kind 候选项来自后端真实返回的数据。
 - 展示 Runtime 下的 Agent、归属 Runtime、采集状态、Task 派生的最近活跃、派生 Task 数量和只读 Skill 仓库入口。
 - Runtime Fleet 当前不展示搜索、Runtime kind 和同步时间筛选条；页面顶部工作栏展示全局数量，页面主体展示全量 Device、Runtime 和 Agent。
 - 点击设备、Runtime 或 Agent 后，在右侧详情面板查看身份信息、归属关系、采集状态和必要 diagnostics。
 - 详情面板不直接展示完整 Lorume 内部对象 ID；需要排障时，通过 `复制 ID` 按钮复制当前 Device、Runtime 或 Agent 的完整 ID。
 - Runtime / Agent 行级 Skill 入口仍是只读能力；点击后跳转到 Skill 仓库并带上 Runtime / Agent 筛选，不请求设备执行远端探测。表格动作列不展示可见列名，行内按钮文案统一为 `查看 Skill`。
-- 页面自动轮询后端已有数据，不下发远端采集命令。
+- 页面自动轮询后端已有数据，不下发远端采集、探测或任意命令。Collector 升级是唯一允许从 Runtime Fleet 发起的受限设备控制动作，必须创建 Operation 并遵守 [collector upgrade spec](collector-upgrade-spec.md)。
 
 ## 非目标
 
@@ -34,12 +34,17 @@ Runtime Fleet 是 Lorume 查看设备、Runtime 和 Agent 采集状态的管理�
 - 不提供搜索、Runtime kind、同步时间或 Channel 筛选条。
 - 不展示 `Conversation`、`Execution`、`Capability`、`SourceRef` 作为一等对象。
 - 不展示后端没有返回、当前 adapter 未采集或缺少 harness 覆盖的 Runtime 结果。
+- 不把 collector 版本状态混入 Device collection status。
+- 不把 collector 升级展示为 Runs 会话任务。
 
 ## 数据源
 
 - `GET /api/runtime-fleet`：正式 Runtime Fleet 查询 API，返回 Device、Runtime、Agent 和派生 Task 计数摘要，不返回 Task 明细数组。
 - `GET /api/runtime-tasks`：正式 Runs 会话任务查询 API，返回 Task 查询页、summary 和 channel facets。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，用于解释 `collectionStatus`，不渲染成独立健康区块，只返回 `device_state` 检查项。
+- `GET /api/device-collector/manifest.json`：读取服务端当前 collector 最新版本和文件 manifest，用于版本状态展示。
+- `POST /api/devices/:deviceId/collector-upgrade`：对单台设备创建 collector upgrade Operation；页面不直接发送设备 WebSocket 消息。
+- `GET /api/operations` / `GET /api/operations/:operationId`：读取 collector upgrade 的用户可见进度和结果。
 - `GET /api/runtimes/:runtimeId/skill-probe`：读取目标 Runtime 最近一次已存储的只读 Skill metadata。Skill 仓库通过 Runtime Fleet 结果和 Runtime snapshot 聚合目录。
 - `GET /api/agents/:agentId/skill-probe`：兼容读取接口，只读取已存储 metadata，不触发 Agent 级探测；当前 Runtime Fleet UI 不再直接消费该接口。
 
@@ -58,6 +63,17 @@ Runtime Fleet 对 Device、Runtime 和 Agent 只展示 `collectionStatus`：
 
 页面可以展示派生 Task 计数，例如 `进行中 2`、`失败 1`，但这些计数不能改写 Runtime/Agent 的 collection status。
 Device 在线态以最近成功收到的 `device_state` 为主证据；heartbeat 仅解释控制连接健康。Agent 如果在其所属 Runtime 的最新 metadata snapshot 中缺失，应显示为 `不可见` 并保留最近同步时间作为内部采集新鲜度证据，避免旧 Agent 长期停留在在线状态。Agent 本轮仍在但没有任务时仍显示 `在线`。
+
+Collector 版本状态单独展示：
+
+| 状态 | 含义 |
+|---|---|
+| `最新` | 当前 collector version 等于服务端 manifest version。 |
+| `待升级` | 当前 collector version 低于服务端 manifest version，且设备支持升级协议。 |
+| `升级中` | 存在进行中的 `collector_upgrade` Operation / Job。 |
+| `升级失败` | 最近一次 collector upgrade Operation / Job 失败。 |
+| `需手动重装` | 设备未声明升级协议能力，不能自动升级。 |
+| `未上报` | 后端没有可用 collector version。 |
 
 ## 最近活跃
 
@@ -105,6 +121,9 @@ Runs 会话任务页消费 `Task.status`，但 UI 只展示 `statusScope=board-v
 
 - 列表/卡片使用 `users.html` 的团队动态节奏展示 device id、hostname、collection status、最近活跃、Runtime 数和 Agent 数。
 - 详情展示基础信息、网络、collector、已注册 Runtime。
+- Collector 详情展示当前版本、服务端最新版本、升级协议能力、最近升级 Operation、最近升级时间和失败摘要。
+- `升级 Collector` / `重试升级` 操作只在用户有 owner / admin 权限且后端返回可升级状态时显示；点击后创建 Operation，不直接向设备发消息。
+- `查看任务` 打开 Operations 抽屉或跳转 `/operations` 深链查看对应 Operation。
 - 网络详情展示去噪后的本机局域网 IP 和公网 IP。`localIps` 只展示 collector 认为对用户有解释价值的地址，不展示 link-local IPv6、虚拟网桥、Docker/VM/VPN 噪音地址。
 - 不展示由 Runtime/Agent/Task 推导出的工作状态。
 
@@ -138,6 +157,8 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 - `agents`: Agent 数组。
 - `taskSummary`: 由 active non-stale Task 派生的计数摘要。
 - `summary`: 顶部统计。
+- `collectorSummary`: 服务端 collector 最新版本、待升级设备数和进行中升级数。
+- `collectorUpgradeByDeviceId`: 每台设备的版本状态、升级协议能力和最近 Operation 摘要。
 
 `taskSummary` 必须至少包含：
 
@@ -153,10 +174,12 @@ Task 的 channel 和 conversation 是嵌套上下文字段，不是独立实体�
 ## 验收标准
 
 - 主导航可以进入 Runtime Fleet 页面。
-- 顶部工作栏显示设备、Runtime、Agent 数量；页面主体不再重复展示独立指标卡，也不显示独立异常统计卡。
+- 顶部工作栏显示设备、Runtime、Agent 数量、服务端 collector 最新版本和待升级设备数；页面主体不再重复展示独立指标卡，也不显示独立异常统计卡。
 - 刷新能力只在顶部工作栏右侧最后一个图标提供；页面主体不再渲染页面级刷新按钮。
 - 页面不展示搜索、Runtime kind、同步时间、Channel 或可用性筛选条。
 - Device、Runtime 状态只显示 `同步中 / 在线 / 离线 / 异常`；Agent 额外允许 `不可见`，表示此前采集到过但最新全量清单中未再出现。`不可见` badge hover/focus 时展示解释：`该 Agent 曾被采集到，但最新全量采集中未再出现。可能已被删除、停用，或已移出当前采集范围。`
+- Device collector 版本状态只显示 `最新 / 待升级 / 升级中 / 升级失败 / 需手动重装 / 未上报`，不能改写 Device collection status。
+- 单设备 `升级 Collector` 会创建 Operation，并由 Operations 抽屉展示进度和结果。
 - Runtime 行级 Skill 入口跳转到 `/skills?runtimeId=...`；Agent 行级 Skill 入口跳转到 `/skills?runtimeId=...&agentId=...`。
 - `不可见` Agent 的行级 Skill 仓库入口禁用，避免把最新清单中已缺失的 Agent 作为当前可用 Agent 过滤目标。
 - Runtime/Agent 不显示 `工作中` 或 `空闲` 作为自身状态。

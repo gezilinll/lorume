@@ -1,6 +1,6 @@
 # Backend Service Spec
 
-版本：TinySpec v0.6
+版本：TinySpec v0.7
 
 Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与组织访问、collector 上报、Postgres 持久化、Runtime Fleet / Runs 查询、异步 Operation / Job Runner、通知投递和设备连接健康。当前已经具备本地长期运行、production-like Docker / Nginx 验收形态，以及通过 SSH 运维的生产部署形态。
 
@@ -8,7 +8,7 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 
 - 提供独立于 Vite 的 Lorume backend 服务，前端和 collector 都通过 HTTP / WebSocket 访问它。
 - 使用 Postgres 持久化 Device、Runtime、Agent、Task 和采集记录。
-- 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 上报连接健康，通过 HTTP POST 上报采集结果。
+- 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 上报连接健康，通过 HTTP POST 上报采集结果；服务端只能按 [collector upgrade spec](collector-upgrade-spec.md) 向已认证设备下发受限 collector 升级消息。
 - 将 Runs / Runtime Fleet 的正式数据读取固定为“后端查询、前端展示”，不再使用前端拉 latest snapshot 后本地筛选作为正式路径。
 - 每次 collector 上报都记录 ingestion 结果，并由后端生成设备采集诊断结论，支持排查某个平台为什么缺数据、什么时候缺数据、缺了哪些能力。
 - 统一维护规范化错误码到用户可读 message 的映射；后端 API、collector 上报失败、通知和 UI 错误状态必须复用同一语义，不向用户展示技术错误字符串。
@@ -51,7 +51,7 @@ flowchart LR
 边界：
 
 - Frontend 只消费后端查询 API，不解释 OpenClaw、Multica、Slock 原始字段。
-- Backend 负责 API、入库、查询和设备连接状态；不负责向设备下发采集或探测命令。
+- Backend 负责 API、入库、查询、设备连接状态和已规格化的 collector 升级 Operation；不负责向设备下发采集、探测、调度或任意命令。
 - Collector 负责只读采集和上报，不承担后端查询、用户权限或 UI 语义。
 - Runtime adapter 仍负责把平台差异转换为 Lorume-owned semantics。
 
@@ -107,12 +107,14 @@ Collector 保持主动上报：
 - `GET /readyz`
 - `GET /api/device-collector/install.sh`
 - `GET /api/device-collector/files/:fileName`
+- `GET /api/device-collector/manifest.json`
 - `POST /api/device-state-snapshots`
 - `POST /api/runtime-skill-probe-snapshots`
 - `POST /api/device-task-batches`
 - `WS /api/device-control/ws`
+- `POST /api/devices/:deviceId/collector-upgrade`
 
-Installer 入口只服务无密钥设备包文件，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集命令不属于当前 backend service。Runtime 数据只通过设备认证后的 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 进入后端。
+Installer 入口只服务无密钥设备包文件和 collector package manifest，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集、探测或 runtime command 不属于当前 backend service；collector upgrade 是唯一允许的受限设备控制动作，协议和安全边界见 [collector-upgrade-spec.md](collector-upgrade-spec.md)。Runtime 数据只通过设备认证后的 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 进入后端。
 
 正式查询 API：
 
@@ -140,10 +142,15 @@ Installer 入口只服务无密钥设备包文件，device token 由已鉴权的
 - `GET /api/operations`
   - 参数：`organizationId`、`status`、`resourceType`、`resourceId`、`targetType`、`targetId`、`limit`。
   - 需要当前用户属于该组织。
-  - 返回用户可见的异步动作状态，供设备刷新、通知投递和后续长耗时动作展示进度。
+  - 返回用户可见的异步动作状态，供 collector 升级、通知投递和后续长耗时动作展示进度。
 - `GET /api/operations/:operationId`
   - 需要当前用户属于该 Operation 所属组织。
   - 返回 Operation 和最近 Job 状态。
+- `POST /api/devices/:deviceId/collector-upgrade`
+  - 需要当前用户是设备所属组织的 owner / admin。
+  - 创建 `collector_upgrade` Operation 和 `collector_upgrade_device` Job。
+  - 默认目标版本是当前 `/api/device-collector/manifest.json` 中的 collector package version。
+  - 设备不在线、不支持升级协议、已是最新版本或需要人工 bootstrap 时，返回 Operation 摘要并进入对应 Job 状态。
 - `GET /api/notifications`
   - 参数：`organizationId`。
   - 需要当前用户属于该组织。
@@ -178,7 +185,7 @@ Production-like 本地验收形态：
 生产部署形态：
 
 - 生产域名、ICP备案、DNS、TLS 证书和公网可达性属于部署/运维验证，不作为项目 harness 的必需条件。
-- 当前生产发布流程是 SSH 到生产主机更新 `main`、运行 deploy config check、重建 Docker Compose 服务；真实设备 collector 也通过 SSH 进入目标设备后运行组织设置生成的一行安装命令。完整操作边界、命令模板和回滚方式见 [../operations/ssh-deployment.md](../operations/ssh-deployment.md)。
+- 当前生产发布流程是 SSH 到生产主机更新 `main`、运行 deploy config check、重建 Docker Compose 服务；真实设备 collector 首次安装、低于升级协议能力的 bootstrap 和升级失败恢复仍通过 SSH 进入目标设备后运行组织设置生成的一行安装命令。具备升级协议能力的 collector 可由服务端创建 Operation 后自升级。完整操作边界、命令模板和回滚方式见 [../operations/ssh-deployment.md](../operations/ssh-deployment.md)。
 - 系统 Nginx 负责公网 `80/443`、HTTP 到 HTTPS 跳转、TLS 证书、静态前端反代、`/api`、`/healthz`、`/readyz` 和 WebSocket upgrade。
 - Docker Compose 运行 Postgres、backend 和 frontend 容器；frontend 绑定 `127.0.0.1:8080`，backend 绑定 `127.0.0.1:4173`，Postgres 不暴露宿主端口。
 - Nginx 必须配置足够的 `client_max_body_size`，当前为 `50m`，否则 collector 的 `device_state` 快照可能被 413 拒绝。
@@ -195,6 +202,7 @@ Production-like 本地验收形态：
 - readiness harness：`/healthz` 和 `/readyz` 能区分进程存活与数据库可用。
 - connection channel harness：WebSocket hello、heartbeat、断连和 stale 判定继续可用。
 - operation runner harness：Postgres Job claim、lease、retry、完成态和失败态。
+- collector upgrade harness：manifest API、受限 WebSocket downlink、collector progress、Operation / Job 外部完成、目标版本 heartbeat 确认和超时失败。
 - notification harness：事件聚合、限流、in-app 记录和 email delivery 记录。
 - collector notification harness：认证后的 collector payload 失败会写 ingestion 记录并生成限流后的 runtime 采集失败通知。
 - collector contract harness：当前 collector `device_state` payload 可被后端接收；常驻 collector 在采集 subprocess 运行期间仍会发送 heartbeat，且 Node 运行时缺少全局 `WebSocket` 时仍能通过设备包内 fallback 建立控制通道。

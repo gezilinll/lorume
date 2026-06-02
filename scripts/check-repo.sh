@@ -31,6 +31,7 @@ required_paths=(
   "docs/product/runtime-codex-adapter-spec.md"
   "docs/product/runtime-task-acceptance-spec.md"
   "docs/product/backend-service-spec.md"
+  "docs/product/collector-upgrade-spec.md"
   "docs/product/cli-device-capability-spec.md"
   "docs/product/agent-skill-probing-spec.md"
   "docs/product/auth-and-access-spec.md"
@@ -115,6 +116,7 @@ markdown_files = [
     Path("docs/product/runtime-codex-adapter-spec.md"),
     Path("docs/product/runtime-task-acceptance-spec.md"),
     Path("docs/product/backend-service-spec.md"),
+    Path("docs/product/collector-upgrade-spec.md"),
     Path("docs/product/cli-device-capability-spec.md"),
     Path("docs/product/agent-skill-probing-spec.md"),
     Path("docs/product/auth-and-access-spec.md"),

@@ -6,7 +6,7 @@
 
 ## 目标
 
-- 为通知投递和后续已规格化的长耗时动作提供统一异步状态。
+- 为通知投递、collector 升级和后续已规格化的长耗时动作提供统一异步状态。
 - 用户能在页面内看到异步动作的当前状态、失败原因和需要人工处理的提示。
 - 后端能安全 claim、执行、重试和完成 Job，避免重复执行和长时间卡死。
 - 业务模块只暴露 Lorume 自己的 Operation 语义，不把某个平台的任务状态直接泄漏给 UI。
@@ -30,7 +30,7 @@ Operation 是用户可见的一次异步动作。
 
 - `id`：内部 ID。
 - `organizationId`：所属组织。
-- `type`：动作类型。当前实现只支持 `notification_delivery`。
+- `type`：动作类型。本规格支持 `notification_delivery` 和 `collector_upgrade`。
 - `status`：`queued`、`running`、`succeeded`、`failed`、`unsupported`、`requires_manual_step`、`cancelled`。
 - `resourceType` / `resourceId`：主要资源，可为空。
 - `targetType` / `targetId`：目标资源，可为空。
@@ -50,7 +50,7 @@ Operation Job 是后端可执行的最小任务单元。
 - `id`：内部 ID。
 - `operationId`：所属 Operation。
 - `organizationId`：所属组织。
-- `type`：执行类型，例如 `notification_in_app`、`notification_email`。
+- `type`：执行类型。本规格支持 `notification_in_app`、`notification_email`、`collector_upgrade_device`。
 - `status`：`queued`、`running`、`succeeded`、`failed`、`unsupported`、`requires_manual_step`、`cancelled`。
 - `payload`：执行所需的非敏感参数。
 - `attemptCount` / `maxAttempts`：已尝试次数和最大尝试次数。
@@ -90,6 +90,7 @@ Job 状态：
 - Operation 的最终状态由必要 Job 的结果汇总产生。
 - 任一必要 Job 进入 `requires_manual_step` 时，Operation 进入 `requires_manual_step` 并保留 `manualInstruction`。
 - Operation 状态变化必须可以创建 Notification Event。
+- `collector_upgrade_device` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限升级请求，Job 保持 `running`；collector progress、目标版本 heartbeat 或超时检查负责把 Job 推进到最终状态。
 
 ## 当前实现策略
 
@@ -122,7 +123,7 @@ Job 状态：
 - 业务 API 可以返回 `operation` 摘要，前端据此展示异步状态。
 - Operation API 必须要求用户属于目标组织；不能跨组织读取 Operation 或 Job。
 - Job Runner 在 Operation 进入 `succeeded`、`failed`、`unsupported`、`requires_manual_step` 时，按 `requestedByUserId` 创建站内通知；通知失败不能回滚 Operation 状态。
-- 设备采集刷新和 Agent Skill 探测不创建 Operation，也不通过 Operation/Job Runner 下发设备命令；设备侧负责采集和上报。
+- 设备采集刷新和 Agent Skill 探测不创建 Operation，也不通过 Operation/Job Runner 下发设备命令；设备侧负责采集和上报。Collector 升级是例外，它只能按 [collector upgrade spec](collector-upgrade-spec.md) 创建 `collector_upgrade` Operation，并下发受限升级消息。
 
 ## UI 边界
 
@@ -141,6 +142,8 @@ Job 状态：
 - 不支持 Job 会让 Operation 进入 `unsupported`。
 - 需要人工处理的 Job 会让 Operation 进入 `requires_manual_step`，并保留用户可理解的手动处理说明。
 - Operation 状态变化能创建通知事件。
+- 外部完成型 collector upgrade Job dispatch 后保持 `running`，progress 更新 Job payload，目标版本 heartbeat 后完成，超时后进入 `failed` 或 `requires_manual_step`。
+
 ## 验收标准
 
 - 异步动作不再靠长请求或前端 loading 假装完成。

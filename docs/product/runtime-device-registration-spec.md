@@ -1,6 +1,6 @@
 # Runtime & Device Registration Spec
 
-版本：TinySpec v0.9
+版本：TinySpec v1.0
 
 Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端上报标准化设备元数据、Runtime Skill metadata 和 Task 批次。当前默认 runtime adapter allowlist 启用 OpenClaw、Slock 和 Codex；Slock adapter 只在本机 `.slock/agents` 与 Slock daemon 进程参数能提供 ownership proof、server URL 和 token 时执行，否则安静跳过；Codex adapter 只采集 Codex 原生或其他未被平台 adapter 归属的本机会话，Slock-owned 和 Multica-owned 的 Codex 会话只进入 diagnostics。其他 Runtime adapter 在没有对应 spec 和 harness 前不采集、不执行命令、不读目录。
 
@@ -11,7 +11,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - Collector 只读采集本机事实和已启用 adapter 覆盖的运行资产。
 - 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot、Runtime Skill probe snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
 - Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
-- WebSocket 控制面只支持设备主动 `hello`、`heartbeat` 和连接健康判定；不下发采集、探测、调度或任意命令。
+- WebSocket 控制面支持设备主动 `hello`、`heartbeat`、连接健康判定，以及 [collector upgrade spec](collector-upgrade-spec.md) 中定义的受限 collector 自升级消息；不下发采集、探测、调度或任意命令。
 
 ## 非目标
 
@@ -296,6 +296,7 @@ HTTP 上报规则：
 
 - `GET /api/device-collector/install.sh`：返回无密钥远程安装入口脚本。
 - `GET /api/device-collector/files/:fileName`：只允许下载白名单设备包文件。
+- `GET /api/device-collector/manifest.json`：返回无密钥 collector package manifest，供已支持升级协议的 collector 校验和下载升级包。
 - `POST /api/device-state-snapshots`：Collector 上报 Device / Runtime / Agent metadata snapshot，使用 device token 鉴权；`tasks` 必须为空。
 - `POST /api/runtime-skill-probe-snapshots`：Collector 上报 Runtime 级只读 Skill metadata snapshot，使用 device token 鉴权。
 - `POST /api/device-task-batches`：Collector 上报变化 Task 批次，使用 device token 鉴权；后端返回 ACK 列表供本地 cache 推进。
@@ -303,7 +304,7 @@ HTTP 上报规则：
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
 - `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`statusScope`、可重复 `channelKind`、兼容逗号分隔 `channelKinds`、`startAt`、`endAt`、`limit`、`cursor`。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
-- `WS /api/device-control/ws`：只处理 `hello`、`heartbeat`、断开和 stale 判定。
+- `WS /api/device-control/ws`：处理 `hello`、`heartbeat`、断开、stale 判定和 `collector.upgrade.*` 受限升级消息；升级协议、payload、状态和安全边界见 [collector-upgrade-spec.md](collector-upgrade-spec.md)。
 
 ## OpenClaw Adapter
 
@@ -391,7 +392,7 @@ Collector 的采集 subprocess 不能阻塞控制通道 heartbeat。即使 `devi
 
 远程安装入口不包含密钥。它只从同一个 Lorume backend 下载白名单设备包文件到临时目录，再调用 `scripts/install-device-collector.sh --source-dir <temp-dir>` 完成本机安装、配置写入和 launchd / systemd 服务注册。
 
-真实设备 collector 部署和更新当前通过 SSH 进入目标设备执行组织设置生成的一行安装命令完成；`gezilinll-claw` 是当前真实设备验收目标。SSH 操作边界、检查命令和停止/卸载流程见 [../operations/ssh-deployment.md](../operations/ssh-deployment.md)。
+真实设备 collector 首次部署、低于升级协议能力的设备 bootstrap、以及升级失败后的人工恢复，仍通过 SSH 进入目标设备执行组织设置生成的一行安装命令完成；`gezilinll-claw` 是当前真实设备验收目标。已具备升级协议能力的 collector 可以按 [collector-upgrade-spec.md](collector-upgrade-spec.md) 由服务端发起受限自升级。SSH 操作边界、检查命令和停止/卸载流程见 [../operations/ssh-deployment.md](../operations/ssh-deployment.md)。
 
 安装目录必须包含后续生命周期命令需要的完整设备包文件：`install-device-collector.sh`、`lorume-device-collector.mjs`、`lorume-runtime-adapters.mjs`、`lorume.mjs` 和 `config.json`。已安装的 `lorume.mjs collector stop/uninstall` 必须能通过同目录的 `install-device-collector.sh` 完成停止或卸载，不能依赖仓库源码目录仍然存在。`uninstall` 必须移除 collector 安装目录、服务定义、collector 日志目录和 task sync cache；如果 `$HOME/.lorume` 已为空，也应一并移除。
 
@@ -407,5 +408,6 @@ Collector 的采集 subprocess 不能阻塞控制通道 heartbeat。即使 `devi
 - Runtime Fleet 只展示 Device/Runtime/Agent 的 collection status 和派生 Task 计数。
 - Runs 会话任务页消费 `taskType=conversation` 的 Task 查询页、summary 和 channel facets，并按 `Task.status` 分组。
 - Installer harness 必须验证安装目录文件完整性，并验证已安装 CLI 能执行 `collector uninstall`。
+- Collector upgrade harness 必须验证 manifest 白名单、sha256 校验、staging、备份、原子替换、config/token 保留、失败回滚和升级状态上报。
 - 自动化测试只使用本地 isolated backend/Postgres，不写真实生产后端。
 - 真实设备验收采用观察者方式：发现产品能力残留或采集缺口时修代码和测试，不手动清理掩盖问题。

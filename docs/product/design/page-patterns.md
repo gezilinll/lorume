@@ -62,13 +62,14 @@ Rules:
 
 ## Runtime Fleet
 
-Purpose: View Device, Runtime, Agent, Task-derived recent activity, ownership, and one clear operating status.
+Purpose: View Device, Runtime, Agent, Task-derived recent activity, ownership, collector version posture, and one clear operating status.
 
 Rules:
 
 - Runtime and Channel are separate concepts.
 - Runtime Fleet does not provide Channel filtering.
 - Availability and operating evidence use Lorume-owned semantics, but the page exposes one user-facing object status: `同步中`、`在线`、`离线`、`异常`.
+- Collector version posture is separate from object status. Device cards and details may show `最新`、`待升级`、`升级中`、`升级失败`、`需手动重装` or `未上报`, but those labels must not replace `同步中`、`在线`、`离线`、`异常`.
 - The layout exposes counts in the top workbar, then Device, Runtime, and Agent lists plus a sticky detail inspector. It does not repeat body-level metric cards, page explanations, or secondary title blocks.
 - Device uses the `users.html` team-activity rhythm: icon/dot, object title, compact metadata, recent activity, and status badge.
 - Runtime and Agent use the `users.html` member-directory rhythm: compact avatar, primary label, secondary metadata, status, Task count, and recent activity. Runtime does not use a separate kind column or repeated kind badge in the directory table.
@@ -78,9 +79,11 @@ Rules:
 - The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
 - Runtime and Agent Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. The action column keeps a stable width but has no visible header label, and the button text is `查看 Skill`. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
+- Collector upgrade is the only Runtime Fleet device control action. It appears from the selected Device detail, creates a `collector_upgrade` Operation, and hands progress/result display to the Operations drawer. It must not expose a raw WebSocket command, shell command, runtime probe, or generic remote control button.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
 - Copying an object ID uses toast feedback; the detail panel should not grow a temporary copied row.
 - Collection failures, adapter exceptions, and unusable payloads fold into `异常`; details stay traceable in ingestion records, structured logs, notifications, or future diagnostics without dumping debug data into UI.
+- Devices that do not advertise collector upgrade capability show a concise `需手动重装` posture and keep the organization settings install command as the recovery path.
 
 ## Runs
 
@@ -145,6 +148,7 @@ Rules:
 - The overlay dims without background blur.
 - Reads organization-scoped data; no organization means no API request.
 - Does not show backend raw payload, tokens, device secrets, or debug fields.
+- Collector upgrade Operations show Device, current version, target version, stage, progress message, and result. They remain platform operations, not Runs tasks.
 - Closing returns to the previous Console context.
 
 ## Notifications Utility Drawer

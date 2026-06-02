@@ -29,7 +29,8 @@ export type AuthAuditEventType =
   | "device_token.revoked"
   | "invitation.accepted"
   | "invitation.rejected"
-  | "invitation.sent";
+  | "invitation.sent"
+  | "organization.member_left";
 
 /** Persisted email-code login challenge. */
 export interface AuthLoginCode {
@@ -143,6 +144,11 @@ export interface AuthAuditEvent {
   targetType?: string | null;
 }
 
+/** Result for a user voluntarily leaving an organization. */
+export type AuthLeaveOrganizationResult =
+  | { ok: true; organizations: AuthOrganizationMembership[] }
+  | { ok: false; reason: "last_owner" | "not_member" };
+
 /** Repository contract used by auth HTTP handlers. */
 export interface AuthStore {
   createLoginCode: (input: { codeHash: string; email: string; expiresAt: Date }) => Promise<AuthLoginCode>;
@@ -153,6 +159,7 @@ export interface AuthStore {
   revokeSession: (sessionHash: string) => Promise<void>;
   createOrganization: (input: { createdByUserId: string; name: string; slug: string }) => Promise<AuthOrganization>;
   listOrganizationsForUser: (userId: string) => Promise<AuthOrganizationMembership[]>;
+  leaveOrganization: (input: { now: Date; organizationId: string; userId: string }) => Promise<AuthLeaveOrganizationResult>;
   /** Returns active organization owners and admins for infrastructure notifications and admin-only actions. */
   listOrganizationAdminUserIds: (organizationId: string) => Promise<string[]>;
   createInvitation: (input: {
@@ -360,6 +367,58 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
     listOrganizationsForUser(userId) {
       return listOrganizationsForUser(pool, userId);
     },
+    async leaveOrganization(input) {
+      return withTransaction(pool, async (client) => {
+        const membershipResult = await client.query<{
+          id: string;
+          role: AuthMemberRole;
+        }>(`
+          SELECT id, role
+          FROM organization_members
+          WHERE organization_id = $1
+            AND user_id = $2
+            AND status = 'active'
+          LIMIT 1
+          FOR UPDATE
+        `, [input.organizationId, input.userId]);
+        const membership = membershipResult.rows[0];
+        if (!membership) return { ok: false, reason: "not_member" };
+
+        if (membership.role === "owner") {
+          const ownerMembershipsResult = await client.query<{ id: string }>(`
+            SELECT id
+            FROM organization_members
+            WHERE organization_id = $1
+              AND status = 'active'
+              AND role = 'owner'
+            FOR UPDATE
+          `, [input.organizationId]);
+          if (ownerMembershipsResult.rows.length <= 1) {
+            return { ok: false, reason: "last_owner" };
+          }
+        }
+
+        await client.query(`
+          UPDATE organization_members
+          SET status = 'removed', updated_at = $3
+          WHERE organization_id = $1
+            AND user_id = $2
+            AND status = 'active'
+        `, [input.organizationId, input.userId, input.now]);
+        await createAuditEvent(client, {
+          actorUserId: input.userId,
+          eventType: "organization.member_left",
+          metadata: { role: membership.role },
+          organizationId: input.organizationId,
+          targetId: membership.id,
+          targetType: "organization_member",
+        });
+        return {
+          ok: true,
+          organizations: await listOrganizationsForUser(client, input.userId),
+        };
+      });
+    },
     async listOrganizationAdminUserIds(organizationId) {
       const result = await pool.query<{ userId: string }>(`
         SELECT user_id AS "userId"
@@ -515,6 +574,7 @@ export function createPostgresAuthStore(options: PostgresAuthStoreOptions = {}):
         FROM organization_members m
         INNER JOIN users u ON u.id = m.user_id
         WHERE m.organization_id = $1
+          AND m.status = 'active'
         ORDER BY m.joined_at ASC, m.id ASC
       `, [input.organizationId]);
       return result.rows;

@@ -208,8 +208,10 @@ describe("auth pages", () => {
   it("accepts an invitation link after the invited email signs in", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/invite/invitation-token-1");
+    const requests: Array<{ body: unknown; method?: string; url: string }> = [];
     globalThis.fetch = vi.fn(async (input, init) => {
       const url = input.toString();
+      requests.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : null });
       if (url.endsWith("/api/me")) return jsonResponse(sessionResponse({ organizations: [] }));
       if (url.endsWith("/api/invitations/invitation-token-1/preview")) {
         return jsonResponse({
@@ -222,6 +224,8 @@ describe("auth pages", () => {
           },
         });
       }
+      if (url.endsWith("/api/auth/email-code")) return jsonResponse({ ok: true, email: "zhangliang@gaoding.com" }, 202);
+      if (url.endsWith("/api/auth/login")) return jsonResponse(sessionResponse({ organizations: [], userEmail: "zhangliang@gaoding.com" }));
       if (url.endsWith("/api/invitations/invitation-token-1/accept")) {
         expect(init?.method).toBe("POST");
         return jsonResponse({ organization: { organizationId: "org_2", id: "mem_2", name: "受邀组织", role: "member", slug: "invited" } });
@@ -231,12 +235,23 @@ describe("auth pages", () => {
 
     render(<App runtimeMode="production" />);
 
-    expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
-    expect(await screen.findByText(/受邀组织/)).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "运营概览" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
+    expect(screen.getByText(/z\*\*\*@gaoding.com/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "加入组织" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("验证码"), "246810");
     await user.click(screen.getByRole("button", { name: "加入并进入" }));
 
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+    expect(requests).toContainEqual({
+      url: "/api/auth/email-code",
+      method: "POST",
+      body: { email: "zhangliang@gaoding.com" },
+    });
+    expect(requests).toContainEqual({
+      url: "/api/invitations/invitation-token-1/accept",
+      method: "POST",
+      body: null,
+    });
   });
 
   it("previews an invitation and automatically sends a code to the invited email before login", async () => {
@@ -271,18 +286,21 @@ describe("auth pages", () => {
     expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
     expect(screen.getByText(/i\*\*\*@gaoding.com/)).toBeInTheDocument();
     await user.type(screen.getByLabelText("验证码"), "246810");
-    await user.click(screen.getByRole("button", { name: "进入控制台" }));
-    expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "加入并进入" }));
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "加入组织" })).not.toBeInTheDocument();
 
     expect(requests).toContainEqual({
       url: "/api/auth/email-code",
       body: { email: "invited@gaoding.com" },
     });
+    expect(requests).toContainEqual({
+      url: "/api/invitations/invitation-token-1/accept",
+      body: null,
+    });
   });
 
-  it("asks a signed-in mismatched user to verify the invited email before accepting", async () => {
+  it("automatically switches a signed-in mismatched user to invited-email verification", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/invite/invitation-token-1");
     const requests: Array<{ body: unknown; method?: string; url: string }> = [];
@@ -314,18 +332,15 @@ describe("auth pages", () => {
 
     render(<App runtimeMode="production" />);
 
-    expect(await screen.findByRole("heading", { name: "验证受邀邮箱" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
     expect(screen.getByText(/i\*\*\*@gaoding.com/)).toBeInTheDocument();
     expect(screen.queryByText("linbinghe@gmail.com")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "加入并进入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "验证受邀邮箱" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "发送验证码到受邀邮箱" }));
-    expect(await screen.findByRole("heading", { name: "输入验证码" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("验证码"), "246810");
-    await user.click(screen.getByRole("button", { name: "进入控制台" }));
-    expect(await screen.findByRole("heading", { name: "加入组织" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "加入并进入" }));
     expect(await screen.findByRole("heading", { name: "运行资产" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "加入组织" })).not.toBeInTheDocument();
 
     expect(requests).toContainEqual({
       url: "/api/auth/logout",

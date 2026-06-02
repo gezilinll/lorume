@@ -152,6 +152,8 @@ describe("OrganizationSettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "撤销" }));
 
     expect(await screen.findByRole("button", { name: "撤销" })).toBeDisabled();
+    expect(await screen.findByText("已撤销")).toBeInTheDocument();
+    expect(screen.queryByText("fixture-mac")).not.toBeInTheDocument();
   });
 
   it("lists pending invitations and can resend invitation email", async () => {
@@ -228,6 +230,34 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.queryByRole("button", { name: "发送邀请邮件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成安装命令" })).not.toBeInTheDocument();
   });
+
+  it("lets a non-owner member leave the current organization", async () => {
+    const user = userEvent.setup();
+    const leaveOrganization = vi.fn(async () => {});
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<OrganizationSettingsPage session={sessionWithRole("member")} onLeaveOrganization={leaveOrganization} />);
+
+    await user.click(screen.getByRole("button", { name: "退出组织" }));
+
+    expect(window.confirm).toHaveBeenCalledWith("确定退出当前组织？退出后需要重新邀请才能加入。");
+    expect(leaveOrganization).toHaveBeenCalledWith("org_1");
+  });
+
+  it("prevents the only owner from leaving the current organization", async () => {
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = input.toString();
+      if (url === "/api/organizations/org_1/device-tokens") return jsonResponse({ deviceTokens: [] });
+      if (url === "/api/organizations/org_1/invitations") return jsonResponse({ invitations: [] });
+      if (url === "/api/organizations/org_1/members") return jsonResponse({ members: [memberSummary("owner")] });
+      return jsonResponse({ error: "unexpected request" }, 500);
+    }) as unknown as typeof fetch;
+
+    render(<OrganizationSettingsPage session={sessionWithRole("owner")} onLeaveOrganization={vi.fn()} />);
+
+    expect(await screen.findByText("唯一 Owner 不能退出组织。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "退出组织" })).toBeDisabled();
+  });
 });
 
 function sessionWithRole(role: AuthMemberRole): AuthSessionContext {
@@ -251,12 +281,12 @@ function sessionWithRole(role: AuthMemberRole): AuthSessionContext {
   };
 }
 
-function memberSummary() {
+function memberSummary(role: AuthMemberRole = "admin") {
   return {
     email: "owner@lorume.com",
     id: "membership_1",
     joinedAt: "2026-05-17T08:00:00.000Z",
-    role: "admin",
+    role,
     status: "active",
     userId: "user_1",
   };

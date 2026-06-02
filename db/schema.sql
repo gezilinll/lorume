@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS email_login_codes (
   email text NOT NULL,
   code_hash text NOT NULL,
   purpose text NOT NULL DEFAULT 'login',
-  expires_at timestamptz NOT NULL,
+  expires_at timestamptz,
   consumed_at timestamptz,
   attempts integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now()

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,7 +116,7 @@ test.describe("Runs conversation tasks", () => {
     expect(todoLaneBox?.height ?? 0).toBeGreaterThanOrEqual((page.viewportSize()?.height ?? 900) - 210);
 
     await page.getByRole("button", { name: "日期范围" }).click();
-    await page.locator('[role="gridcell"][data-day="2026-05-10"] button').click();
+    await selectCalendarDate(page, "2026-05-10");
     await expect(page.getByRole("button", { name: /PMO asked OpenClaw/ })).not.toBeVisible();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "日期范围" }).click();
@@ -301,4 +301,20 @@ async function seedWorkBoardData(
     const batchResponse = await request.post("/api/device-task-batches", { data: batch });
     expect(batchResponse.ok()).toBe(true);
   }
+}
+
+async function selectCalendarDate(page: Page, dataDay: string): Promise<void> {
+  const targetDate = new Date(`${dataDay}T00:00:00`);
+  const now = new Date();
+  const monthDelta = (targetDate.getFullYear() - now.getFullYear()) * 12 + targetDate.getMonth() - now.getMonth();
+  if (monthDelta < 0) {
+    for (let index = 0; index < Math.abs(monthDelta); index += 1) {
+      await page.getByRole("button", { name: "Go to the Previous Month" }).click();
+    }
+  } else if (monthDelta > 1) {
+    for (let index = 0; index < monthDelta - 1; index += 1) {
+      await page.getByRole("button", { name: "Go to the Next Month" }).click();
+    }
+  }
+  await page.locator(`[role="gridcell"][data-day="${dataDay}"] button`).click();
 }

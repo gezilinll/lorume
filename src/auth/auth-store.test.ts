@@ -108,6 +108,20 @@ describeDb("Postgres auth store", () => {
           tokenHash: memberInvitationTokenHash,
           userId: memberUser.id,
         });
+        await expect(store.leaveOrganization({
+          now,
+          organizationId: organization.id,
+          userId: memberUser.id,
+        })).resolves.toEqual({ ok: true, organizations: [] });
+        await expect(store.listOrganizationMembers({ organizationId: organization.id })).resolves.toEqual([
+          expect.objectContaining({ email: "zhangliang@gaoding.com", role: "owner" }),
+          expect.objectContaining({ email: "juanbai@gaoding.com", role: "admin" }),
+        ]);
+        await expect(store.leaveOrganization({
+          now,
+          organizationId: organization.id,
+          userId: user.id,
+        })).resolves.toEqual({ ok: false, reason: "last_owner" });
         await expect(store.listOrganizationAdminUserIds(organization.id)).resolves.toEqual([
           user.id,
           invitedUser.id,
@@ -167,6 +181,10 @@ describeDb("Postgres auth store", () => {
           expect.objectContaining({
             eventType: "device_token.occupied",
             metadata: expect.objectContaining({ deviceId: "gezilinll-claw" }),
+          }),
+          expect.objectContaining({
+            eventType: "organization.member_left",
+            metadata: expect.objectContaining({ role: "member" }),
           }),
         ]);
       } finally {

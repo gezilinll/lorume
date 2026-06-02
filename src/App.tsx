@@ -187,7 +187,11 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
           organizationId={runtimeOrganizationId}
         />
       ) : (
-        <OrganizationSettingsPage organization={currentOrganization} session={auth?.session} />
+        <OrganizationSettingsPage
+          organization={currentOrganization}
+          session={auth?.session}
+          onLeaveOrganization={auth?.leaveOrganization}
+        />
       )}
       <ConsoleUtilityDrawer
         organizationId={organizationId}
@@ -253,6 +257,9 @@ function skillFiltersFromSearch(search: string): RuntimeSkillInventoryFilters {
 
 function createAgentAuthContext(): AuthContextValue {
   return {
+    async leaveOrganization() {
+      return [];
+    },
     async logout() {
       window.history.pushState({}, "", "/");
     },

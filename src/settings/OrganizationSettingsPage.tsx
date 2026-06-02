@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface OrganizationSettingsPageProps {
+  onLeaveOrganization?: (organizationId: string) => Promise<unknown>;
   organization?: AuthOrganizationMembership;
   session?: AuthSessionContext;
 }
@@ -41,7 +42,7 @@ const invitationExpiryLabels: Record<InvitationExpiryOption, string> = {
 };
 
 /** Organization settings entry for member visibility and invitation link creation. */
-export function OrganizationSettingsPage({ organization: activeOrganization, session }: OrganizationSettingsPageProps) {
+export function OrganizationSettingsPage({ onLeaveOrganization, organization: activeOrganization, session }: OrganizationSettingsPageProps) {
   const organization = activeOrganization ?? session?.organizations[0];
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AuthInvitableMemberRole>("member");
@@ -57,15 +58,19 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
   const [deviceErrorMessage, setDeviceErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCreatingDeviceToken, setIsCreatingDeviceToken] = useState(false);
+  const [isLeavingOrganization, setIsLeavingOrganization] = useState(false);
   const [resendingInvitationId, setResendingInvitationId] = useState("");
   const [revokingInvitationId, setRevokingInvitationId] = useState("");
   const [copyingDeviceTokenId, setCopyingDeviceTokenId] = useState("");
+  const [leaveErrorMessage, setLeaveErrorMessage] = useState("");
   const hasConsoleWorkbar = useHasConsoleWorkbar();
 
   const canManage = useMemo(() => organization?.role === "owner" || organization?.role === "admin", [organization]);
   const pendingInvitations = useMemo(() => invitations.filter((invitation) => invitation.status !== "accepted"), [invitations]);
   const visibleMembers = members.length > 0 ? members : fallbackMembers(session, organization);
   const boundDeviceCount = deviceTokens.filter((token) => Boolean(token.deviceId) && token.status === "occupied").length;
+  const activeOwnerCount = visibleMembers.filter((member) => member.status === "active" && member.role === "owner").length;
+  const isOnlyOwner = organization?.role === "owner" && activeOwnerCount <= 1;
 
   useEffect(() => {
     if (!organization || !canManage) {
@@ -263,6 +268,27 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
     }
   }
 
+  async function leaveCurrentOrganization() {
+    if (!organization || !onLeaveOrganization) return;
+    if (isOnlyOwner) {
+      setLeaveErrorMessage("唯一 Owner 不能退出组织。");
+      return;
+    }
+    if (!window.confirm("确定退出当前组织？退出后需要重新邀请才能加入。")) return;
+    setIsLeavingOrganization(true);
+    setLeaveErrorMessage("");
+    try {
+      await onLeaveOrganization(organization.organizationId);
+      toast.success("已退出组织");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "退出组织失败";
+      setLeaveErrorMessage(message);
+      toast.error(message);
+    } finally {
+      setIsLeavingOrganization(false);
+    }
+  }
+
   if (!organization) {
     return (
       <div className="space-y-6">
@@ -292,6 +318,22 @@ export function OrganizationSettingsPage({ organization: activeOrganization, ses
             <SummaryItem label="成员数" value={`${visibleMembers.length}`} />
             <SummaryItem label="待加入邀请" value={`${pendingInvitations.length}`} />
             <SummaryItem label="设备 Token" value={`${deviceTokens.length} 条 · ${boundDeviceCount} 已绑定`} />
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-[var(--surface-soft)] p-3 sm:col-span-3 xl:col-span-6 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">退出组织</p>
+                <p className="text-xs leading-5 text-muted-foreground">离开后将不再看到该组织下的运行资产、任务和 Skill 数据。</p>
+                {isOnlyOwner ? <p className="text-xs text-muted-foreground">唯一 Owner 不能退出组织。</p> : null}
+                {leaveErrorMessage ? <p className="text-xs text-destructive" role="alert">{leaveErrorMessage}</p> : null}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!onLeaveOrganization || isLeavingOrganization || isOnlyOwner}
+                onClick={() => void leaveCurrentOrganization()}
+              >
+                退出组织
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -597,9 +639,9 @@ function stripPlaintextDeviceToken(token: AuthDeviceTokenSummary & { token?: str
 }
 
 function deviceTokenDeviceLabel(token: AuthDeviceTokenSummary): string {
-  if (token.deviceId) return token.deviceId;
   if (token.status === "revoked") return "已撤销";
   if (token.status === "expired") return "已过期";
+  if (token.deviceId) return token.deviceId;
   return "待绑定";
 }
 

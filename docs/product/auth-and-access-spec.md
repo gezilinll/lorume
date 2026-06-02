@@ -1,6 +1,6 @@
 # Auth And Access Spec
 
-版本：TinySpec v0.2
+版本：TinySpec v0.3
 
 本规格定义 Lorume 组织、登录、成员、邀请、会话、设备 token 和组织安全审计的产品边界。它是当前权限实现的来源，不覆盖计费、SSO、LDAP 或复杂 RBAC。
 
@@ -63,6 +63,12 @@ Organization Member 表示用户在组织内的角色。
 
 当前组织基础角色只做三档。owner 和 admin 可执行组织管理动作；member 默认读取组织内 Console 数据。Skill 资源级编辑、发布、分配、同步和权限管理通过 Skill governance 模块追加控制。
 
+成员退出规则：
+
+- active member / admin 可以主动退出组织，退出后组织成员关系转为 removed，不删除组织、设备、Runtime、Runs、Skill 或历史数据。
+- owner 可以退出组织，但首版必须至少保留一个 active owner；唯一 owner 退出必须被拒绝。
+- 所有权转让不在本规格内；唯一 owner 需要先通过后续所有权转让能力产生其他 owner 后才能退出。
+
 ### Email Login Code
 
 Email Login Code 是一次性登录验证码。
@@ -101,10 +107,11 @@ Invitation 是加入组织的邮件凭证。
 - 重发邀请必须生成新的 invitation token 并发送新邮件；旧邀请应转为 `revoked`，避免多个有效链接长期并存。
 - 重发邀请沿用原邀请的有效期策略；原邀请永不过期时，新邀请也永不过期。
 - owner / admin 可以撤销未接受邀请，撤销后邀请链接不可再加入组织。
-- 被邀请人点击链接后，如果未登录，先进入邀请登录流程。
+- 被邀请人点击链接后，直接进入受邀邮箱验证码流程。
 - 邀请登录流程可以根据邀请 token 自动预填受邀邮箱，并自动发送验证码；页面展示仍只显示脱敏邮箱。
+- 如果当前已登录邮箱与受邀邮箱不一致，前端应自动退出当前会话并发送受邀邮箱验证码，避免用户在错误身份下确认加入。
 - 登录邮箱必须和邀请邮箱一致，才能接受邀请。
-- 接受后创建 Organization Member，邀请标记为已接受。
+- 验证码校验成功后直接创建 Organization Member，邀请标记为已接受，并进入目标组织 Console，不再额外展示二次加入确认页。
 - 邀请过期、已撤销、已接受、邮箱不匹配或 token 不存在时必须展示明确不可用原因。
 
 ### Device Token
@@ -142,6 +149,7 @@ Organization Audit Event 是组织安全和权限变更的追加式记录。
 - `invitation.sent`：记录操作者、受邀邮箱脱敏值、目标角色和邀请过期时间。
 - `invitation.accepted`：记录接受者、组织和角色。
 - `invitation.rejected`：记录过期、撤销、邮箱不匹配、已接受或 token 无效等原因。
+- `organization.member_left`：记录主动退出组织的用户和原角色。
 - `device_token.created`：记录操作者、目标 `deviceId`、token prefix 和过期时间。
 - `device_token.occupied`：记录 token prefix 和首次绑定的 `deviceId`。
 - `device_token.reuse_rejected`：记录 token prefix、已绑定 `deviceId` 和异常 `deviceId`。
@@ -162,6 +170,7 @@ Organization API：
 
 - `POST /api/organizations`：创建组织。
 - `GET /api/organizations`：读取当前用户组织列表。
+- `POST /api/organizations/:organizationId/leave`：当前用户退出组织；active member / admin 可直接退出，owner 退出时必须至少保留一个 active owner，否则返回 `organization_last_owner_cannot_leave`。
 - `GET /api/organizations/:organizationId/members`：列出组织成员，只有 owner / admin 可用。
 - `POST /api/organizations/:organizationId/invitations`：创建邀请并发送邮件，只有 owner / admin 可用，目标角色只能是 `member` 或 `admin`，`expiresIn` 支持 `1d`、`7d`、`30d`、`never`。
 - `GET /api/organizations/:organizationId/invitations`：列出组织邀请记录，只有 owner / admin 可用；前端默认展示尚未接受的记录用于查看状态和重发。
@@ -222,9 +231,11 @@ Runtime / Runs 读取 API：
 - 组织设置页发送邀请时支持选择过期时间：一天、一星期、一个月或永不过期。
 - 组织设置页应展示待加入邀请记录，包括邮箱、角色、状态、过期时间、重发和撤销操作；已接受邀请不作为待加入记录展示。
 - 邀请页登录前可以展示组织名、目标角色、邀请状态和脱敏邮箱；不得展示完整邮箱、邀请 token、邀请创建人内部信息。
-- 邀请页未登录时可以自动预填受邀邮箱并自动发送验证码；用户只需填写验证码。已登录但邮箱不匹配时，提示退出并使用受邀邮箱登录。
+- 邀请页未登录时可以自动预填受邀邮箱并自动发送验证码；用户只需填写验证码。已登录但邮箱不匹配时，自动退出当前会话并切换到受邀邮箱验证码流程。
+- 邀请页验证码通过后直接加入组织并进入 Console，不再展示单独的“加入组织”确认页。
 - 设备 token 管理应以列表呈现 token 摘要。名称列第一行展示 token 名称，第二行展示 `token_id`；设备列展示已绑定设备名，未绑定时展示待绑定，已撤销/过期且无绑定设备时展示已撤销/已过期；安装命令列提供复制完整安装命令按钮；操作列保留撤销。列表不展示明文 token。
 - 组织设置页创建设备 token 的输入统一命名为“Token 名称”，用于识别该安装 token；当前安装命令会继续把该值作为默认 `--device-id` 传给 collector。
+- 组织概览中提供退出组织入口；唯一 owner 的退出按钮必须禁用，并展示“唯一 Owner 不能退出组织。”。
 - owner / admin 可以撤销 token；member 只能看到自己无权管理设备 token 的说明。
 
 ## Runtime Profiles
@@ -242,11 +253,11 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 后端：
 
 - crypto 测试必须证明验证码、session、invitation token 和 device token 可通过哈希校验；需要后续复制安装命令的 device token secret 必须通过可恢复加密保存，且不会以明文入库。
-- store 测试必须覆盖 User -> Organization -> Member -> Invitation -> Session -> Device Token 的核心链路。
+- store 测试必须覆盖 User -> Organization -> Member -> Invitation -> Session -> Device Token 的核心链路，并覆盖成员退出组织和唯一 owner 退出拒绝。
 - store 测试必须覆盖 device token 从 `pending` 到 `occupied`、跨设备复用拒绝、撤销和过期。
 - store 测试必须覆盖 invitation 只允许 `member` / `admin`，拒绝 `owner`。
 - store 测试必须覆盖审计事件写入，且不包含 token 明文或验证码明文。
-- HTTP API 测试必须覆盖发送验证码、登录、`/api/me`、创建组织、发送邀请邮件、邀请过期选项、邀请列表、邀请重发、邀请撤销、邀请预览、接受邀请、device token 安装命令复制和 logout。
+- HTTP API 测试必须覆盖发送验证码、登录、`/api/me`、创建组织、退出组织、发送邀请邮件、邀请过期选项、邀请列表、邀请重发、邀请撤销、邀请预览、接受邀请、device token 安装命令复制和 logout。
 - Runtime 读取 API 在开启 session 校验时必须拒绝匿名请求。
 - Collector / control 在开启 device token 校验时必须拒绝无效 token。
 - Collector / control 测试必须覆盖 `occupied` token 只能被已绑定设备继续使用。
@@ -254,8 +265,9 @@ Lorume 前后端共享三个稳定运行模式，避免把 auth 规则散落到�
 前端：
 
 - 登录页、验证码页、创建组织页和邀请加入页必须有组件测试。
-- 邀请页测试必须覆盖邀请预览、脱敏邮箱展示、自动发送验证码、邮箱不匹配、过期/撤销/已接受状态和接受成功后切换到目标组织。
+- 邀请页测试必须覆盖邀请预览、脱敏邮箱展示、自动发送验证码、邮箱不匹配时自动切换到受邀邮箱验证码流程、过期/撤销/已接受状态和接受成功后切换到目标组织。
 - 组织设置页测试必须覆盖发送邀请邮件、邀请过期选项、待加入邀请记录、邀请重发、邀请撤销、拒绝 owner 邀请、设备 token 列表、安装命令复制、撤销和不同角色的管理权限。
+- 组织设置页测试必须覆盖成员退出组织、唯一 owner 退出禁用和设备 token 撤销后的列表展示。
 - Console 必须被 `/api/me` gate 保护。
 - shadcn auth component tests and behavior-focused tests must cover the modern logo, base form/button/badge/token usage, and identity page structure so later pages do not bypass shared shadcn tokens or generated primitives.
 - 登录页组件测试必须覆盖初始匿名 `/api/me` 探测 `401` / `404` 不显示错误，同时覆盖非匿名后端故障不被吞掉。

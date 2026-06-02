@@ -27,6 +27,7 @@ const errorMessages: Record<string, string> = {
   device_token_not_found: "设备令牌不存在或已不可用。",
   device_token_not_installable: "该设备令牌已撤销或已过期，不能生成安装命令。",
   device_token_secret_unavailable: "该设备令牌缺少可恢复密钥，请重新生成 token。",
+  organization_last_owner_cannot_leave: "当前组织需要至少保留一个 Owner，请先转让所有权后再退出。",
   organization_name_required: "请输入组织名称。",
   postgres_store_unavailable: "后端数据存储暂时不可用，请稍后重试。",
   request_body_too_large: "请求内容过大，请减少单次上报的数据量。",

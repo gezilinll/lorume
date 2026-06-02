@@ -163,6 +163,24 @@ export function createAuthHttpApiHandler(options: AuthHttpApiHandlerOptions): Au
       return;
     }
 
+    const organizationLeaveMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/leave$/);
+    if (request.method === "POST" && organizationLeaveMatch) {
+      const session = await requireSession(request, response, options.store, now(), pepper);
+      if (!session) return;
+      const organizationId = decodeURIComponent(organizationLeaveMatch[1] ?? "");
+      const result = await options.store.leaveOrganization({
+        now: now(),
+        organizationId,
+        userId: session.user.id,
+      });
+      if (!result.ok) {
+        sendAuthError(response, result.reason === "last_owner" ? 409 : 403, result.reason === "last_owner" ? "organization_last_owner_cannot_leave" : "forbidden");
+        return;
+      }
+      sendJson(response, 200, { organizations: result.organizations });
+      return;
+    }
+
     const organizationMembersMatch = requestUrl.pathname.match(/^\/api\/organizations\/([^/]+)\/members$/);
     if (request.method === "GET" && organizationMembersMatch) {
       const session = await requireSession(request, response, options.store, now(), pepper);
@@ -749,6 +767,7 @@ function normalizeAuditEventType(value: string): AuthAuditEventType | undefined 
     || value === "invitation.accepted"
     || value === "invitation.rejected"
     || value === "invitation.sent"
+    || value === "organization.member_left"
   ) {
     return value;
   }

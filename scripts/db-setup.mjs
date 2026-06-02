@@ -22,7 +22,12 @@ async function applySchema(connectionString) {
   await client.connect();
   try {
     await client.query(await readFile(schemaPath, "utf8"));
+    await applyCompatibleSchemaUpgrades(client);
   } finally {
     await client.end();
   }
+}
+
+async function applyCompatibleSchemaUpgrades(client) {
+  await client.query("ALTER TABLE organization_invitations ALTER COLUMN expires_at DROP NOT NULL");
 }

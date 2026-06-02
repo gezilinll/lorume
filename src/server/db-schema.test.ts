@@ -124,6 +124,7 @@ describeDb("database schema baseline", () => {
           "metadata",
           "created_at",
         ]);
+        await expect(readColumnNullable(client, "organization_invitations", "expires_at")).resolves.toBe(true);
         await expect(listPublicColumnNames(client, "runtime_skill_probe_snapshots")).resolves.toEqual([
           "id",
           "device_id",
@@ -181,4 +182,15 @@ async function listPublicColumnNames(client: Client, tableName: string): Promise
     ORDER BY ordinal_position
   `, [tableName]);
   return result.rows.map((row) => row.column_name);
+}
+
+async function readColumnNullable(client: Client, tableName: string, columnName: string): Promise<boolean> {
+  const result = await client.query<{ is_nullable: string }>(`
+    SELECT is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = $1
+      AND column_name = $2
+  `, [tableName, columnName]);
+  return result.rows[0]?.is_nullable === "YES";
 }

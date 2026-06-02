@@ -325,6 +325,47 @@ describe("auth HTTP API", () => {
     });
   });
 
+  it("lets active members leave an organization but blocks the only owner", async () => {
+    const store = new MemoryAuthStore();
+    const { baseUrl } = await startAuthApi(store);
+
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "owner@gaoding.com" });
+    const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "owner@gaoding.com", code: "246810" });
+    const ownerCookie = ownerLogin.headers.get("set-cookie") ?? "";
+    const orgResponse = await postJson(`${baseUrl}/api/organizations`, { name: "Lorume" }, ownerCookie);
+    const orgBody = await orgResponse.json() as { organization: { id: string } };
+
+    await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/invitations`, {
+      email: "member@gaoding.com",
+      role: "member",
+    }, ownerCookie);
+    await postJson(`${baseUrl}/api/auth/email-code`, { email: "member@gaoding.com" });
+    const memberLogin = await postJson(`${baseUrl}/api/auth/login`, { email: "member@gaoding.com", code: "246810" });
+    const memberCookie = memberLogin.headers.get("set-cookie") ?? "";
+    const acceptResponse = await postJson(`${baseUrl}/api/invitations/invite-token/accept`, {}, memberCookie);
+    expect(acceptResponse.status).toBe(200);
+
+    const leaveMemberResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/leave`, {}, memberCookie);
+    expect(leaveMemberResponse.status).toBe(200);
+    await expect(leaveMemberResponse.json()).resolves.toEqual({ organizations: [] });
+
+    const memberMeResponse = await fetch(`${baseUrl}/api/me`, { headers: { cookie: memberCookie } });
+    await expect(memberMeResponse.json()).resolves.toMatchObject({ organizations: [] });
+
+    const membersResponse = await fetch(`${baseUrl}/api/organizations/${orgBody.organization.id}/members`, {
+      headers: { cookie: ownerCookie },
+    });
+    await expect(membersResponse.json()).resolves.toMatchObject({
+      members: [expect.objectContaining({ email: "owner@gaoding.com", role: "owner" })],
+    });
+
+    const leaveOwnerResponse = await postJson(`${baseUrl}/api/organizations/${orgBody.organization.id}/leave`, {}, ownerCookie);
+    expect(leaveOwnerResponse.status).toBe(409);
+    await expect(leaveOwnerResponse.json()).resolves.toMatchObject({
+      error: "organization_last_owner_cannot_leave",
+    });
+  });
+
   it("returns a readable message when the email provider is unavailable", async () => {
     const store = new MemoryAuthStore();
     const handler = createAuthHttpApiHandler({
@@ -437,6 +478,7 @@ class MemoryAuthStore implements AuthStore {
     tokenHash: string;
   }> = [];
   private readonly memberships: AuthOrganizationMembership[] = [];
+  private readonly removedMembershipIds = new Set<string>();
   private readonly organizations: Array<{ createdByUserId: string; id: string; name: string; slug: string }> = [];
   private readonly sessions: Array<{ expiresAt: Date; id: string; revokedAt?: Date; sessionHash: string; userId: string }> = [];
   private readonly users: AuthUser[] = [];
@@ -511,13 +553,39 @@ class MemoryAuthStore implements AuthStore {
   }
 
   async listOrganizationsForUser(userId: string): Promise<AuthOrganizationMembership[]> {
-    return this.memberships.filter((membership) => this.membershipUserIds.get(membership.id) === userId);
+    return this.memberships.filter((membership) =>
+      this.membershipUserIds.get(membership.id) === userId
+      && !this.removedMembershipIds.has(membership.id)
+    );
+  }
+
+  async leaveOrganization(input: { organizationId: string; userId: string }) {
+    const membership = this.memberships.find((item) =>
+      item.organizationId === input.organizationId
+      && this.membershipUserIds.get(item.id) === input.userId
+      && !this.removedMembershipIds.has(item.id)
+    );
+    if (!membership) return { ok: false as const, reason: "not_member" as const };
+    if (membership.role === "owner") {
+      const activeOwnerCount = this.memberships.filter((item) =>
+        item.organizationId === input.organizationId
+        && item.role === "owner"
+        && !this.removedMembershipIds.has(item.id)
+      ).length;
+      if (activeOwnerCount <= 1) return { ok: false as const, reason: "last_owner" as const };
+    }
+    this.removedMembershipIds.add(membership.id);
+    return { ok: true as const, organizations: await this.listOrganizationsForUser(input.userId) };
   }
 
   async listOrganizationAdminUserIds(organizationId: string): Promise<string[]> {
     const adminRoles = new Set<AuthMemberRole>(["owner", "admin"]);
     return this.memberships
-      .filter((membership) => membership.organizationId === organizationId && adminRoles.has(membership.role))
+      .filter((membership) =>
+        membership.organizationId === organizationId
+        && adminRoles.has(membership.role)
+        && !this.removedMembershipIds.has(membership.id)
+      )
       .map((membership) => this.membershipUserIds.get(membership.id) ?? "")
       .filter(Boolean);
   }
@@ -598,7 +666,10 @@ class MemoryAuthStore implements AuthStore {
 
   async listOrganizationMembers(input: { organizationId: string }): Promise<AuthOrganizationMemberSummary[]> {
     return this.memberships
-      .filter((membership) => membership.organizationId === input.organizationId)
+      .filter((membership) =>
+        membership.organizationId === input.organizationId
+        && !this.removedMembershipIds.has(membership.id)
+      )
       .map((membership) => {
         const userId = this.membershipUserIds.get(membership.id) ?? "";
         const user = this.users.find((item) => item.id === userId);

@@ -7,6 +7,7 @@ export interface AuthClient {
   createOrganization: (input: { name: string; slug: string }) => Promise<{ organizations: AuthOrganizationMembership[] }>;
   getInvitationPreview: (token: string) => Promise<AuthInvitationPreview>;
   getMe: () => Promise<AuthSessionContext | null>;
+  leaveOrganization: (organizationId: string) => Promise<{ organizations: AuthOrganizationMembership[] }>;
   loginWithCode: (input: { code: string; email: string }) => Promise<AuthSessionContext>;
   logout: () => Promise<void>;
   requestEmailCode: (email: string) => Promise<{ email: string; ok: boolean }>;
@@ -37,6 +38,11 @@ export function createAuthClient(): AuthClient {
       if (response.status === 401 || response.status === 404) return null;
       if (!response.ok) throw new Error(await readErrorMessage(response));
       return response.json() as Promise<AuthSessionContext>;
+    },
+    leaveOrganization(organizationId) {
+      return requestJson(`/api/organizations/${encodeURIComponent(organizationId)}/leave`, {
+        method: "POST",
+      });
     },
     loginWithCode(input) {
       return requestJson("/api/auth/login", {

@@ -2,13 +2,13 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { AuthInvitationPreview, AuthOrganizationMembership, AuthSessionContext } from "./auth-store";
 import { createAuthClient, type AuthClient } from "./auth-client";
 import { CreateOrganizationPage } from "./CreateOrganizationPage";
-import { InviteJoinPage } from "./InviteJoinPage";
 import { LoginPage } from "./LoginPage";
 import { VerifyCodePage } from "./VerifyCodePage";
 import { AuthPageShell } from "./AuthPageShell";
 import { Button } from "@/components/ui/button";
 
 export interface AuthContextValue {
+  leaveOrganization: (organizationId: string) => Promise<AuthOrganizationMembership[]>;
   logout: () => Promise<void>;
   session: AuthSessionContext;
 }
@@ -71,15 +71,25 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
         if (!isMounted) return;
         setInvitePreview(preview);
         if (
-          !session
-          && preview.status === "available"
+          preview.status === "available"
           && preview.email
           && autoCodeRequestedInviteToken !== inviteToken
         ) {
           setAutoCodeRequestedInviteToken(inviteToken);
-          const result = await authClient.requestEmailCode(preview.email);
-          if (!isMounted) return;
-          setEmailForCode(result.email);
+          try {
+            if (session && !isSameEmail(session.user.email, preview.email)) {
+              await authClient.logout();
+              if (!isMounted) return;
+              setSession(null);
+            }
+            const result = await authClient.requestEmailCode(preview.email);
+            if (!isMounted) return;
+            setEmailForCode(result.email);
+          } catch (nextError) {
+            if (!isMounted) return;
+            setAutoCodeRequestedInviteToken(null);
+            setError(formatAuthError(nextError));
+          }
         }
       })
       .catch((nextError: unknown) => {
@@ -91,11 +101,16 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
     return () => {
       isMounted = false;
     };
-  }, [authClient, autoCodeRequestedInviteToken, inviteToken, isLoading, session]);
+  }, [authClient, autoCodeRequestedInviteToken, inviteToken, isLoading, session?.user.email]);
 
   const context = useMemo<AuthContextValue | null>(() => {
     if (!session) return null;
     return {
+      async leaveOrganization(organizationId) {
+        const result = await authClient.leaveOrganization(organizationId);
+        setSession((current) => current ? { ...current, organizations: result.organizations } : current);
+        return result.organizations;
+      },
       async logout() {
         await authClient.logout();
         setSession(null);
@@ -114,8 +129,8 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
     );
   }
 
-  if (!session) {
-    if (inviteToken && isInvitePreviewLoading && !emailForCode) {
+  if (inviteToken) {
+    if (isInvitePreviewLoading && !emailForCode) {
       return (
         <AuthPageShell title="确认邀请" subtitle="正在读取邀请信息，并准备邮箱验证码。">
           <p className="text-sm leading-6 text-muted-foreground">加载中...</p>
@@ -123,13 +138,14 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
       );
     }
 
-    if (inviteToken && invitePreview && invitePreview.status !== "available") {
+    if (invitePreview && invitePreview.status !== "available") {
       return (
         <InvitationStatusPage
           error={error}
           preview={invitePreview}
           onBack={() => {
             setError(null);
+            setEmailForCode("");
             clearInviteRoute();
             setInviteToken(null);
           }}
@@ -140,7 +156,52 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
     if (emailForCode) {
       return (
         <VerifyCodePage
+          backLabel="暂不加入"
           displayEmail={invitePreview?.maskedEmail}
+          email={emailForCode}
+          error={error}
+          notice="验证通过后会直接加入该组织，并进入控制台。"
+          submitLabel="加入并进入"
+          onBack={() => {
+            setError(null);
+            setEmailForCode("");
+            clearInviteRoute();
+            setInviteToken(null);
+          }}
+          onSubmit={async (code) => {
+            setError(null);
+            try {
+              const nextSession = await authClient.loginWithCode({ code, email: emailForCode });
+              const result = await authClient.acceptInvitation(inviteToken);
+              clearInviteRoute();
+              setInviteToken(null);
+              setEmailForCode("");
+              setSession(addOrganizationToSession(nextSession, result.organization));
+            } catch (nextError) {
+              setError(formatAuthError(nextError));
+            }
+          }}
+        />
+      );
+    }
+
+    return (
+      <AuthPageShell title="确认邀请" subtitle="正在发送受邀邮箱验证码，请稍等片刻。">
+        {error ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : (
+          <p className="text-sm leading-6 text-muted-foreground">加载中...</p>
+        )}
+      </AuthPageShell>
+    );
+  }
+
+  if (!session) {
+    if (emailForCode) {
+      return (
+        <VerifyCodePage
           email={emailForCode}
           error={error}
           onBack={() => {
@@ -175,81 +236,6 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
     );
   }
 
-  if (inviteToken) {
-    if (isInvitePreviewLoading || !invitePreview) {
-      return (
-        <AuthPageShell title="确认邀请" subtitle="正在读取邀请信息，请稍等片刻。">
-          <p className="text-sm leading-6 text-muted-foreground">加载中...</p>
-        </AuthPageShell>
-      );
-    }
-
-    if (invitePreview.status !== "available") {
-      return (
-        <InvitationStatusPage
-          error={error}
-          preview={invitePreview}
-          onBack={() => {
-            setError(null);
-            clearInviteRoute();
-            setInviteToken(null);
-          }}
-        />
-      );
-    }
-
-    if (invitePreview.email && !isSameEmail(session.user.email, invitePreview.email)) {
-      const invitedEmail = invitePreview.email;
-      return (
-        <InvitationEmailSwitchPage
-          error={error}
-          preview={invitePreview}
-          onSkip={() => {
-            setError(null);
-            clearInviteRoute();
-            setInviteToken(null);
-          }}
-          onSubmit={async () => {
-            setError(null);
-            try {
-              setAutoCodeRequestedInviteToken(inviteToken);
-              await authClient.logout();
-              setSession(null);
-              const result = await authClient.requestEmailCode(invitedEmail);
-              setEmailForCode(result.email);
-            } catch (nextError) {
-              setAutoCodeRequestedInviteToken(null);
-              setError(formatAuthError(nextError));
-            }
-          }}
-        />
-      );
-    }
-
-    return (
-      <InviteJoinPage
-        error={error}
-        preview={invitePreview}
-        onSkip={() => {
-          setError(null);
-          clearInviteRoute();
-          setInviteToken(null);
-        }}
-        onSubmit={async () => {
-          setError(null);
-          try {
-            const result = await authClient.acceptInvitation(inviteToken);
-            clearInviteRoute();
-            setInviteToken(null);
-            setSession(addOrganizationToSession(session, result.organization));
-          } catch (nextError) {
-            setError(formatAuthError(nextError));
-          }
-        }}
-      />
-    );
-  }
-
   if (session.organizations.length === 0) {
     return (
       <CreateOrganizationPage
@@ -268,45 +254,6 @@ export function AuthProvider({ children, client }: AuthProviderProps) {
   }
 
   return <AuthContext.Provider value={context}>{children}</AuthContext.Provider>;
-}
-
-function InvitationEmailSwitchPage({
-  error,
-  onSkip,
-  onSubmit,
-  preview,
-}: {
-  error?: string | null;
-  onSkip: () => void;
-  onSubmit: () => Promise<void>;
-  preview: AuthInvitationPreview;
-}) {
-  const roleLabel = preview.role === "admin" ? "管理员" : "成员";
-  const organizationName = preview.organizationName ?? "受邀组织";
-  const maskedEmail = preview.maskedEmail ?? "受邀邮箱";
-
-  return (
-    <AuthPageShell
-      title="验证受邀邮箱"
-      subtitle={`你将加入 ${organizationName}，目标角色为 ${roleLabel}。请使用受邀邮箱 ${maskedEmail} 完成验证码登录。`}
-      preview={null}
-      notice="当前浏览器已登录其他账号。为了保护组织访问权限，需要先切换到受邀邮箱。"
-    >
-      <div className="grid gap-4">
-        <Button type="button" onClick={() => void onSubmit()}>
-          发送验证码到受邀邮箱
-        </Button>
-        <Button type="button" variant="secondary" onClick={onSkip}>
-          暂不加入
-        </Button>
-      </div>
-      {error ? (
-        <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </AuthPageShell>
-  );
 }
 
 function InvitationStatusPage({

@@ -122,13 +122,13 @@ describe("Runtime Fleet collector upgrade management", () => {
         });
       }
       if (url.includes("/api/device-collector/manifest.json")) {
-        return jsonResponse({ schemaVersion: "collector-package-v1", version: "0.1.0" });
+        return jsonResponse({ schemaVersion: "collector-package-v1", version: "0.1.1" });
       }
       if (url.includes("/api/operations")) {
         return jsonResponse({ operations: [] });
       }
       if (url.includes("/api/devices/fixture-mac/collector-upgrade") && init?.method === "POST") {
-        return jsonResponse({ operationId: "op_upgrade", status: "queued", targetVersion: "0.1.0" }, 202);
+        return jsonResponse({ operationId: "op_upgrade", status: "queued", targetVersion: "0.1.1" }, 202);
       }
       if (url.includes("/collection-health") || url.includes("/diagnostics")) {
         return jsonResponse({}, 404);
@@ -141,7 +141,7 @@ describe("Runtime Fleet collector upgrade management", () => {
 
     expect(await screen.findByText("Collector 0.0.9 · 待升级")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /fixture-mac/ }));
-    expect(await screen.findByText("最新版本: 0.1.0")).toBeInTheDocument();
+    expect(await screen.findByText("最新版本: 0.1.1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "升级 Collector" }));
 

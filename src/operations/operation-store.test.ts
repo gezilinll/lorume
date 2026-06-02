@@ -292,6 +292,7 @@ describeDb("Postgres operation store", () => {
             stage: "queued",
             targetVersion: "0.1.2",
           },
+          runAfter: new Date("2026-06-02T08:59:00.000Z"),
           type: "collector_upgrade_device",
         });
 
@@ -380,6 +381,7 @@ describeDb("Postgres operation store", () => {
             stage: "installing",
             targetVersion: "0.1.2",
           },
+          runAfter: new Date("2026-06-02T09:59:00.000Z"),
           type: "collector_upgrade_device",
         });
         await operationStore.claimNextJob({

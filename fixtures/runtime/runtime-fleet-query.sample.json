@@ -16,7 +16,7 @@
         "publicIp": "203.0.113.10"
       },
       "collector": {
-        "version": "0.1.0",
+        "version": "0.1.1",
         "installPath": "/opt/lorume"
       }
     }

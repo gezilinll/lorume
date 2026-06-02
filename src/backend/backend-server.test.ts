@@ -20,6 +20,7 @@ import {
 
 const describeDb = shouldRunPostgresTests() ? describe : describe.skip;
 const backends: LorumeBackendServer[] = [];
+const devicePackageVersion = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")).version;
 
 afterEach(async () => {
   await Promise.all(backends.map((backend) => backend.close()));
@@ -201,7 +202,7 @@ describe("standalone Lorume backend server", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
     await expect(response.json()).resolves.toMatchObject({
       schemaVersion: "collector-package-v1",
-      version: "0.1.0",
+      version: devicePackageVersion,
       files: expect.arrayContaining([
         expect.objectContaining({
           fileName: "lorume-device-collector.mjs",

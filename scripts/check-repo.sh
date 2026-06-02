@@ -59,6 +59,8 @@ required_paths=(
   "scripts/db-setup.mjs"
   "scripts/check-commit-message.mjs"
   "scripts/check-commit-message.test.mjs"
+  "scripts/check-device-package-version.mjs"
+  "scripts/check-device-package-version.test.mjs"
   "scripts/dev-e2e.ts"
   "scripts/lorume.mjs"
   "scripts/lorume-device-collector.mjs"
@@ -240,5 +242,7 @@ if problems:
         print(f"- {problem}", file=sys.stderr)
     sys.exit(1)
 PY
+
+node scripts/check-device-package-version.mjs
 
 echo "check:repo: ok"

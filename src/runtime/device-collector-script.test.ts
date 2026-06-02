@@ -425,11 +425,11 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       taskSyncCachePath,
     }));
     writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
-    const packageFiles = createUpgradePackageFiles("0.1.1");
+    const packageFiles = createUpgradePackageFiles("0.1.2");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "upgrade-device",
       packageFiles,
-      targetVersion: "0.1.1",
+      targetVersion: "0.1.2",
     });
     const collector = createCollectorProcessTracker();
 
@@ -468,7 +468,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
         jobId: "opjob_upgrade",
         stage: "restart_pending",
-        targetVersion: "0.1.1",
+        targetVersion: "0.1.2",
       });
     } finally {
       await collector.stop();
@@ -493,7 +493,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       deviceToken: "upgrade-token",
       installDir,
     }));
-    const packageFiles = createUpgradePackageFiles("0.1.1");
+    const packageFiles = createUpgradePackageFiles("0.1.2");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "unsafe-upgrade-device",
       manifestOverride: {
@@ -501,7 +501,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
         path: "../config.json",
       },
       packageFiles,
-      targetVersion: "0.1.1",
+      targetVersion: "0.1.2",
     });
     const collector = createCollectorProcessTracker();
 
@@ -1537,7 +1537,7 @@ async function startCollectorUpgradeServer(options: {
         webSocket.send(JSON.stringify({ type: "hello.ack", deviceId: message.deviceId }));
         webSocket.send(JSON.stringify({
           type: "collector.upgrade.request",
-          currentVersion: "0.1.0",
+          currentVersion: "0.1.1",
           deadlineAt: "2026-06-02T09:05:00.000Z",
           deviceId: options.deviceId,
           jobId: "opjob_upgrade",

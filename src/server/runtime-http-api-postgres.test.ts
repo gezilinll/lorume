@@ -832,19 +832,19 @@ describeDb("runtime HTTP API with Postgres store", () => {
         expect(body).toMatchObject({
           operationId: expect.any(String),
           status: "queued",
-          targetVersion: "0.1.0",
+          targetVersion: "0.1.1",
         });
         expect(operations).toEqual([
           expect.objectContaining({
             metadata: expect.objectContaining({
               currentVersion: "0.0.9",
               deviceId: "upgrade-device",
-              targetVersion: "0.1.0",
+              targetVersion: "0.1.1",
             }),
             resourceId: "upgrade-device",
             resourceType: "device",
             status: "queued",
-            targetId: "0.1.0",
+            targetId: "0.1.1",
             targetType: "collector",
             type: "collector_upgrade",
           }),
@@ -856,7 +856,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
               deviceId: "upgrade-device",
               nonce: expect.stringMatching(/^upgrade_/),
               stage: "queued",
-              targetVersion: "0.1.0",
+              targetVersion: "0.1.1",
             }),
             status: "queued",
             type: "collector_upgrade_device",
@@ -955,7 +955,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         store.writeDeviceConnection({
           collectorUpgrade: { protocolVersion: 1, supported: true },
-          collectorVersion: "0.1.0",
+          collectorVersion: "0.1.1",
           deviceId: "latest-device",
           status: "online",
         });
@@ -971,12 +971,12 @@ describeDb("runtime HTTP API with Postgres store", () => {
         expect(latestResponse.status).toBe(200);
         await expect(latestResponse.json()).resolves.toMatchObject({
           status: "succeeded",
-          targetVersion: "0.1.0",
+          targetVersion: "0.1.1",
         });
         expect(legacyResponse.status).toBe(202);
         await expect(legacyResponse.json()).resolves.toMatchObject({
           status: "requires_manual_step",
-          targetVersion: "0.1.0",
+          targetVersion: "0.1.1",
         });
       } finally {
         await Promise.all([authStore.close(), operationStore.close(), postgresStore.close()]);

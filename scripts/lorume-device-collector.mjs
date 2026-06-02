@@ -10,7 +10,7 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.0";
+const COLLECTOR_VERSION = "0.1.1";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;

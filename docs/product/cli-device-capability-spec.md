@@ -4,6 +4,8 @@
 
 本规格定义 `lorume` CLI 的设备侧确定性能力边界。被采集设备上只有 Lorume device package 这一条安装入口，稳定本地调用面是 `lorume` CLI；collector / daemon 只能编排 CLI 命令、上传结果和维护连接健康，不能直接探测第三方 Runtime 的私有目录、内部 API、token 或进程语义，也不能承担后端命令执行器角色。CLI 不具备推理能力，也不负责分析、编辑、安装或迁移 Skill。
 
+CLI 随 collector 一起作为 Lorume device package 安装到目标设备。任何会改变 `lorume.mjs`、runtime adapter、collector 脚本、安装器或设备包 manifest 的代码变更，都必须按 [collector upgrade spec](collector-upgrade-spec.md) 的版本规则提升设备包版本；版本号仍是服务端判断 collector 是否最新的唯一依据。
+
 ## 目标
 
 - 提供一个本地 `lorume` CLI 入口，用于暴露设备侧确定性能力。
@@ -112,5 +114,6 @@ Collector 调用该命令时必须使用本地单飞锁保护，避免常驻服�
 - `src/cli/lorume-cli.test.ts` 覆盖命令 shape、JSON 输出、路径安全和 unsupported command。
 - `src/cli/lorume-cli.test.ts` 覆盖 `collect device-state`、`agent skill-probe` 的 JSON 合同、可选字段和错误码映射。
 - `src/runtime/device-collector-script.test.ts` 必须验证 collector 通过 `lorume` CLI 获取 `device_state`，而不是直接新增第三方私有探测逻辑。
+- `scripts/check-device-package-version.mjs` 和 `scripts/check-device-package-version.test.mjs` 兜底检查 collector / CLI 设备包文件变更必须伴随更高的设备包版本，并要求 `package.json`、`package-lock.json`、collector 脚本和 runtime adapter 版本一致。
 - `npm run check:cli` 运行 CLI harness。
 - `npm run check:runtime`、`npm run check:backend`、`npm run check:quick` 继续覆盖 collector、backend 和 TypeScript 边界。

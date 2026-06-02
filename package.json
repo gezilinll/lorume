@@ -1,6 +1,6 @@
 {
   "name": "lorume",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "bin": {
@@ -22,6 +22,7 @@
     "check": "npm run verify",
     "check:full": "npm run verify",
     "check:commit-message": "vitest run scripts/check-commit-message.test.mjs",
+    "check:device-package-version": "node scripts/check-device-package-version.mjs && vitest run scripts/check-device-package-version.test.mjs",
     "check:cli": "vitest run src/cli",
     "check:repo": "./scripts/check-repo.sh",
     "check:backend": "vitest run src/auth/auth-crypto.test.ts src/auth/auth-http-api.test.ts src/backend src/server src/operations src/notifications src/runtime/device-collector-script.test.ts",

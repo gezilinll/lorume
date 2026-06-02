@@ -56,6 +56,19 @@ export interface CollectorPackageManifest {
 
 Manifest 不包含 device token、server session、平台 API key、本机路径或外部 runtime 原始证据。
 
+Collector 是否“最新”只按设备上报的 `collectorVersion` 与服务端 manifest `version` 做版本号比较。`upgrade.supported` 和 `protocolVersion` 只决定服务端是否能自动下发升级 Job；它们不参与最新版本判定，避免把版本治理复杂化为能力推断。
+
+Collector / CLI 设备包版本必须随安装到目标设备的代码变更递增。任何会改变以下文件内容、文件白名单、安装结果或设备侧 CLI 行为的提交，都必须同步 bump 设备包版本：
+
+- `scripts/lorume-device-collector.mjs`
+- `scripts/lorume-runtime-adapters.mjs`
+- `scripts/local-ip-normalization.mjs`
+- `scripts/lorume.mjs`
+- `scripts/install-device-collector.sh`
+- `src/backend/device-installer-manifest.ts`
+
+版本递增按变更范围选择：bugfix、采集稳定性、harness 驱动的小行为修正使用 patch；新增 collector 协议能力、CLI 命令或设备包文件使用 minor；不兼容安装目录、配置、协议或文件白名单变更使用 major。当前实现的设备包版本源仍是 `package.json`，并要求 `package-lock.json`、`lorume-device-collector.mjs` 和 `lorume-runtime-adapters.mjs` 中的 collector version 常量保持一致。
+
 ### Device Collector Capability
 
 Collector 在 `hello` 和 `heartbeat` 中继续上报 `collectorVersion`，并在具备自升级能力后额外上报：
@@ -278,4 +291,5 @@ Organization Settings 只保留设备 token、安装命令和手动重装入口�
 - Backend API-only E2E：本地 isolated backend/Postgres、真实 collector 进程、device token WebSocket、升级消息、重启后目标版本确认。
 - Runtime Fleet component harness：展示最新版本、每台设备版本状态、单设备升级按钮，并确认升级请求会创建 Operation。
 - Operations drawer harness：展示 collector upgrade Operation / Job stage、progress message 和失败摘要。
+- Device package version harness：`scripts/check-device-package-version.mjs` 比较设备包文件相对 git 基线的变更；当 collector / CLI 包文件变更但当前版本未高于基线版本时，`npm run check:repo` 必须失败。
 - Repo and DB harness：`npm run check:repo`、`npm run check:backend`、`npm run check:db`、`npm run check:runtime` 覆盖新增 source of truth、schema 和 collector 行为。

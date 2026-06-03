@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Bell, Bot, CalendarClock, ClipboardList, KeyRound, Layers3, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Bell, Bot, CalendarClock, ClipboardList, KeyRound, Layers3, MessageSquareText, RadioTower, Server, Settings2, ShieldCheck } from "lucide-react";
 
 import { LorumeLogo } from "@/components/brand/LorumeLogo";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,13 @@ const capabilityCards = [
     icon: Layers3,
     tone: "bg-[var(--purple-soft)] text-[var(--purple-foreground)]",
     title: "Skill 仓库",
+  },
+  {
+    description: "展示 OpenClaw main Agent 的日报硬指标、Agent 自评、典型案例和风险说明。",
+    href: "/agent-dashboard",
+    icon: BarChart3,
+    tone: "bg-[var(--blue-soft)] text-[var(--blue-foreground)]",
+    title: "Agent 看板",
   },
   {
     description: "管理当前组织上下文、成员邀请、设备 token 和 collector 安装入口。",
@@ -122,7 +129,7 @@ export function HomePage() {
       </section>
 
       <section aria-label="当前已实现能力" className="border-t bg-muted/30">
-        <div className="mx-auto grid w-full max-w-7xl items-stretch gap-4 px-4 py-12 sm:px-6 sm:grid-cols-2 lg:grid-cols-3 lg:px-8 xl:grid-cols-5">
+        <div className="mx-auto grid w-full max-w-7xl items-stretch gap-4 px-4 py-12 sm:px-6 sm:grid-cols-2 lg:grid-cols-3 lg:px-8 xl:grid-cols-6">
           {capabilityCards.map((capability) => {
             const Icon = capability.icon;
             return (

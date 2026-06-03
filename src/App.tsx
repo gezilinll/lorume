@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { LorumeAppMode } from "./app-mode";
 import { AuthProvider, AuthSessionProvider, useOptionalAuthSession, type AuthContextValue } from "./auth/AuthProvider";
 import { AppShell, type ConsolePageKey, type ConsoleUtilityKey } from "./components/layout/AppShell";
+import { AgentDashboardPage } from "./agent-dashboard/AgentDashboardPage";
 import {
   ConsoleUtilityBar,
   ConsoleUtilityDrawer,
@@ -25,6 +26,7 @@ const pagePathByKey: Record<PageKey, string> = {
   runs: "/runs",
   scheduled: "/scheduled-tasks",
   skills: "/skills",
+  agentDashboard: "/agent-dashboard",
   settings: "/settings",
 };
 
@@ -142,6 +144,18 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
     setUtilityReturnPath(nextPath);
   };
 
+  const openAgentDashboard = (filters: { agentId?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (filters.agentId) searchParams.set("agentId", filters.agentId);
+    const search = searchParams.toString() ? `?${searchParams.toString()}` : "";
+    const nextPath = `${pagePathByKey.agentDashboard}${search}`;
+    window.history.pushState({}, "", nextPath);
+    setRouteSearch(search);
+    setActivePage("agentDashboard");
+    setUtilityView(null);
+    setUtilityReturnPath(nextPath);
+  };
+
   const closeUtility = () => {
     const nextPath = utilityReturnPath || pagePathByKey[activePage];
     if (getCurrentPath() !== nextPath) {
@@ -175,7 +189,11 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
       )}
     >
       {activePage === "runtime" ? (
-        <RuntimeFleetPage organizationId={runtimeOrganizationId} onOpenSkillWarehouse={openSkillWarehouse} />
+        <RuntimeFleetPage
+          organizationId={runtimeOrganizationId}
+          onOpenAgentDashboard={openAgentDashboard}
+          onOpenSkillWarehouse={openSkillWarehouse}
+        />
       ) : activePage === "runs" ? (
         <RuntimeWorkBoardPage organizationId={runtimeOrganizationId} />
       ) : activePage === "scheduled" ? (
@@ -185,6 +203,12 @@ function ConsoleApp({ utilityDataEnabled }: { utilityDataEnabled: boolean }) {
           initialFilters={skillFiltersFromSearch(routeSearch)}
           key={routeSearch}
           organizationId={runtimeOrganizationId}
+        />
+      ) : activePage === "agentDashboard" ? (
+        <AgentDashboardPage
+          initialAgentId={agentDashboardFiltersFromSearch(routeSearch).agentId}
+          key={routeSearch}
+          organizationId={organizationId}
         />
       ) : (
         <OrganizationSettingsPage
@@ -217,6 +241,7 @@ function pageFromPath(path: string): PageKey | null {
   if (path === "/runs") return "runs";
   if (path === "/scheduled-tasks") return "scheduled";
   if (path === "/skills") return "skills";
+  if (path === "/agent-dashboard") return "agentDashboard";
   if (path === "/settings") return "settings";
   return null;
 }
@@ -251,6 +276,13 @@ function skillFiltersFromSearch(search: string): RuntimeSkillInventoryFilters {
   const params = new URLSearchParams(search);
   return {
     ...(params.get("runtimeId") ? { runtimeId: params.get("runtimeId") ?? undefined } : {}),
+    ...(params.get("agentId") ? { agentId: params.get("agentId") ?? undefined } : {}),
+  };
+}
+
+function agentDashboardFiltersFromSearch(search: string): { agentId?: string } {
+  const params = new URLSearchParams(search);
+  return {
     ...(params.get("agentId") ? { agentId: params.get("agentId") ?? undefined } : {}),
   };
 }

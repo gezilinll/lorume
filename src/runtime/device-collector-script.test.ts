@@ -1753,7 +1753,7 @@ async function startCollectorAnalysisServer(options: { deviceId: string }): Prom
           periodStart: "2026-06-01T16:00:00.000Z",
           periodEnd: "2026-06-02T16:00:00.000Z",
           prompt: "Return JSON only.",
-          deadlineAt: "2026-06-03T08:05:00.000Z",
+          deadlineAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
           timeoutSeconds: 120,
           nonce: "analysis_nonce",
         };

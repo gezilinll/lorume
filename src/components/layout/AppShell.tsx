@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Bell, CalendarClock, Check, ChevronDown, Layers3, ListChecks, LogOut, Play, Plus, RefreshCw, Server, Settings } from "lucide-react";
+import { BarChart3, Bell, CalendarClock, Check, ChevronDown, Layers3, ListChecks, LogOut, Play, Plus, RefreshCw, Server, Settings } from "lucide-react";
 import type { AuthOrganizationMembership } from "@/auth/auth-store";
 import { InitialAvatar, initialFromText } from "@/components/data/InitialAvatar";
 import { ConsoleWorkbarContext, type ConsoleWorkbarState } from "@/components/layout/ConsoleWorkbar";
@@ -32,7 +32,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type ConsolePageKey = "runtime" | "runs" | "scheduled" | "skills" | "settings";
+export type ConsolePageKey = "runtime" | "runs" | "scheduled" | "skills" | "agentDashboard" | "settings";
 export type ConsoleUtilityKey = "notifications" | "operations";
 type ConsoleLayoutTier = "workspace" | "data-dense" | "standard";
 
@@ -41,6 +41,7 @@ const navItems = [
   { icon: Play, label: "Runs", page: "runs" },
   { icon: CalendarClock, label: "定时任务", page: "scheduled" },
   { icon: Layers3, label: "Skill 仓库", page: "skills" },
+  { icon: BarChart3, label: "Agent 看板", page: "agentDashboard" },
   { icon: Settings, label: "组织设置", page: "settings" },
 ] as const;
 
@@ -49,6 +50,7 @@ const pageTitles: Record<ConsolePageKey, string> = {
   runs: "Runs",
   scheduled: "定时任务",
   skills: "Skill 仓库",
+  agentDashboard: "Agent 看板",
   settings: "组织设置",
 };
 
@@ -57,6 +59,7 @@ const layoutTierByPage: Record<ConsolePageKey, ConsoleLayoutTier> = {
   runs: "workspace",
   scheduled: "data-dense",
   skills: "data-dense",
+  agentDashboard: "data-dense",
   settings: "standard",
 };
 

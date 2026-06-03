@@ -16,6 +16,10 @@ const fixture = JSON.parse(
   runtimes: DeviceStateSnapshot["runtimes"];
   tasks: DeviceStateSnapshot["tasks"];
 };
+const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string };
+const latestCollectorVersion = packageJson.version;
+const fixtureCollectorVersion = fixture.devices[0].collector?.version ?? "未上报";
+const fixtureCollectorPosture = fixtureCollectorVersion === latestCollectorVersion ? "最新" : "待升级";
 
 const backendDeviceState: DeviceStateSnapshot = {
   agents: fixture.agents,
@@ -76,11 +80,17 @@ test.describe("Runtime Fleet", () => {
     await expect(page.getByRole("heading", { name: "运行资产" })).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
     await expect(page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ })).toBeVisible();
-    await expect(page.getByLabel("设备").getByRole("button", { name: /Collector 0\.1\.1 · 最新/ })).toBeVisible();
+    await expect(page.getByLabel("设备").getByRole("button", {
+      name: new RegExp(`Collector ${escapeRegExp(fixtureCollectorVersion)} · ${fixtureCollectorPosture}`),
+    })).toBeVisible();
     await page.getByLabel("设备").getByRole("button", { name: /fixture-mac fixture-mac\.local/ }).click();
     const deviceDetail = page.getByRole("complementary", { name: "运行资产详情" });
-    await expect(deviceDetail).toContainText("最新版本: 0.1.1");
-    await expect(deviceDetail.getByRole("button", { name: "已是最新" })).toBeDisabled();
+    await expect(deviceDetail).toContainText(`最新版本: ${latestCollectorVersion}`);
+    if (fixtureCollectorPosture === "最新") {
+      await expect(deviceDetail.getByRole("button", { name: "已是最新" })).toBeDisabled();
+    } else {
+      await expect(deviceDetail.getByRole("button", { name: "升级 Collector" })).toBeEnabled();
+    }
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("OpenClaw Gateway");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("状态");
     await expect(page.getByRole("table", { name: "Runtime 列表" })).toContainText("在线");
@@ -179,4 +189,8 @@ async function seedRuntimeFleetData(request: APIRequestContext): Promise<void> {
     const batchResponse = await request.post("/api/device-task-batches", { data: batch });
     expect(batchResponse.ok()).toBe(true);
   }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -4,7 +4,7 @@ Page specs define the visual, content, and interaction boundaries for current su
 
 ## Home
 
-Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, 定时任务, Skill 仓库, Organization Settings, and utility drawer capabilities.
+Purpose: Explain Lorume as an Agent Network control plane and show implemented Runtime Fleet, Runs, 定时任务, Skill 仓库, Agent 看板, Organization Settings, and utility drawer capabilities.
 
 Rules:
 
@@ -78,7 +78,8 @@ Rules:
 - The refresh action lives in the top workbar as the final icon. Runtime Fleet should not render a separate page-header refresh button.
 - The left navigation stays fixed and keeps one workspace/account identity entry in the sidebar header. The account menu is part of that unified entry, not a separate footer card.
 - Desktop layouts keep the selected detail inspector visible while the main content scrolls.
-- Runtime and Agent Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. The action column keeps a stable width but has no visible header label, and the button text is `查看 Skill`. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
+- Runtime Skill actions appear as compact row-level actions that deep-link to the read-only Skill 仓库. The action column keeps a stable width but has no visible header label, and the button text is `查看 Skill`. They do not become editors, import flows, assignment controls, probe triggers, or migration wizards.
+- Agent row-level actions may include `查看看板` and `查看 Skill`. `查看看板` deep-links to `/agent-dashboard?agentId=...`; `查看 Skill` deep-links to the read-only Skill 仓库. Both remain navigation actions, not runtime execution controls.
 - Collector upgrade is the only Runtime Fleet device control action. It appears from the selected Device detail, creates a `collector_upgrade` Operation, and hands progress/result display to the Operations drawer. It must not expose a raw WebSocket command, shell command, runtime probe, or generic remote control button.
 - Device, Runtime, and Agent details use the same section rhythm: overview, basic facts, status, ownership, and optional local paths.
 - Copying an object ID uses toast feedback; the detail panel should not grow a temporary copied row.
@@ -135,6 +136,21 @@ Rules:
 - The `查看` action opens a read-only detail card. The detail card header shows only the Skill name; it does not repeat the short description, chips, metadata, or available Agents. The card shows `本地路径` when collected and expands `Skill 正文` as the primary reading area.
 - Skill 仓库 must not show raw adapter source-path evidence, command names, hidden adapter fields, same-name diagnostics as primary content, edit/import/install/assignment controls, or auxiliary Skill files.
 - The page is read-only. No create, import, edit, publish, install, assign, migrate, sync, execute, or backend-triggered probe controls are allowed.
+
+## Agent 看板
+
+Purpose: Show OpenClaw `main` Agent daily operation reports from backend Agent Analysis, separating system-calculated hard metrics from Agent self-analysis.
+
+Rules:
+
+- The page uses the `data-dense` Console layout tier, the shared top workbar, a compact target/report control surface, a left report body, and a right report/status rail.
+- The first phase only supports `Runtime.kind=openclaw` and OpenClaw external Agent id `main`. Unsupported targets show `不支持分析` instead of pretending data is missing.
+- Hard metrics are labeled `系统计算` and come from backend-calculated Task data. Agent narrative sections are labeled `Agent 自评`.
+- Do not show `satisfaction`、`satisfactionScore`、NPS、用户情绪估计 or any user satisfaction estimate, even if an unexpected backend payload contains such fields.
+- The report body shows task totals, status distribution, failed/unknown counts, recent activity, done/failed duration metrics, task type breakdown, typical cases, risks, and data quality notes.
+- The side rail shows report history, current analysis Operation status, model/provider usage metadata when available, and a concise source boundary note.
+- `运行分析` creates an `agent_analysis` Operation through the backend API, then polls the Operation detail for progress. It does not directly contact collector or execute real-device commands from the browser.
+- The page must not display raw prompt text, nonce, backend raw payload, device token, session token, cookie, OpenClaw secret, or debug-only fields.
 
 ## Operations Utility Drawer
 

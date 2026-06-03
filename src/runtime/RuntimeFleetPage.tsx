@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Copy, Cpu, Monitor, Server, UploadCloud } from "lucide-react";
+import { BarChart3, Bot, Copy, Cpu, Monitor, Server, UploadCloud } from "lucide-react";
 import fixtureSnapshot from "../../fixtures/runtime/runtime-fleet-query.sample.json";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -67,9 +67,11 @@ function createRuntimeFleetUrl(pathname: string, organizationId?: string): URL {
 /** First Runtime Fleet surface: inspect registered device, runtimes, agents, and collection state. */
 export function RuntimeFleetPage({
   organizationId,
+  onOpenAgentDashboard,
   onOpenSkillWarehouse,
 }: {
   organizationId?: string;
+  onOpenAgentDashboard?: (filters: { agentId?: string }) => void;
   onOpenSkillWarehouse?: (filters: { runtimeId?: string; agentId?: string }) => void;
 }) {
   const allowFixtureFallback = isFixtureFallbackAllowed();
@@ -372,12 +374,19 @@ export function RuntimeFleetPage({
                 setSelection({ kind: "agent", id: agent.id });
                 onOpenSkillWarehouse?.({ agentId: agent.id, runtimeId: agent.runtimeId });
               }}
+              onOpenAgentDashboard={(agent) => {
+                setSelection({ kind: "agent", id: agent.id });
+                onOpenAgentDashboard?.({ agentId: agent.id });
+              }}
             />
           </div>
           <RuntimeDetail
             collectorVersion={detail?.kind === "device" ? collectorVersionSummary.byDeviceId[detail.id] : undefined}
             detail={detail}
             isCollectorUpgradeSubmitting={Boolean(detail?.kind === "device" && upgradeRequestDeviceId === detail.id)}
+            onOpenAgentDashboard={(agentId) => {
+              onOpenAgentDashboard?.({ agentId });
+            }}
             onUpgradeCollector={requestCollectorUpgrade}
           />
         </section>
@@ -701,6 +710,7 @@ function AgentTable({
   runtimes,
   snapshot,
   selectedId,
+  onOpenAgentDashboard,
   onOpenSkillWarehouse,
   onSelect,
 }: {
@@ -709,6 +719,7 @@ function AgentTable({
   runtimes: Runtime[];
   snapshot: RuntimeFleetSnapshot;
   selectedId?: string;
+  onOpenAgentDashboard?: (agent: Agent) => void;
   onOpenSkillWarehouse: (agent: Agent) => void;
   onSelect: (agent: Agent) => void;
 }) {
@@ -730,13 +741,13 @@ function AgentTable({
           <Table aria-label="Agent 列表" className="table-fixed">
             <TableHeader className="bg-[var(--surface-soft)]">
               <TableRow>
-                <TableHead className="w-[30%]">名称</TableHead>
-                <TableHead className="w-[22%]">归属 Runtime</TableHead>
-                <TableHead className="w-[12%]">状态</TableHead>
-                <TableHead className="w-[9%]">Task</TableHead>
-                <TableHead className="w-[17%]">最近活跃</TableHead>
-                <TableHead className="w-[10%]">
-                  <span className="sr-only">Skill 操作</span>
+                <TableHead className="w-[26%]">名称</TableHead>
+                <TableHead className="w-[20%]">归属 Runtime</TableHead>
+                <TableHead className="w-[11%]">状态</TableHead>
+                <TableHead className="w-[8%]">Task</TableHead>
+                <TableHead className="w-[15%]">最近活跃</TableHead>
+                <TableHead className="w-[20%]">
+                  <span className="sr-only">操作</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -782,33 +793,49 @@ function AgentTable({
                       {formatRelativeActivityTime(lastActiveAt)}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            className="inline-flex"
-                            data-skill-probe-disabled={skillProbeDisabled ? "true" : undefined}
-                            onClick={(event) => event.stopPropagation()}
+                      <div className="flex min-w-max items-center justify-end gap-2">
+                        {onOpenAgentDashboard ? (
+                          <Button
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenAgentDashboard(agent);
+                            }}
                           >
-                            <Button
-                              disabled={skillProbeDisabled}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                if (skillProbeDisabled) return;
-                                onOpenSkillWarehouse(agent);
-                              }}
-                            >
-                              查看 Skill
-                            </Button>
-                          </span>
-                        </TooltipTrigger>
-                        {skillProbeDisabled ? (
-                          <TooltipContent className="max-w-72 text-left leading-5" side="top">
-                            {invisibleAgentDescription}
-                          </TooltipContent>
+                            <BarChart3 aria-hidden="true" className="size-3.5" />
+                            查看看板
+                          </Button>
                         ) : null}
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className="inline-flex"
+                              data-skill-probe-disabled={skillProbeDisabled ? "true" : undefined}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <Button
+                                disabled={skillProbeDisabled}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  if (skillProbeDisabled) return;
+                                  onOpenSkillWarehouse(agent);
+                                }}
+                              >
+                                查看 Skill
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          {skillProbeDisabled ? (
+                            <TooltipContent className="max-w-72 text-left leading-5" side="top">
+                              {invisibleAgentDescription}
+                            </TooltipContent>
+                          ) : null}
+                        </Tooltip>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -825,11 +852,13 @@ function RuntimeDetail({
   collectorVersion,
   detail,
   isCollectorUpgradeSubmitting,
+  onOpenAgentDashboard,
   onUpgradeCollector,
 }: {
   collectorVersion?: CollectorVersionDeviceSummary;
   detail: RuntimeFleetDetail | null;
   isCollectorUpgradeSubmitting: boolean;
+  onOpenAgentDashboard?: (agentId: string) => void;
   onUpgradeCollector: (deviceId: string) => void;
 }) {
   if (!detail) {
@@ -870,6 +899,17 @@ function RuntimeDetail({
                 >
                   <UploadCloud aria-hidden="true" className="size-3.5" />
                   {collectorUpgradeButtonLabel(collectorVersion, isCollectorUpgradeSubmitting)}
+                </Button>
+              ) : null}
+              {detail.kind === "agent" && onOpenAgentDashboard ? (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenAgentDashboard(detail.id)}
+                >
+                  <BarChart3 aria-hidden="true" className="size-3.5" />
+                  查看看板
                 </Button>
               ) : null}
               <Button

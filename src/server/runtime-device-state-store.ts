@@ -53,6 +53,18 @@ export interface RuntimeCollectorUpgradeCapability {
   lastUpgradeStatus?: "succeeded" | "failed" | "rolled_back";
 }
 
+/** Restricted Agent analysis protocol capability reported by the collector. */
+export interface RuntimeAgentAnalysisCapability {
+  /** Collector supports Lorume-controlled Agent analysis prompts. */
+  supported: true;
+  /** Agent analysis protocol version supported by the collector. */
+  protocolVersion: number;
+  /** Runtime kinds the collector can analyze. */
+  runtimes: string[];
+  /** Prompt kinds the collector accepts. */
+  promptKinds: string[];
+}
+
 export interface RuntimeDeviceConnection {
   /** Stable Lorume device id. */
   deviceId: string;
@@ -68,6 +80,8 @@ export interface RuntimeDeviceConnection {
   collectorVersion?: string;
   /** Collector self-upgrade capability reported by the device agent. */
   collectorUpgrade?: RuntimeCollectorUpgradeCapability;
+  /** Restricted Agent analysis capability reported by the device agent. */
+  agentAnalysis?: RuntimeAgentAnalysisCapability;
   /** Hostname reported by the device agent. */
   hostname?: string;
   /** Small load/status summary reported by heartbeat. */

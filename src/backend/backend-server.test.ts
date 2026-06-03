@@ -10,6 +10,7 @@ import { createPostgresNotificationStore } from "../notifications/notification-s
 import { createPostgresOperationStore } from "../operations/operation-store";
 import { createDeviceStateSnapshot } from "../runtime/runtime-model";
 import { createRuntimeTaskBatches } from "../runtime/runtime-task-sync";
+import { createPostgresStore } from "../server/postgres-store";
 import { createTemporaryPostgresDatabase, runDatabaseSchemaScript, shouldRunPostgresTests } from "../test/postgres";
 import { createLorumeBackendServer, type LorumeBackendServer } from "./backend-server";
 import {
@@ -251,6 +252,124 @@ describeDb("standalone Lorume backend server with Postgres", () => {
     }
   });
 
+  it("runs an Agent analysis Operation through the device WebSocket and persists a report", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    let backend: LorumeBackendServer | null = null;
+    let socket: WebSocket | null = null;
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const postgresStore = createPostgresStore({ connectionString: database.url });
+      let organizationId = "";
+      try {
+        const user = await authStore.upsertUserForEmail("agent-analysis-backend@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Backend Agent Analysis Team",
+          slug: "backend-agent-analysis-team",
+        });
+        organizationId = organization.id;
+        await authStore.createSession({
+          expiresAt: new Date("2026-06-14T10:00:00.000Z"),
+          sessionHash: hashSecret("agent-analysis-session", "session-token", "test-pepper"),
+          userId: user.id,
+        });
+        const snapshot = createAgentAnalysisSnapshot();
+        await postgresStore.upsertDeviceStateSnapshot({ ...snapshot, tasks: [] }, { organizationId });
+        await postgresStore.upsertRuntimeTaskBatch(createTaskBatch(snapshot), { organizationId });
+      } finally {
+        await Promise.all([authStore.close(), postgresStore.close()]);
+      }
+
+      backend = await startBackend({
+        agentAnalysisSchedulerEnabled: false,
+        authPepper: "test-pepper",
+        databaseUrl: database.url,
+        operationRunnerIntervalMs: 50,
+      });
+      socket = new WebSocket(`${backend.wsUrl}/api/device-control/ws`);
+      await waitForOpen(socket);
+      const analysisRequestPromise = waitForMessageMatching(socket, (message) => message.type === "agent.analysis.request");
+      socket.send(JSON.stringify({
+        type: "hello",
+        deviceId: "analysis-device",
+        collectorVersion: devicePackageVersion,
+        analysis: {
+          promptKinds: ["daily_operation_review"],
+          protocolVersion: 1,
+          runtimes: ["openclaw"],
+          supported: true,
+        },
+      }));
+      await waitForMessageMatching(socket, (message) => message.type === "hello.ack");
+
+      const runResponse = await fetch(`${backend.url}/api/agent-analysis-runs`, {
+        body: JSON.stringify({ agentId: "analysis-device:runtime:openclaw:agent:main" }),
+        headers: {
+          "content-type": "application/json",
+          cookie: "lorume_session=agent-analysis-session",
+        },
+        method: "POST",
+      });
+      expect(runResponse.status).toBe(202);
+      const request = await analysisRequestPromise;
+      expect(request).toMatchObject({
+        deviceId: "analysis-device",
+        openclawAgentId: "main",
+        promptKind: "daily_operation_review",
+        type: "agent.analysis.request",
+      });
+      socket.send(JSON.stringify({
+        type: "agent.analysis.result",
+        protocolVersion: 1,
+        operationId: request.operationId,
+        jobId: request.jobId,
+        deviceId: "analysis-device",
+        nonce: request.nonce,
+        status: "succeeded",
+        runtimeRunId: "run_backend_123",
+        durationMs: 10842,
+        modelMetadata: { model: "gpt-test", provider: "openai", usage: { input: 1, output: 2, cacheRead: 0, total: 3 } },
+        analysis: {
+          schemaVersion: "agent-analysis-v1",
+          promptKind: "daily_operation_review",
+          summary: "Queue triage dominated the day.",
+          taskTypeBreakdown: [],
+          typicalCases: [
+            {
+              taskId: "analysis-device:runtime:openclaw:agent:main:task:done",
+              title: "Queue triage",
+              whyTypical: "It is the sampled completed task.",
+              outcome: "Completed",
+              status: "done",
+              evidence: "The task asks for queue summarization.",
+            },
+          ],
+          risks: [],
+          dataQualityNotes: ["Only sampled tasks were reviewed."],
+        },
+      }));
+
+      const reports = await waitForReports(backend.url, organizationId, "agent-analysis-session");
+      expect(reports).toEqual([
+        expect.objectContaining({
+          agentId: "analysis-device:runtime:openclaw:agent:main",
+          analysis: expect.objectContaining({
+            summary: "Queue triage dominated the day.",
+          }),
+          modelMetadata: expect.objectContaining({
+            model: "gpt-test",
+          }),
+          runtimeKind: "openclaw",
+        }),
+      ]);
+    } finally {
+      if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+      if (backend) await closeRegisteredBackend(backend);
+      await database.drop();
+    }
+  });
+
   it("serves authenticated Operation and Notification query APIs", async () => {
     const database = await createTemporaryPostgresDatabase();
     let backend: LorumeBackendServer | null = null;
@@ -342,21 +461,25 @@ describeDb("standalone Lorume backend server with Postgres", () => {
 });
 
 async function startBackend(options: {
+  agentAnalysisSchedulerEnabled?: boolean;
   appMode?: "production" | "development" | "agent";
   authPepper?: string;
   authStore?: AuthStore;
   databaseUrl?: string;
   deviceTokenRequired?: boolean;
+  operationRunnerIntervalMs?: number;
 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "lorume-standalone-backend-"));
   const backend = createLorumeBackendServer({
     appMode: options.appMode ?? "agent",
     databaseUrl: options.databaseUrl,
+    agentAnalysisSchedulerEnabled: options.agentAnalysisSchedulerEnabled,
     authPepper: options.authPepper,
     authStore: options.authStore,
     deviceTokenRequired: options.deviceTokenRequired,
     host: "127.0.0.1",
     deviceStateSnapshotPath: path.join(dataDir, "runtime-device-state.json"),
+    operationRunnerIntervalMs: options.operationRunnerIntervalMs,
     port: 0,
   });
   backends.push(backend);
@@ -403,6 +526,49 @@ function createTaskBatch(snapshot: ReturnType<typeof createDeviceStateSnapshot>)
   return batch;
 }
 
+function createAgentAnalysisSnapshot() {
+  const agentId = "analysis-device:runtime:openclaw:agent:main";
+  return createDeviceStateSnapshot({
+    collectedAt: "2026-06-03T08:00:00.000Z",
+    device: {
+      id: "analysis-device",
+      hostname: "analysis-device.local",
+      os: "darwin",
+      collectionStatus: "online",
+    },
+    runtimes: [
+      {
+        id: "analysis-device:runtime:openclaw",
+        deviceId: "analysis-device",
+        kind: "openclaw",
+        name: "OpenClaw",
+        collectionStatus: "online",
+      },
+    ],
+    agents: [
+      {
+        id: agentId,
+        runtimeId: "analysis-device:runtime:openclaw",
+        name: "main",
+        collectionStatus: "online",
+      },
+    ],
+    tasks: [
+      {
+        id: `${agentId}:task:done`,
+        agentId,
+        taskType: "conversation",
+        status: "done",
+        adapter: { kind: "openclaw" },
+        userMessage: "Summarize the queue.",
+        agentReply: "Done.",
+        createdAt: "2026-06-01T18:00:00.000Z",
+        updatedAt: "2026-06-01T18:02:00.000Z",
+      },
+    ],
+  });
+}
+
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -427,6 +593,47 @@ function waitForMessage(socket: WebSocket): Promise<Record<string, unknown>> {
     });
     socket.once("error", reject);
   });
+}
+
+function waitForMessageMatching(
+  socket: WebSocket,
+  predicate: (message: Record<string, unknown>) => boolean,
+  timeoutMs = 4_000,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (data: unknown) => {
+      try {
+        const message = JSON.parse(String(data)) as Record<string, unknown>;
+        if (!predicate(message)) return;
+        clearTimeout(timer);
+        socket.off("message", onMessage);
+        resolve(message);
+      } catch (error) {
+        clearTimeout(timer);
+        socket.off("message", onMessage);
+        reject(error);
+      }
+    };
+    const timer = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error("timed out waiting for websocket message"));
+    }, timeoutMs);
+    socket.on("message", onMessage);
+    socket.once("error", reject);
+  });
+}
+
+async function waitForReports(baseUrl: string, organizationId: string, sessionToken: string): Promise<unknown[]> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 4_000) {
+    const response = await fetch(`${baseUrl}/api/agent-analysis-reports?organizationId=${organizationId}`, {
+      headers: { cookie: `lorume_session=${sessionToken}` },
+    });
+    const body = await response.json() as { reports?: unknown[] };
+    if (Array.isArray(body.reports) && body.reports.length > 0) return body.reports;
+    await sleep(50);
+  }
+  throw new Error("timed out waiting for agent analysis reports");
 }
 
 function waitForClose(socket: WebSocket): Promise<number> {

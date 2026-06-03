@@ -1,6 +1,9 @@
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
+import { createAgentAnalysisHttpApiHandler } from "../agent-analysis/agent-analysis-http-api";
+import { createAgentAnalysisScheduler } from "../agent-analysis/agent-analysis-scheduler";
+import { createPostgresAgentAnalysisStore, type AgentAnalysisStore } from "../agent-analysis/agent-analysis-store";
 import { resolveLorumeAppMode, type LorumeAppMode } from "../app-mode";
 import {
   createAuthHttpApiHandler,
@@ -10,6 +13,7 @@ import {
 import { createPostgresAuthStore, type AuthStore } from "../auth/auth-store";
 import { createNotificationHttpApiHandler } from "../notifications/notification-http-api";
 import { createPostgresNotificationStore, type NotificationStore } from "../notifications/notification-store";
+import { applyAgentAnalysisProgress, applyAgentAnalysisResult, dispatchAgentAnalysisJob } from "../operations/agent-analysis";
 import { applyCollectorUpgradeProgress, dispatchCollectorUpgradeJob } from "../operations/collector-upgrade";
 import { createOperationHttpApiHandler } from "../operations/operation-http-api";
 import { createOperationJobRunner } from "../operations/job-runner";
@@ -42,10 +46,16 @@ export interface LorumeBackendServerOptions {
   operationStore?: OperationStore;
   /** Optional Notification repository injection for tests. */
   notificationStore?: NotificationStore;
+  /** Optional Agent Analysis repository injection for tests. */
+  agentAnalysisStore?: AgentAnalysisStore;
   /** Enable or disable the in-process Operation job runner. */
   operationRunnerEnabled?: boolean;
   /** Operation runner polling interval in milliseconds. */
   operationRunnerIntervalMs?: number;
+  /** Enable or disable the in-process Agent Analysis scheduler. */
+  agentAnalysisSchedulerEnabled?: boolean;
+  /** Agent Analysis scheduler polling interval in milliseconds. */
+  agentAnalysisSchedulerIntervalMs?: number;
   /** Optional email provider injection for tests. */
   emailProvider?: AuthEmailProvider;
   /** Permission profile for local agent, development, or production operation. */
@@ -99,6 +109,10 @@ export function createLorumeBackendServer(
     ? null
     : createPostgresNotificationStore({ connectionString: options.databaseUrl });
   const notificationStore = options.notificationStore ?? ownedNotificationStore;
+  const ownedAgentAnalysisStore = options.agentAnalysisStore
+    ? null
+    : createPostgresAgentAnalysisStore({ connectionString: options.databaseUrl });
+  const agentAnalysisStore = options.agentAnalysisStore ?? ownedAgentAnalysisStore;
   const logger = options.logger ?? createStructuredLogger({ service: "lorume-backend" });
   const controlChannel = createRuntimeControlChannel({
     store,
@@ -114,14 +128,44 @@ export function createLorumeBackendServer(
         }, "collector upgrade progress update failed");
       });
     },
+    onAgentAnalysisProgress: (message) => {
+      if (!operationStore) return;
+      void applyAgentAnalysisProgress({
+        operationStore,
+      }, message).catch((error) => {
+        logger.warn({
+          error: error instanceof Error ? error.message : "unknown error",
+          jobId: message.jobId,
+          operationId: message.operationId,
+        }, "agent analysis progress update failed");
+      });
+    },
+    onAgentAnalysisResult: (message) => {
+      if (!operationStore || !agentAnalysisStore) return;
+      void applyAgentAnalysisResult({
+        agentAnalysisStore,
+        operationStore,
+      }, message).catch((error) => {
+        logger.warn({
+          error: error instanceof Error ? error.message : "unknown error",
+          jobId: message.jobId,
+          operationId: message.operationId,
+        }, "agent analysis result update failed");
+      });
+    },
   });
   const operationRunnerEnabled = options.operationRunnerEnabled
     ?? Boolean(options.databaseUrl ?? process.env.DATABASE_URL);
   const operationRunnerIntervalMs = options.operationRunnerIntervalMs
     ?? Number(process.env.LORUME_OPERATION_RUNNER_INTERVAL_MS ?? 1_000);
-  const operationRunner = operationRunnerEnabled && operationStore
+  const operationRunner = operationRunnerEnabled && operationStore && agentAnalysisStore
     ? createOperationJobRunner({
       handlers: {
+        agent_analysis_openclaw: (job) => dispatchAgentAnalysisJob({
+          agentAnalysisStore,
+          controlChannel,
+          operationStore,
+        }, job),
         collector_upgrade_device: (job) => dispatchCollectorUpgradeJob({
           backendBaseUrl: () => process.env.LORUME_PUBLIC_BASE_URL || baseUrl,
           controlChannel,
@@ -173,6 +217,23 @@ export function createLorumeBackendServer(
       requireUserSession: authGuards.requireUserSession,
     })
     : undefined;
+  const agentAnalysisHandler = authGuards && operationStore && agentAnalysisStore
+    ? createAgentAnalysisHttpApiHandler({
+      agentAnalysisStore,
+      operationStore,
+      requireUserSession: authGuards.requireUserSession,
+    })
+    : undefined;
+  const agentAnalysisSchedulerEnabled = options.agentAnalysisSchedulerEnabled
+    ?? readBooleanEnv("LORUME_AGENT_ANALYSIS_SCHEDULER_ENABLED", true);
+  const agentAnalysisScheduler = agentAnalysisSchedulerEnabled && operationStore && agentAnalysisStore
+    ? createAgentAnalysisScheduler({
+      agentAnalysisStore,
+      intervalMs: options.agentAnalysisSchedulerIntervalMs
+        ?? Number(process.env.LORUME_AGENT_ANALYSIS_SCHEDULER_INTERVAL_MS ?? 60 * 60 * 1000),
+      operationStore,
+    })
+    : undefined;
   const deviceInstallerHandler = createDeviceInstallerHttpApiHandler();
   const webSocketServer = new WebSocketServer({ noServer: true });
   const server = createServer((request, response) => {
@@ -191,11 +252,18 @@ export function createLorumeBackendServer(
         runRuntimeHandler();
       }
     };
-    const runNotificationHandler = () => {
-      if (notificationHandler) {
-        void notificationHandler(request, response, runOperationHandler);
+    const runAgentAnalysisHandler = () => {
+      if (agentAnalysisHandler) {
+        void agentAnalysisHandler(request, response, runOperationHandler);
       } else {
         runOperationHandler();
+      }
+    };
+    const runNotificationHandler = () => {
+      if (notificationHandler) {
+        void notificationHandler(request, response, runAgentAnalysisHandler);
+      } else {
+        runAgentAnalysisHandler();
       }
     };
     const runAuthHandler = () => {
@@ -213,6 +281,7 @@ export function createLorumeBackendServer(
   let authClosed = false;
   let operationClosed = false;
   let notificationClosed = false;
+  let agentAnalysisClosed = false;
   let operationRunnerTimer: ReturnType<typeof setInterval> | null = null;
   let operationRunnerRunning = false;
 
@@ -279,6 +348,7 @@ export function createLorumeBackendServer(
               void runOperationRunnerTick();
             }, Math.max(100, operationRunnerIntervalMs));
           }
+          agentAnalysisScheduler?.start();
           resolve();
         });
       });
@@ -288,6 +358,7 @@ export function createLorumeBackendServer(
         clearInterval(operationRunnerTimer);
         operationRunnerTimer = null;
       }
+      agentAnalysisScheduler?.stop();
       await closeWebSocketServer(webSocketServer);
       if (listening) {
         await closeHttpServer(server);
@@ -309,6 +380,10 @@ export function createLorumeBackendServer(
       if (ownedNotificationStore && !notificationClosed) {
         notificationClosed = true;
         await ownedNotificationStore.close();
+      }
+      if (ownedAgentAnalysisStore && !agentAnalysisClosed) {
+        agentAnalysisClosed = true;
+        await ownedAgentAnalysisStore.close();
       }
     },
   };

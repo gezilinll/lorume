@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import { createRuntimeDeviceStateStore } from "./runtime-device-state-store";
 
 const describeDb = shouldRunPostgresTests() ? describe : describe.skip;
 const servers: Server[] = [];
+const currentDevicePackageVersion = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")).version;
 
 afterEach(async () => {
   await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -832,19 +833,19 @@ describeDb("runtime HTTP API with Postgres store", () => {
         expect(body).toMatchObject({
           operationId: expect.any(String),
           status: "queued",
-          targetVersion: "0.1.1",
+          targetVersion: currentDevicePackageVersion,
         });
         expect(operations).toEqual([
           expect.objectContaining({
             metadata: expect.objectContaining({
               currentVersion: "0.0.9",
               deviceId: "upgrade-device",
-              targetVersion: "0.1.1",
+              targetVersion: currentDevicePackageVersion,
             }),
             resourceId: "upgrade-device",
             resourceType: "device",
             status: "queued",
-            targetId: "0.1.1",
+            targetId: currentDevicePackageVersion,
             targetType: "collector",
             type: "collector_upgrade",
           }),
@@ -856,7 +857,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
               deviceId: "upgrade-device",
               nonce: expect.stringMatching(/^upgrade_/),
               stage: "queued",
-              targetVersion: "0.1.1",
+              targetVersion: currentDevicePackageVersion,
             }),
             status: "queued",
             type: "collector_upgrade_device",
@@ -955,7 +956,7 @@ describeDb("runtime HTTP API with Postgres store", () => {
         });
         store.writeDeviceConnection({
           collectorUpgrade: { protocolVersion: 1, supported: true },
-          collectorVersion: "0.1.1",
+          collectorVersion: currentDevicePackageVersion,
           deviceId: "latest-device",
           status: "online",
         });
@@ -971,12 +972,12 @@ describeDb("runtime HTTP API with Postgres store", () => {
         expect(latestResponse.status).toBe(200);
         await expect(latestResponse.json()).resolves.toMatchObject({
           status: "succeeded",
-          targetVersion: "0.1.1",
+          targetVersion: currentDevicePackageVersion,
         });
         expect(legacyResponse.status).toBe(202);
         await expect(legacyResponse.json()).resolves.toMatchObject({
           status: "requires_manual_step",
-          targetVersion: "0.1.1",
+          targetVersion: currentDevicePackageVersion,
         });
       } finally {
         await Promise.all([authStore.close(), operationStore.close(), postgresStore.close()]);

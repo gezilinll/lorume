@@ -204,6 +204,7 @@ async function readMatchingUpgradeJob(
   const payload = asRecord(job.payload);
   if (readString(payload.deviceId) !== progress.deviceId) return null;
   if (readString(payload.nonce) !== progress.nonce) return null;
+  if (isTerminalJobStatus(job.status)) return null;
   return job;
 }
 
@@ -239,4 +240,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function isTerminalJobStatus(status: OperationJobRow["status"]): boolean {
+  return status === "succeeded" ||
+    status === "failed" ||
+    status === "unsupported" ||
+    status === "requires_manual_step" ||
+    status === "cancelled";
 }

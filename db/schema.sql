@@ -232,7 +232,7 @@ CREATE INDEX IF NOT EXISTS idx_collector_ingestions_received_at ON collector_ing
 CREATE TABLE IF NOT EXISTS operations (
   id text PRIMARY KEY,
   organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('notification_delivery', 'collector_upgrade')),
+  type text NOT NULL CHECK (type IN ('notification_delivery', 'collector_upgrade', 'agent_analysis')),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN (
     'queued',
     'running',
@@ -264,13 +264,13 @@ CREATE INDEX IF NOT EXISTS idx_operations_target ON operations(target_type, targ
 ALTER TABLE operations
   DROP CONSTRAINT IF EXISTS operations_type_check;
 ALTER TABLE operations
-  ADD CONSTRAINT operations_type_check CHECK (type IN ('notification_delivery', 'collector_upgrade'));
+  ADD CONSTRAINT operations_type_check CHECK (type IN ('notification_delivery', 'collector_upgrade', 'agent_analysis'));
 
 CREATE TABLE IF NOT EXISTS operation_jobs (
   id text PRIMARY KEY,
   operation_id text NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
   organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device')),
+  type text NOT NULL CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device', 'agent_analysis_openclaw')),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN (
     'queued',
     'running',
@@ -301,7 +301,31 @@ CREATE INDEX IF NOT EXISTS idx_operation_jobs_operation_id ON operation_jobs(ope
 ALTER TABLE operation_jobs
   DROP CONSTRAINT IF EXISTS operation_jobs_type_check;
 ALTER TABLE operation_jobs
-  ADD CONSTRAINT operation_jobs_type_check CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device'));
+  ADD CONSTRAINT operation_jobs_type_check CHECK (type IN ('notification_in_app', 'notification_email', 'collector_upgrade_device', 'agent_analysis_openclaw'));
+
+CREATE TABLE IF NOT EXISTS agent_analysis_reports (
+  id text PRIMARY KEY,
+  organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  operation_id text NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+  device_id text NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  runtime_id text NOT NULL REFERENCES runtimes(id) ON DELETE CASCADE,
+  agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  runtime_kind text NOT NULL,
+  period_start timestamptz NOT NULL,
+  period_end timestamptz NOT NULL,
+  prompt_kind text NOT NULL,
+  prompt_version text NOT NULL,
+  hard_metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+  analysis jsonb NOT NULL DEFAULT '{}'::jsonb,
+  model_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, agent_id, period_start, period_end, prompt_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_analysis_reports_organization_agent_created
+  ON agent_analysis_reports(organization_id, agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_analysis_reports_operation_id
+  ON agent_analysis_reports(operation_id);
 
 CREATE TABLE IF NOT EXISTS notification_events (
   id text PRIMARY KEY,

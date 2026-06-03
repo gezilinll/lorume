@@ -425,11 +425,11 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       taskSyncCachePath,
     }));
     writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
-    const packageFiles = createUpgradePackageFiles("0.1.2");
+    const packageFiles = createUpgradePackageFiles("0.1.5");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "upgrade-device",
       packageFiles,
-      targetVersion: "0.1.2",
+      targetVersion: "0.1.5",
     });
     const collector = createCollectorProcessTracker();
 
@@ -468,11 +468,144 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
         jobId: "opjob_upgrade",
         stage: "restart_pending",
-        targetVersion: "0.1.2",
+        targetVersion: "0.1.5",
       });
     } finally {
       await collector.stop();
       upgradeServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("runs a restricted OpenClaw Agent analysis request and returns parsed JSON result", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-agent-analysis-"));
+    const installDir = path.join(tempDir, "collector");
+    const binDir = path.join(tempDir, ".local", "state", "fnm_multishells", "session_9999999999999", "bin");
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(installDir, "config.json");
+    const openclawPath = path.join(binDir, "openclaw");
+    const openclawCallsPath = path.join(tempDir, "openclaw-calls.jsonl");
+    mkdirSync(installDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(fakeCli, `console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("analysis-device"))}));\n`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(openclawPath, `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(openclawCallsPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+console.log(JSON.stringify({
+  runId: "run_123",
+  status: "ok",
+  result: {
+    payloads: [{
+      text: JSON.stringify({
+        schemaVersion: "agent-analysis-v1",
+        promptKind: "daily_operation_review",
+        summary: "Queue triage dominated the day.",
+        taskTypeBreakdown: [],
+        typicalCases: [],
+        risks: [],
+        dataQualityNotes: ["Only sampled tasks were reviewed."]
+      })
+    }],
+    meta: {
+      durationMs: 10842,
+      agentMeta: {
+        provider: "openai",
+        model: "gpt-test",
+        usage: { input: 1, output: 2, cacheRead: 0, total: 3 }
+      },
+      systemPromptReport: { shouldNotLeak: true }
+    }
+  }
+}));
+`);
+    chmodSync(openclawPath, 0o755);
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "analysis-device",
+      deviceToken: "analysis-token",
+      installDir,
+    }));
+    const analysisServer = await startCollectorAnalysisServer({ deviceId: "analysis-device" });
+    const collector = createCollectorProcessTracker();
+
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8"));
+      writeFileSync(configPath, JSON.stringify({ ...config, serverUrl: analysisServer.baseUrl }, null, 2));
+      collector.child = spawn(process.execPath, [
+        collectorScript,
+        "--config",
+        configPath,
+        "--interval-ms",
+        "100",
+      ], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: tempDir,
+          LORUME_CLI_PATH: fakeCli,
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => analysisServer.resultMessages().some((message) => message.status === "succeeded"),
+        "collector agent analysis result",
+        4_000,
+      );
+
+      const hello = analysisServer.controlMessages().find((message) => message.type === "hello");
+      const result = analysisServer.resultMessages()[0];
+      const progressStages = analysisServer.progressMessages().map((message) => message.stage);
+      const openclawArgs = readFileSync(openclawCallsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+
+      expect(hello).toMatchObject({
+        analysis: {
+          promptKinds: ["daily_operation_review"],
+          protocolVersion: 1,
+          runtimes: ["openclaw"],
+          supported: true,
+        },
+      });
+      expect(progressStages).toEqual(expect.arrayContaining(["accepted", "executing", "result_received"]));
+      expect(result).toMatchObject({
+        analysis: {
+          schemaVersion: "agent-analysis-v1",
+          summary: "Queue triage dominated the day.",
+        },
+        deviceId: "analysis-device",
+        durationMs: 10842,
+        jobId: "opjob_analysis",
+        modelMetadata: {
+          model: "gpt-test",
+          provider: "openai",
+          usage: { input: 1, output: 2, cacheRead: 0, total: 3 },
+        },
+        nonce: "analysis_nonce",
+        operationId: "op_analysis",
+        runtimeRunId: "run_123",
+        status: "succeeded",
+        type: "agent.analysis.result",
+      });
+      expect(openclawArgs).toHaveLength(1);
+      expect(openclawArgs[0]).toEqual([
+        "agent",
+        "--agent",
+        "main",
+        "--session-id",
+        "lorume-analysis-opjob_analysis",
+        "--message",
+        "Return JSON only.",
+        "--json",
+        "--thinking",
+        "off",
+        "--timeout",
+        "120",
+      ]);
+      expect(openclawArgs[0]).not.toContain("--deliver");
+    } finally {
+      await collector.stop();
+      analysisServer.close();
       rmSync(tempDir, { force: true, recursive: true });
     }
   });
@@ -493,7 +626,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       deviceToken: "upgrade-token",
       installDir,
     }));
-    const packageFiles = createUpgradePackageFiles("0.1.2");
+    const packageFiles = createUpgradePackageFiles("0.1.5");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "unsafe-upgrade-device",
       manifestOverride: {
@@ -501,7 +634,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
         path: "../config.json",
       },
       packageFiles,
-      targetVersion: "0.1.2",
+      targetVersion: "0.1.5",
     });
     const collector = createCollectorProcessTracker();
 
@@ -1537,7 +1670,7 @@ async function startCollectorUpgradeServer(options: {
         webSocket.send(JSON.stringify({ type: "hello.ack", deviceId: message.deviceId }));
         webSocket.send(JSON.stringify({
           type: "collector.upgrade.request",
-          currentVersion: "0.1.1",
+          currentVersion: "0.1.2",
           deadlineAt: "2026-06-02T09:05:00.000Z",
           deviceId: options.deviceId,
           jobId: "opjob_upgrade",
@@ -1565,6 +1698,87 @@ async function startCollectorUpgradeServer(options: {
       server.close();
     },
     progressMessages: () => [...progressMessages],
+  };
+}
+
+async function startCollectorAnalysisServer(options: { deviceId: string }): Promise<{
+  baseUrl: string;
+  close: () => void;
+  controlMessages: () => Array<Record<string, unknown>>;
+  progressMessages: () => Array<Record<string, unknown>>;
+  resultMessages: () => Array<Record<string, unknown>>;
+}> {
+  const controlMessages: Array<Record<string, unknown>> = [];
+  const progressMessages: Array<Record<string, unknown>> = [];
+  const resultMessages: Array<Record<string, unknown>> = [];
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/device-state-snapshots" && request.url !== "/api/device-task-batches") {
+      response.statusCode = 404;
+      response.end("not found");
+      return;
+    }
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: true, acked: [] }));
+    });
+  });
+  const webSocketServer = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    if (request.url !== "/api/device-control/ws") {
+      socket.destroy();
+      return;
+    }
+    webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+      webSocketServer.emit("connection", webSocket, request);
+    });
+  });
+  webSocketServer.on("connection", (webSocket) => {
+    webSocket.on("message", (data) => {
+      const message = JSON.parse(data.toString()) as Record<string, unknown>;
+      controlMessages.push(message);
+      if (message.type === "hello") {
+        webSocket.send(JSON.stringify({ type: "hello.ack", deviceId: message.deviceId }));
+        const request = {
+          type: "agent.analysis.request",
+          protocolVersion: 1,
+          operationId: "op_analysis",
+          jobId: "opjob_analysis",
+          deviceId: options.deviceId,
+          runtimeId: `${options.deviceId}:runtime:openclaw`,
+          agentId: `${options.deviceId}:runtime:openclaw:agent:main`,
+          openclawAgentId: "main",
+          promptKind: "daily_operation_review",
+          promptVersion: "openclaw-agent-analysis-v1",
+          periodStart: "2026-06-01T16:00:00.000Z",
+          periodEnd: "2026-06-02T16:00:00.000Z",
+          prompt: "Return JSON only.",
+          deadlineAt: "2026-06-03T08:05:00.000Z",
+          timeoutSeconds: 120,
+          nonce: "analysis_nonce",
+        };
+        webSocket.send(JSON.stringify(request));
+        webSocket.send(JSON.stringify(request));
+      } else if (message.type === "agent.analysis.progress") {
+        progressMessages.push(message);
+      } else if (message.type === "agent.analysis.result") {
+        resultMessages.push(message);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close() {
+      webSocketServer.close();
+      server.close();
+    },
+    controlMessages: () => [...controlMessages],
+    progressMessages: () => [...progressMessages],
+    resultMessages: () => [...resultMessages],
   };
 }
 

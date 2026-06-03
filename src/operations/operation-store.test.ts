@@ -318,6 +318,16 @@ describeDb("Postgres operation store", () => {
           },
           status: "succeeded",
         });
+        const lateProgress = await operationStore.updateJobPayload({
+          jobId: job.id,
+          now: new Date("2026-06-02T09:00:31.000Z"),
+          payloadPatch: {
+            message: "Late downloading progress",
+            stage: "downloading",
+            status: "running",
+          },
+        });
+        const jobsAfterLateProgress = await operationStore.listJobs({ operationId: operation.id });
         const completedOperation = await operationStore.readOperation({ operationId: operation.id });
 
         expect(progressing).toMatchObject({
@@ -333,6 +343,14 @@ describeDb("Postgres operation store", () => {
           finishedAt: expect.any(Date),
           id: job.id,
           lockedBy: null,
+          payload: expect.objectContaining({
+            collectorVersion: "0.1.2",
+            stage: "succeeded",
+          }),
+          status: "succeeded",
+        });
+        expect(lateProgress).toBeNull();
+        expect(jobsAfterLateProgress[0]).toMatchObject({
           payload: expect.objectContaining({
             collectorVersion: "0.1.2",
             stage: "succeeded",

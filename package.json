@@ -1,6 +1,6 @@
 {
   "name": "lorume",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "bin": {
@@ -25,10 +25,10 @@
     "check:device-package-version": "node scripts/check-device-package-version.mjs && vitest run scripts/check-device-package-version.test.mjs",
     "check:cli": "vitest run src/cli",
     "check:repo": "./scripts/check-repo.sh",
-    "check:backend": "vitest run src/auth/auth-crypto.test.ts src/auth/auth-http-api.test.ts src/backend src/server src/operations src/notifications src/runtime/device-collector-script.test.ts",
+    "check:backend": "vitest run src/auth/auth-crypto.test.ts src/auth/auth-http-api.test.ts src/agent-analysis src/backend src/server src/operations src/notifications src/runtime/device-collector-script.test.ts",
     "check:backend:e2e": "npm run test:backend-e2e",
     "check:backend:standalone": "vitest run src/backend",
-    "check:db": "npm run db:up && LORUME_RUN_DB_TESTS=1 LORUME_TEST_DATABASE_URL=postgres://lorume:lorume@127.0.0.1:54329/postgres vitest run src/auth/auth-store.test.ts src/server/db-schema.test.ts src/server/postgres-store.test.ts src/server/runtime-http-api-postgres.test.ts src/backend/backend-server.test.ts src/operations/operation-store.test.ts src/notifications/notification-store.test.ts",
+    "check:db": "npm run db:up && LORUME_RUN_DB_TESTS=1 LORUME_TEST_DATABASE_URL=postgres://lorume:lorume@127.0.0.1:54329/postgres vitest run src/auth/auth-store.test.ts src/agent-analysis/agent-analysis-store.test.ts src/server/db-schema.test.ts src/server/postgres-store.test.ts src/server/runtime-http-api-postgres.test.ts src/backend/backend-server.test.ts src/operations/operation-store.test.ts src/notifications/notification-store.test.ts",
     "check:runtime": "vitest run src/runtime",
     "check:quick": "npm run typecheck && npm run test:run",
     "check:build": "npm run build",

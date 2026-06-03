@@ -26,13 +26,15 @@ export type OperationJobStatus =
 /** Operation type currently supported by Lorume. */
 export type OperationType =
   | "notification_delivery"
-  | "collector_upgrade";
+  | "collector_upgrade"
+  | "agent_analysis";
 
 /** Operation job type currently supported by Lorume. */
 export type OperationJobType =
   | "notification_in_app"
   | "notification_email"
-  | "collector_upgrade_device";
+  | "collector_upgrade_device"
+  | "agent_analysis_openclaw";
 
 /** Persisted operation row. */
 export interface OperationRow {
@@ -286,6 +288,7 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
           payload = payload || $2::jsonb,
           updated_at = $3
         WHERE id = $1
+          AND status NOT IN ('succeeded', 'failed', 'unsupported', 'requires_manual_step', 'cancelled')
         RETURNING ${jobColumns}
       `, [input.jobId, JSON.stringify(input.payloadPatch), now]);
       return result.rows[0] ?? null;
@@ -301,6 +304,7 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
             finished_at = $3,
             updated_at = $3
           WHERE id = $1
+            AND status NOT IN ('succeeded', 'failed', 'unsupported', 'requires_manual_step', 'cancelled')
           RETURNING ${jobColumns}
         `, [input.jobId, input.status, input.now]);
         const job = result.rows[0] ?? null;
@@ -324,6 +328,7 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
             finished_at = $5,
             updated_at = $5
           WHERE id = $1
+            AND status NOT IN ('succeeded', 'failed', 'unsupported', 'requires_manual_step', 'cancelled')
           RETURNING ${jobColumns}
         `, [
           input.jobId,

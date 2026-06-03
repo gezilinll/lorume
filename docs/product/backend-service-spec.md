@@ -8,7 +8,7 @@ Lorume backend 是独立于 Vite 的正式服务入口，用于承接登录与�
 
 - 提供独立于 Vite 的 Lorume backend 服务，前端和 collector 都通过 HTTP / WebSocket 访问它。
 - 使用 Postgres 持久化 Device、Runtime、Agent、Task 和采集记录。
-- 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 上报连接健康，通过 HTTP POST 上报采集结果；服务端只能按 [collector upgrade spec](collector-upgrade-spec.md) 向已认证设备下发受限 collector 升级消息。
+- 保留设备侧主动连接后端的模型：collector 通过 outbound WebSocket 上报连接健康，通过 HTTP POST 上报采集结果；服务端只能按 [collector upgrade spec](collector-upgrade-spec.md) 向已认证设备下发受限 collector 升级消息，或按 [OpenClaw Agent Dashboard backend spec](openclaw-agent-dashboard-backend-spec.md) 下发受限 OpenClaw Agent 分析 prompt。
 - 将 Runs / Runtime Fleet 的正式数据读取固定为“后端查询、前端展示”，不再使用前端拉 latest snapshot 后本地筛选作为正式路径。
 - 每次 collector 上报都记录 ingestion 结果，并由后端生成设备采集诊断结论，支持排查某个平台为什么缺数据、什么时候缺数据、缺了哪些能力。
 - 统一维护规范化错误码到用户可读 message 的映射；后端 API、collector 上报失败、通知和 UI 错误状态必须复用同一语义，不向用户展示技术错误字符串。
@@ -113,8 +113,11 @@ Collector 保持主动上报：
 - `POST /api/device-task-batches`
 - `WS /api/device-control/ws`
 - `POST /api/devices/:deviceId/collector-upgrade`
+- `POST /api/agent-analysis-runs`
+- `GET /api/agent-analysis-reports`
+- `GET /api/agent-analysis-reports/:reportId`
 
-Installer 入口只服务无密钥设备包文件和 collector package manifest，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集、探测或 runtime command 不属于当前 backend service；collector upgrade 是唯一允许的受限设备控制动作，协议和安全边界见 [collector-upgrade-spec.md](collector-upgrade-spec.md)。Runtime 数据只通过设备认证后的 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 进入后端。
+Installer 入口只服务无密钥设备包文件和 collector package manifest，device token 由已鉴权的组织设置页面生成并拼入用户可见的一行命令。后端触发式采集、探测或 runtime command 不属于当前 backend service；collector upgrade 和 OpenClaw Agent 分析是当前允许的受限设备控制动作，协议和安全边界分别见 [collector-upgrade-spec.md](collector-upgrade-spec.md) 和 [openclaw-agent-dashboard-backend-spec.md](openclaw-agent-dashboard-backend-spec.md)。Runtime 数据只通过设备认证后的 metadata snapshot、Runtime Skill probe snapshot 和 Task batch 进入后端。
 
 正式查询 API：
 
@@ -151,6 +154,17 @@ Installer 入口只服务无密钥设备包文件和 collector package manifest�
   - 创建 `collector_upgrade` Operation 和 `collector_upgrade_device` Job。
   - 默认目标版本是当前 `/api/device-collector/manifest.json` 中的 collector package version。
   - 设备不在线、不支持升级协议、已是最新版本或需要人工 bootstrap 时，返回 Operation 摘要并进入对应 Job 状态。
+- `POST /api/agent-analysis-runs`
+  - 需要当前用户属于目标 Agent 所属组织。
+  - 一期只支持 OpenClaw `main` Agent。
+  - 创建 `agent_analysis` Operation 和 `agent_analysis_openclaw` Job，默认 period 是 Asia/Shanghai 上一个自然日。
+- `GET /api/agent-analysis-reports`
+  - 参数：`organizationId`、`agentId`、`limit`。
+  - 需要当前用户属于该组织。
+  - 返回已校验入库的内部 Agent 分析 report 列表。
+- `GET /api/agent-analysis-reports/:reportId`
+  - 需要当前用户属于该 report 所属组织。
+  - 返回单份已校验 Agent 分析 report。
 - `GET /api/notifications`
   - 参数：`organizationId`。
   - 需要当前用户属于该组织。

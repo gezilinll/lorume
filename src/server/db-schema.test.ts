@@ -27,6 +27,7 @@ describeDb("database schema baseline", () => {
         const tableNames = await listPublicTableNames(client);
 
         expect(tableNames).toEqual([
+          "agent_analysis_reports",
           "agent_skill_probe_snapshots",
           "agents",
           "collector_ingestions",
@@ -154,7 +155,26 @@ describeDb("database schema baseline", () => {
           "updated_at",
         ]);
         await expect(readCheckConstraintDefinition(client, "operations", "operations_type_check")).resolves.toContain("collector_upgrade");
+        await expect(readCheckConstraintDefinition(client, "operations", "operations_type_check")).resolves.toContain("agent_analysis");
         await expect(readCheckConstraintDefinition(client, "operation_jobs", "operation_jobs_type_check")).resolves.toContain("collector_upgrade_device");
+        await expect(readCheckConstraintDefinition(client, "operation_jobs", "operation_jobs_type_check")).resolves.toContain("agent_analysis_openclaw");
+        await expect(listPublicColumnNames(client, "agent_analysis_reports")).resolves.toEqual([
+          "id",
+          "organization_id",
+          "operation_id",
+          "device_id",
+          "runtime_id",
+          "agent_id",
+          "runtime_kind",
+          "period_start",
+          "period_end",
+          "prompt_kind",
+          "prompt_version",
+          "hard_metrics",
+          "analysis",
+          "model_metadata",
+          "created_at",
+        ]);
       } finally {
         await client.end();
       }

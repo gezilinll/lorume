@@ -11,7 +11,7 @@ Lorume 通过设备侧 collector 主动识别本机运行资产，并向后端�
 - Collector 只读采集本机事实和已启用 adapter 覆盖的运行资产。
 - 后端接收设备主动上报的 Device / Runtime / Agent metadata snapshot、Runtime Skill probe snapshot 和 Task batch，并提供 Runtime Fleet / Runs 查询 API。
 - Lorume 产品模型只保留四个一等对象：`Device`、`Runtime`、`Agent`、`Task`。
-- WebSocket 控制面支持设备主动 `hello`、`heartbeat`、连接健康判定，以及 [collector upgrade spec](collector-upgrade-spec.md) 中定义的受限 collector 自升级消息；不下发采集、探测、调度或任意命令。
+- WebSocket 控制面支持设备主动 `hello`、`heartbeat`、连接健康判定、[collector upgrade spec](collector-upgrade-spec.md) 中定义的受限 collector 自升级消息，以及 [OpenClaw Agent Dashboard backend spec](openclaw-agent-dashboard-backend-spec.md) 中定义的受限 OpenClaw Agent 分析 prompt；不下发采集、探测、调度或任意命令。
 
 ## 非目标
 
@@ -304,7 +304,7 @@ HTTP 上报规则：
 - `GET /api/runtime-fleet`：读取 Device、Runtime、Agent 和派生 Task 计数。
 - `GET /api/runtime-tasks`：正式 Task 查询页，支持 `search`、`status`、`statusScope`、可重复 `channelKind`、兼容逗号分隔 `channelKinds`、`startAt`、`endAt`、`limit`、`cursor`。
 - `GET /api/devices/:deviceId/collection-health`：读取采集诊断摘要，只检查 `device_state`。
-- `WS /api/device-control/ws`：处理 `hello`、`heartbeat`、断开、stale 判定和 `collector.upgrade.*` 受限升级消息；升级协议、payload、状态和安全边界见 [collector-upgrade-spec.md](collector-upgrade-spec.md)。
+- `WS /api/device-control/ws`：处理 `hello`、`heartbeat`、断开、stale 判定、`collector.upgrade.*` 受限升级消息和 `agent.analysis.*` 受限分析消息；升级协议、payload、状态和安全边界见 [collector-upgrade-spec.md](collector-upgrade-spec.md)，OpenClaw Agent 分析协议见 [openclaw-agent-dashboard-backend-spec.md](openclaw-agent-dashboard-backend-spec.md)。
 
 ## OpenClaw Adapter
 

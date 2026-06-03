@@ -30,7 +30,7 @@ Operation 是用户可见的一次异步动作。
 
 - `id`：内部 ID。
 - `organizationId`：所属组织。
-- `type`：动作类型。本规格支持 `notification_delivery` 和 `collector_upgrade`。
+- `type`：动作类型。本规格支持 `notification_delivery`、`collector_upgrade` 和 `agent_analysis`。
 - `status`：`queued`、`running`、`succeeded`、`failed`、`unsupported`、`requires_manual_step`、`cancelled`。
 - `resourceType` / `resourceId`：主要资源，可为空。
 - `targetType` / `targetId`：目标资源，可为空。
@@ -50,7 +50,7 @@ Operation Job 是后端可执行的最小任务单元。
 - `id`：内部 ID。
 - `operationId`：所属 Operation。
 - `organizationId`：所属组织。
-- `type`：执行类型。本规格支持 `notification_in_app`、`notification_email`、`collector_upgrade_device`。
+- `type`：执行类型。本规格支持 `notification_in_app`、`notification_email`、`collector_upgrade_device` 和 `agent_analysis_openclaw`。
 - `status`：`queued`、`running`、`succeeded`、`failed`、`unsupported`、`requires_manual_step`、`cancelled`。
 - `payload`：执行所需的非敏感参数。
 - `attemptCount` / `maxAttempts`：已尝试次数和最大尝试次数。
@@ -91,6 +91,7 @@ Job 状态：
 - 任一必要 Job 进入 `requires_manual_step` 时，Operation 进入 `requires_manual_step` 并保留 `manualInstruction`。
 - Operation 状态变化必须可以创建 Notification Event。
 - `collector_upgrade_device` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限升级请求，Job 保持 `running`；collector progress、目标版本 heartbeat 或超时检查负责把 Job 推进到最终状态。
+- `agent_analysis_openclaw` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限 OpenClaw Agent 分析请求，Job 保持 `running`；collector progress/result 负责把 Job 推进到最终状态，后端必须先校验并写入 report 后才可标记成功。
 
 ## 当前实现策略
 
@@ -123,7 +124,7 @@ Job 状态：
 - 业务 API 可以返回 `operation` 摘要，前端据此展示异步状态。
 - Operation API 必须要求用户属于目标组织；不能跨组织读取 Operation 或 Job。
 - Job Runner 在 Operation 进入 `succeeded`、`failed`、`unsupported`、`requires_manual_step` 时，按 `requestedByUserId` 创建站内通知；通知失败不能回滚 Operation 状态。
-- 设备采集刷新和 Agent Skill 探测不创建 Operation，也不通过 Operation/Job Runner 下发设备命令；设备侧负责采集和上报。Collector 升级是例外，它只能按 [collector upgrade spec](collector-upgrade-spec.md) 创建 `collector_upgrade` Operation，并下发受限升级消息。
+- 设备采集刷新和 Agent Skill 探测不创建 Operation，也不通过 Operation/Job Runner 下发设备命令；设备侧负责采集和上报。Collector 升级和 OpenClaw Agent 分析是例外：升级只能按 [collector upgrade spec](collector-upgrade-spec.md) 创建 `collector_upgrade` Operation 并下发受限升级消息；OpenClaw Agent 分析只能按 [openclaw-agent-dashboard-backend-spec.md](openclaw-agent-dashboard-backend-spec.md) 创建 `agent_analysis` Operation 并下发受限分析 prompt。
 
 ## UI 边界
 

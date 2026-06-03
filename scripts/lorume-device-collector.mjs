@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { appendFileSync, chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir, hostname, arch, platform, networkInterfaces, userInfo } from "node:os";
 import path from "node:path";
@@ -10,7 +10,7 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.1";
+const COLLECTOR_VERSION = "0.1.4";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
@@ -23,12 +23,15 @@ const DEFAULT_TASK_BATCH_MAX_BYTES = 512 * 1024;
 const DEFAULT_TASK_BATCH_MAX_TASKS = 1000;
 const TASK_SYNC_SCHEMA_VERSION = "device-state-v3";
 const UPGRADE_PROTOCOL_VERSION = 1;
+const ANALYSIS_PROTOCOL_VERSION = 1;
+const FNM_MULTISHELL_SEARCH_LIMIT = 8;
 const COLLECTOR_PACKAGE_FILES = new Map([
   ["lorume-device-collector.mjs", "0755"],
   ["lorume-runtime-adapters.mjs", "0644"],
   ["local-ip-normalization.mjs", "0644"],
   ["lorume.mjs", "0755"],
 ]);
+const agentAnalysisJobsInFlight = new Set();
 const COLLECTOR_LOG_SECRET_KEYS = new Set([
   "authorization",
   "bearertoken",
@@ -1032,6 +1035,15 @@ function collectorUpgradeCapability(config) {
   };
 }
 
+function collectorAnalysisCapability() {
+  return {
+    supported: true,
+    protocolVersion: ANALYSIS_PROTOCOL_VERSION,
+    runtimes: ["openclaw"],
+    promptKinds: ["daily_operation_review"],
+  };
+}
+
 function sendControlMessage(socket, message) {
   if (!isControlSocketOpen(socket)) return;
   socket.send(JSON.stringify({ sentAt: isoNow(), ...message }));
@@ -1046,6 +1058,7 @@ function heartbeatPayload(config, args) {
     hostname: device.hostname,
     collectorVersion: COLLECTOR_VERSION,
     upgrade: collectorUpgradeCapability(config),
+    analysis: collectorAnalysisCapability(),
   };
 }
 
@@ -1085,11 +1098,69 @@ function sendCollectorUpgradeProgress(socket, request, stage, status, message, e
   });
 }
 
+function sendAgentAnalysisProgress(socket, request, stage, status, message, extra = {}) {
+  sendControlMessage(socket, {
+    type: "agent.analysis.progress",
+    protocolVersion: ANALYSIS_PROTOCOL_VERSION,
+    operationId: request.operationId,
+    jobId: request.jobId,
+    deviceId: request.deviceId,
+    nonce: request.nonce,
+    stage,
+    status,
+    message,
+    observedAt: isoNow(),
+    ...extra,
+  });
+}
+
+function sendAgentAnalysisResult(socket, request, status, extra = {}) {
+  sendControlMessage(socket, {
+    type: "agent.analysis.result",
+    protocolVersion: ANALYSIS_PROTOCOL_VERSION,
+    operationId: request.operationId,
+    jobId: request.jobId,
+    deviceId: request.deviceId,
+    nonce: request.nonce,
+    status,
+    observedAt: isoNow(),
+    ...extra,
+  });
+}
+
 async function handleControlMessage(socket, rawMessage, config, args, logger) {
   let message;
   try {
     message = JSON.parse(await controlMessageDataToText(rawMessage));
   } catch {
+    return;
+  }
+  if (message?.type === "agent.analysis.request") {
+    let request;
+    try {
+      request = normalizeAgentAnalysisRequest(message, config, args);
+      if (!request) {
+        sendAgentAnalysisResult(socket, fallbackAgentAnalysisRequest(message, config, args), "unsupported", {
+          errorCode: "agent_analysis_unsupported",
+          message: "Unsupported agent analysis request",
+        });
+        return;
+      }
+      await performAgentAnalysis(socket, request, logger);
+    } catch (error) {
+      const fallbackRequest = request || fallbackAgentAnalysisRequest(message, config, args);
+      sendAgentAnalysisProgress(socket, fallbackRequest, "failed", "failed", collectorErrorMessage(error));
+      sendAgentAnalysisResult(socket, fallbackRequest, "failed", {
+        errorCode: "agent_analysis_failed",
+        message: collectorErrorMessage(error),
+      });
+      logger.warn({
+        errorCode: "agent_analysis_failed",
+        event: "agent_analysis_failed",
+        jobId: fallbackRequest.jobId,
+        operationId: fallbackRequest.operationId,
+      }, collectorErrorMessage(error));
+    }
     return;
   }
   if (message?.type !== "collector.upgrade.request") return;
@@ -1118,6 +1189,289 @@ async function handleControlMessage(socket, rawMessage, config, args, logger) {
       operationId: request?.operationId,
     }, collectorErrorMessage(error));
   }
+}
+
+async function performAgentAnalysis(socket, request, logger) {
+  if (agentAnalysisJobsInFlight.has(request.jobId)) {
+    sendAgentAnalysisProgress(socket, request, "executing", "running", "Agent analysis already running");
+    return;
+  }
+  agentAnalysisJobsInFlight.add(request.jobId);
+  try {
+    sendAgentAnalysisProgress(socket, request, "accepted", "running", "Collector accepted Agent analysis request");
+    sendAgentAnalysisProgress(socket, request, "executing", "running", "Running OpenClaw Agent analysis");
+    const result = await runOpenClawAgentAnalysis(request);
+    sendAgentAnalysisProgress(socket, request, "result_received", "running", "OpenClaw Agent analysis returned result");
+    sendAgentAnalysisResult(socket, request, "succeeded", result);
+    logger.info({
+      event: "agent_analysis_succeeded",
+      jobId: request.jobId,
+      operationId: request.operationId,
+      runtimeRunId: result.runtimeRunId,
+    }, "Agent analysis completed.");
+  } finally {
+    agentAnalysisJobsInFlight.delete(request.jobId);
+  }
+}
+
+function normalizeAgentAnalysisRequest(message, config, args) {
+  if (message?.protocolVersion !== ANALYSIS_PROTOCOL_VERSION) return null;
+  const device = createControlDevice(config, args, isoNow());
+  if (message.deviceId !== device.id) return null;
+  if (message.openclawAgentId !== "main") return null;
+  if (message.promptKind !== "daily_operation_review") return null;
+  if (message.promptVersion !== "openclaw-agent-analysis-v1") return null;
+  if (typeof message.runtimeId !== "string" || !message.runtimeId.includes(":runtime:openclaw")) return null;
+  if (!isNonEmptyString(message.operationId) || !isNonEmptyString(message.jobId)) return null;
+  if (!isNonEmptyString(message.agentId) || !isNonEmptyString(message.prompt)) return null;
+  if (!isNonEmptyString(message.periodStart) || !isNonEmptyString(message.periodEnd)) return null;
+  if (!isNonEmptyString(message.deadlineAt) || Date.parse(message.deadlineAt) <= Date.now()) return null;
+  if (!isNonEmptyString(message.nonce)) return null;
+  const timeoutSeconds = Number(message.timeoutSeconds);
+  return {
+    agentId: message.agentId,
+    deadlineAt: message.deadlineAt,
+    deviceId: message.deviceId,
+    jobId: message.jobId,
+    nonce: message.nonce,
+    openclawAgentId: "main",
+    operationId: message.operationId,
+    periodEnd: message.periodEnd,
+    periodStart: message.periodStart,
+    prompt: message.prompt,
+    promptKind: "daily_operation_review",
+    promptVersion: "openclaw-agent-analysis-v1",
+    runtimeId: message.runtimeId,
+    timeoutSeconds: Number.isFinite(timeoutSeconds) ? Math.max(1, Math.min(600, Math.trunc(timeoutSeconds))) : 120,
+  };
+}
+
+function fallbackAgentAnalysisRequest(message, config, args) {
+  const device = createControlDevice(config, args, isoNow());
+  return {
+    deviceId: typeof message?.deviceId === "string" ? message.deviceId : device.id,
+    jobId: typeof message?.jobId === "string" ? message.jobId : "unknown",
+    nonce: typeof message?.nonce === "string" ? message.nonce : "unknown",
+    operationId: typeof message?.operationId === "string" ? message.operationId : "unknown",
+  };
+}
+
+async function runOpenClawAgentAnalysis(request) {
+  const executable = resolveExecutableFromPath("openclaw");
+  const args = [
+    "agent",
+    "--agent",
+    "main",
+    "--session-id",
+    `lorume-analysis-${request.jobId}`,
+    "--message",
+    request.prompt,
+    "--json",
+    "--thinking",
+    "off",
+    "--timeout",
+    String(request.timeoutSeconds),
+  ];
+  const output = await spawnForJson(executable, args, request.timeoutSeconds * 1000);
+  const parsed = parseJson(output.stdout, "openclaw stdout was not JSON");
+  const analysisText = readOpenClawPayloadText(parsed);
+  if (typeof analysisText !== "string" || !analysisText.trim()) {
+    throw new Error("openclaw result missing payload text");
+  }
+  const analysis = parseJson(analysisText, "openclaw payload text was not JSON");
+  if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) {
+    throw new Error("openclaw payload text must contain an analysis object");
+  }
+  return {
+    analysis,
+    ...(readString(parsed.runId) || readString(parsed.runtimeRunId) ? { runtimeRunId: readString(parsed.runId) || readString(parsed.runtimeRunId) } : {}),
+    ...(readOpenClawDurationMs(parsed) !== undefined ? { durationMs: readOpenClawDurationMs(parsed) } : {}),
+    modelMetadata: whitelistOpenClawModelMetadata(parsed),
+  };
+}
+
+function spawnForJson(command, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: commandExecutionEnv(command),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, timeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error("openclaw analysis timed out"));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `openclaw exited with code ${code}`));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function parseJson(value, errorMessage) {
+  try {
+    return JSON.parse(String(value || "").trim());
+  } catch {
+    throw new Error(errorMessage);
+  }
+}
+
+function readOpenClawPayloadText(parsed) {
+  const payloads = Array.isArray(parsed?.result?.payloads) ? parsed.result.payloads : parsed?.payloads;
+  const text = Array.isArray(payloads) ? payloads[0]?.text : undefined;
+  return typeof text === "string" ? text : undefined;
+}
+
+function readOpenClawDurationMs(parsed) {
+  return readNumber(parsed?.result?.meta?.durationMs) ?? readNumber(parsed?.durationMs);
+}
+
+function whitelistOpenClawModelMetadata(parsed) {
+  const source = [
+    parsed?.modelMetadata,
+    parsed?.result?.meta?.agentMeta,
+    parsed?.result?.meta,
+    parsed,
+  ].find((candidate) => candidate && typeof candidate === "object") || {};
+  const usageSource = source.usage && typeof source.usage === "object"
+    ? source.usage
+    : parsed?.usage;
+  const usage = usageSource && typeof usageSource === "object"
+    ? {
+      ...(readNumber(usageSource.input) !== undefined ? { input: readNumber(usageSource.input) } : {}),
+      ...(readNumber(usageSource.output) !== undefined ? { output: readNumber(usageSource.output) } : {}),
+      ...(readNumber(usageSource.cacheRead) !== undefined ? { cacheRead: readNumber(usageSource.cacheRead) } : {}),
+      ...(readNumber(usageSource.total) !== undefined ? { total: readNumber(usageSource.total) } : {}),
+    }
+    : {};
+  return {
+    ...(readString(source.provider) ? { provider: readString(source.provider) } : {}),
+    ...(readString(source.model) ? { model: readString(source.model) } : {}),
+    ...(Object.keys(usage).length ? { usage } : {}),
+  };
+}
+
+function resolveExecutableFromPath(command) {
+  for (const entry of commandSearchDirs({ includeDynamicShimDirs: true })) {
+    const candidate = path.join(entry, command);
+    try {
+      const stats = statSync(candidate);
+      if (stats.isFile() && (stats.mode & 0o111)) return candidate;
+    } catch {
+      // Keep looking.
+    }
+  }
+  return command;
+}
+
+function commandExecutionEnv(executable) {
+  const executableDir = path.isAbsolute(executable) ? path.dirname(executable) : "";
+  return {
+    ...process.env,
+    PATH: [...new Set([
+      ...(executableDir ? [executableDir] : []),
+      path.dirname(process.execPath),
+      ...commandSearchDirs({ includeDynamicShimDirs: true }),
+    ])].join(path.delimiter),
+  };
+}
+
+function commandSearchDirs({ includeDynamicShimDirs = false } = {}) {
+  const dirs = [];
+  dirs.push(...String(process.env.PATH || "").split(path.delimiter).filter(Boolean));
+  dirs.push(path.join(homeDir(), ".local", "bin"));
+  dirs.push(path.join(homeDir(), ".npm-global", "bin"));
+  dirs.push(path.join(homeDir(), ".volta", "bin"));
+
+  const fnmRoot = path.join(homeDir(), ".local", "share", "fnm", "node-versions");
+  try {
+    for (const version of readdirSync(fnmRoot)) {
+      dirs.push(path.join(fnmRoot, version, "installation", "bin"));
+    }
+  } catch {
+    // Ignore missing fnm installs.
+  }
+
+  if (includeDynamicShimDirs) dirs.push(...recentFnmMultishellBinDirs());
+
+  dirs.push("/opt/homebrew/bin");
+  dirs.push("/usr/local/bin");
+  dirs.push("/usr/bin");
+  dirs.push("/bin");
+  dirs.push("/usr/sbin");
+  dirs.push("/sbin");
+  return [...new Set(dirs)];
+}
+
+function recentFnmMultishellBinDirs() {
+  const root = path.join(homeDir(), ".local", "state", "fnm_multishells");
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      sortKey: fnmMultishellSortKey(entry.name),
+    }))
+    .sort(compareFnmSessions)
+    .slice(0, FNM_MULTISHELL_SEARCH_LIMIT)
+    .map((entry) => path.join(root, entry.name, "bin"))
+    .filter((binDir) => {
+      try {
+        return statSync(binDir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+}
+
+function fnmMultishellSortKey(session) {
+  const match = /(?:^|_)(\d{10,})$/.exec(String(session || ""));
+  return match ? Number(match[1]) : 0;
+}
+
+function compareFnmSessions(left, right) {
+  const keyDelta = right.sortKey - left.sortKey;
+  if (keyDelta !== 0) return keyDelta;
+  return right.name.localeCompare(left.name);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 async function controlMessageDataToText(rawMessage) {
@@ -1562,6 +1916,7 @@ function startControlChannel(config, args, logger = createCollectorLogger(config
         hostname: device.hostname,
         collectorVersion: COLLECTOR_VERSION,
         upgrade: collectorUpgradeCapability(config),
+        analysis: collectorAnalysisCapability(),
       });
       sendControlMessage(socket, heartbeatPayload(config, args));
       sendPendingUpgradeStartupProgress(socket, config, args);

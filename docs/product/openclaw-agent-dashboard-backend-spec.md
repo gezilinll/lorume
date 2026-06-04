@@ -106,6 +106,8 @@ The backend prompt is written in Chinese and contains:
 - analysis steps for locating period sessions, understanding context, grouping task types, judging per-task-type user feedback, selecting cases, and producing risks/actions
 - bounded analysis instructions: do not exhaustively scan all history, spend at most 90 seconds locating/deep-reading evidence, deep-read at most 8 representative sessions, and use hard metrics to estimate workload when the period has more records
 - bounded output instructions: at most 5 task types, 2 cases per task type, 4 risks, and 4 actions
+- user-feedback instructions: only explicit feedback signals such as confirmation, thanks, adoption, follow-up, correction, complaint, redo request, or abandonment may drive `positive` / `mixed` / `negative`; task success, a final link, or lack of rework alone must remain `unknown`
+- output language instructions: analysis text is manager-facing and must not expose internal implementation terms such as `hardMetrics`, Lorume, OpenClaw, system-computed, Agent self-evaluation, prompt, or schema
 - explicit instruction to return raw JSON only
 - explicit instruction not to add fields outside the JSON contract
 - explicit instruction not to deliver messages, mutate files, mutate external tasks, schedule work, or execute unrelated actions

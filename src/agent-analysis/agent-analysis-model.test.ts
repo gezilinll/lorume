@@ -107,6 +107,9 @@ describe("agent analysis model", () => {
     expect(prompt).toContain("总时间预算为 90 秒");
     expect(prompt).toContain("最多覆盖 8 个代表性会话");
     expect(prompt).toContain("taskTypes 最多 5 类");
+    expect(prompt).toContain("不能仅凭任务 status=done");
+    expect(prompt).toContain("缺少明确用户反馈时使用 unknown");
+    expect(prompt).toContain("文本中不要出现 hardMetrics");
     expect(prompt).toContain("跨周期 session");
     expect(prompt).toContain("不要增加其他字段");
     expect(prompt).toContain("\"hardMetrics\"");

@@ -194,7 +194,10 @@ export function buildAgentAnalysisPrompt(input: {
       "9. 深度分析最多覆盖 8 个代表性会话；如果周期内会话更多，请用系统统计辅助估算任务量，并在案例和证据中保留最有代表性的记录。",
       "10. 如果无法读取会话记录，periodPerformance 说明证据不足，taskTypes、risks 和 actions 可以返回空数组；不要为了满足数量而编造。",
       "11. 不要修改文件、发送消息、执行外部任务或触发任何会产生副作用的操作。只允许读取和分析历史记录。",
-      "12. 如果某些会话证据不足，可以跳过，不要编造。",
+      "12. 判断用户反馈时必须依据周期内或跨周期轻量上下文里的明确反馈信号，例如用户确认采纳、感谢、继续追问、纠错、投诉、要求重做、放弃使用等。",
+      "13. 不能仅凭任务 status=done、轨迹 success、没有返工、输出链接或最终回复完整，就判断用户反馈 positive；缺少明确用户反馈时使用 unknown。",
+      "14. 输出给管理者阅读，文本中不要出现 hardMetrics、Lorume、OpenClaw、系统计算、Agent 自评、prompt、schema 等内部实现词；如果需要引用统计口径，用“运行统计”表达。",
+      "15. 如果某些会话证据不足，可以跳过，不要编造。",
     ].join("\n"),
     [
       "分析步骤：",
@@ -205,7 +208,7 @@ export function buildAgentAnalysisPrompt(input: {
       "5. 每类任务选择典型案例，案例必须来自周期内真实会话片段。",
       "6. 提炼风险和改进建议，建议必须有周期内会话证据支撑。",
     ].join("\n"),
-    "输出要求：只输出 JSON；不要 markdown；不要输出分析过程；输出 JSON 必须符合 outputJsonContract，不要增加其他字段；taskTypes 最多 5 类，每类 cases 最多 2 个，risks 最多 4 条，actions 最多 4 条；evidenceIds 和 cases[].id 使用会话 id、trajectory id、task id 或你能稳定引用的历史记录 id。",
+    "输出要求：只输出 JSON；不要 markdown；不要输出分析过程；输出 JSON 必须符合 outputJsonContract，不要增加其他字段；taskTypes 最多 5 类，每类 cases 最多 2 个，risks 最多 4 条，actions 最多 4 条；evidenceIds 和 cases[].id 使用会话 id、trajectory id、task id 或你能稳定引用的历史记录 id；所有中文说明面向业务管理者，不使用内部实现词。",
     JSON.stringify(payload, null, 2),
   ].join("\n\n");
 }

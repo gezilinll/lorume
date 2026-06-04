@@ -10,7 +10,7 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.5";
+const COLLECTOR_VERSION = "0.1.6";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
@@ -1935,7 +1935,12 @@ function startControlChannel(config, args, logger = createCollectorLogger(config
     });
 
     socket.addEventListener("error", () => {
-      // Close will schedule reconnect. Keep logs quiet so API keys in process args are never echoed.
+      // Some WebSocket implementations emit error without a follow-up close. Force close so reconnect runs.
+      try {
+        socket.close();
+      } catch {
+        // Keep logs quiet so API keys in process args are never echoed.
+      }
     });
   };
 

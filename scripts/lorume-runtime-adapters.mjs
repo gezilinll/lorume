@@ -4,7 +4,7 @@ import { homedir, hostname, arch, platform, networkInterfaces, tmpdir, userInfo 
 import path from "node:path";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-export const COLLECTOR_VERSION = "0.1.5";
+export const COLLECTOR_VERSION = "0.1.6";
 
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 const DEFAULT_ENABLED_RUNTIME_ADAPTERS = "openclaw,slock,codex";

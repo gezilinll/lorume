@@ -425,11 +425,11 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       taskSyncCachePath,
     }));
     writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
-    const packageFiles = createUpgradePackageFiles("0.1.6");
+    const packageFiles = createUpgradePackageFiles("0.1.7");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "upgrade-device",
       packageFiles,
-      targetVersion: "0.1.6",
+      targetVersion: "0.1.7",
     });
     const collector = createCollectorProcessTracker();
 
@@ -468,7 +468,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
         jobId: "opjob_upgrade",
         stage: "restart_pending",
-        targetVersion: "0.1.6",
+        targetVersion: "0.1.7",
       });
     } finally {
       await collector.stop();
@@ -650,7 +650,7 @@ console.log(JSON.stringify({
       deviceToken: "upgrade-token",
       installDir,
     }));
-    const packageFiles = createUpgradePackageFiles("0.1.6");
+    const packageFiles = createUpgradePackageFiles("0.1.7");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "unsafe-upgrade-device",
       manifestOverride: {
@@ -658,7 +658,7 @@ console.log(JSON.stringify({
         path: "../config.json",
       },
       packageFiles,
-      targetVersion: "0.1.6",
+      targetVersion: "0.1.7",
     });
     const collector = createCollectorProcessTracker();
 

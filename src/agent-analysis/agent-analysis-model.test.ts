@@ -104,8 +104,9 @@ describe("agent analysis model", () => {
     expect(prompt).toContain("你是一名 Agent 运行分析助手");
     expect(prompt).toContain("periodStart <= eventTime < periodEnd");
     expect(prompt).toContain("以会话/session 为主要分析粒度");
-    expect(prompt).toContain("最多覆盖 12 个代表性会话");
-    expect(prompt).toContain("taskTypes 最多 6 类");
+    expect(prompt).toContain("总时间预算为 90 秒");
+    expect(prompt).toContain("最多覆盖 8 个代表性会话");
+    expect(prompt).toContain("taskTypes 最多 5 类");
     expect(prompt).toContain("跨周期 session");
     expect(prompt).toContain("不要增加其他字段");
     expect(prompt).toContain("\"hardMetrics\"");

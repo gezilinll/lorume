@@ -425,11 +425,11 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       taskSyncCachePath,
     }));
     writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
-    const packageFiles = createUpgradePackageFiles("0.1.7");
+    const packageFiles = createUpgradePackageFiles("0.1.8");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "upgrade-device",
       packageFiles,
-      targetVersion: "0.1.7",
+      targetVersion: "0.1.8",
     });
     const collector = createCollectorProcessTracker();
 
@@ -468,7 +468,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
         jobId: "opjob_upgrade",
         stage: "restart_pending",
-        targetVersion: "0.1.7",
+        targetVersion: "0.1.8",
       });
     } finally {
       await collector.stop();
@@ -634,6 +634,74 @@ console.log(JSON.stringify({
     }
   });
 
+  it("returns a failed Agent analysis result when OpenClaw ignores timeout termination", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-agent-analysis-timeout-"));
+    const installDir = path.join(tempDir, "collector");
+    const binDir = path.join(tempDir, ".local", "state", "fnm_multishells", "session_9999999999999", "bin");
+    const fakeCli = path.join(tempDir, "lorume.mjs");
+    const configPath = path.join(installDir, "config.json");
+    const openclawPath = path.join(binDir, "openclaw");
+    mkdirSync(installDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(fakeCli, `console.log(JSON.stringify(${JSON.stringify(createMinimalSnapshot("analysis-timeout-device"))}));\n`);
+    chmodSync(fakeCli, 0o755);
+    writeFileSync(openclawPath, `#!/usr/bin/env node
+process.on("SIGTERM", () => {});
+setInterval(() => {}, 1000);
+`);
+    chmodSync(openclawPath, 0o755);
+    writeFileSync(configPath, JSON.stringify({
+      deviceId: "analysis-timeout-device",
+      deviceToken: "analysis-token",
+      installDir,
+    }));
+    const analysisServer = await startCollectorAnalysisServer({
+      deviceId: "analysis-timeout-device",
+      request: { timeoutSeconds: 1 },
+    });
+    const collector = createCollectorProcessTracker();
+
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8"));
+      writeFileSync(configPath, JSON.stringify({ ...config, serverUrl: analysisServer.baseUrl }, null, 2));
+      collector.child = spawn(process.execPath, [
+        collectorScript,
+        "--config",
+        configPath,
+        "--interval-ms",
+        "100",
+      ], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          LORUME_COLLECTOR_HOME: tempDir,
+          LORUME_CLI_PATH: fakeCli,
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      await waitForCondition(
+        () => analysisServer.resultMessages().some((message) => message.status === "failed"),
+        "collector agent analysis timeout result",
+        6_000,
+      );
+
+      expect(analysisServer.resultMessages()[0]).toMatchObject({
+        errorCode: "agent_analysis_failed",
+        jobId: "opjob_analysis",
+        message: "openclaw analysis timed out",
+        operationId: "op_analysis",
+        status: "failed",
+        type: "agent.analysis.result",
+      });
+    } finally {
+      await collector.stop();
+      analysisServer.close();
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it("rejects unsafe collector package manifest paths without replacing files", async () => {
     const tempDir = mkdtempSync(path.join(tmpdir(), "lorume-self-upgrade-unsafe-"));
     const installDir = path.join(tempDir, "collector");
@@ -650,7 +718,7 @@ console.log(JSON.stringify({
       deviceToken: "upgrade-token",
       installDir,
     }));
-    const packageFiles = createUpgradePackageFiles("0.1.7");
+    const packageFiles = createUpgradePackageFiles("0.1.8");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "unsafe-upgrade-device",
       manifestOverride: {
@@ -658,7 +726,7 @@ console.log(JSON.stringify({
         path: "../config.json",
       },
       packageFiles,
-      targetVersion: "0.1.7",
+      targetVersion: "0.1.8",
     });
     const collector = createCollectorProcessTracker();
 
@@ -1725,7 +1793,10 @@ async function startCollectorUpgradeServer(options: {
   };
 }
 
-async function startCollectorAnalysisServer(options: { deviceId: string }): Promise<{
+async function startCollectorAnalysisServer(options: {
+  deviceId: string;
+  request?: Partial<Record<string, unknown>>;
+}): Promise<{
   baseUrl: string;
   close: () => void;
   controlMessages: () => Array<Record<string, unknown>>;
@@ -1780,6 +1851,7 @@ async function startCollectorAnalysisServer(options: { deviceId: string }): Prom
           deadlineAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
           timeoutSeconds: 120,
           nonce: "analysis_nonce",
+          ...options.request,
         };
         webSocket.send(JSON.stringify(request));
         webSocket.send(JSON.stringify(request));

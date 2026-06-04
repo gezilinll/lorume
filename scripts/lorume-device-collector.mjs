@@ -10,10 +10,11 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.6";
+const COLLECTOR_VERSION = "0.1.7";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
+const CHILD_FORCE_KILL_DELAY_MS = 1_000;
 const POST_RETRY_DELAYS_MS = [0, 500, 1500];
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LORUME_CLI_PATH = path.join(SCRIPT_DIR, "lorume.mjs");
@@ -1299,9 +1300,13 @@ function spawnForJson(command, args, timeoutMs) {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let forceKillTimer;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, CHILD_FORCE_KILL_DELAY_MS);
     }, timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -1313,10 +1318,12 @@ function spawnForJson(command, args, timeoutMs) {
     });
     child.on("error", (error) => {
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       reject(error);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       if (timedOut) {
         reject(new Error("openclaw analysis timed out"));
         return;

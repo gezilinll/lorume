@@ -104,8 +104,8 @@ The backend prompt is written in Chinese and contains:
 - instructions that cross-period sessions may use outside-window context only for light understanding, never as current-period evidence
 - instructions that the Agent must read its own history, trajectory, or equivalent records in its runtime environment
 - analysis steps for locating period sessions, understanding context, grouping task types, judging per-task-type user feedback, selecting cases, and producing risks/actions
-- bounded analysis instructions: do not exhaustively scan all history, deep-read at most 12 representative sessions, and use hard metrics to estimate workload when the period has more records
-- bounded output instructions: at most 6 task types, 3 cases per task type, 5 risks, and 5 actions
+- bounded analysis instructions: do not exhaustively scan all history, spend at most 90 seconds locating/deep-reading evidence, deep-read at most 8 representative sessions, and use hard metrics to estimate workload when the period has more records
+- bounded output instructions: at most 5 task types, 2 cases per task type, 4 risks, and 4 actions
 - explicit instruction to return raw JSON only
 - explicit instruction not to add fields outside the JSON contract
 - explicit instruction not to deliver messages, mutate files, mutate external tasks, schedule work, or execute unrelated actions
@@ -277,6 +277,8 @@ The collector parses OpenClaw `--json` output `result.payloads[0].text` as raw A
 
 Duplicate requests for the same running `jobId` must not start another OpenClaw process; the collector only reports running progress.
 
+If the OpenClaw subprocess exceeds `timeoutSeconds`, the collector must terminate it, force-kill it when it does not exit promptly, and send a failed `agent.analysis.result` instead of leaving the backend to infer failure only from `deadlineAt`.
+
 ## Harness
 
 Required checks for this surface:
@@ -293,4 +295,4 @@ Focused harnesses include:
 - `src/agent-analysis/agent-analysis-store.test.ts`
 - `src/operations/agent-analysis.test.ts`
 - `src/server/runtime-control-channel.test.ts`
-- `src/runtime/device-collector-script.test.ts`, including a launchd-like PATH case where `openclaw` is only discoverable from a recent fnm multishell directory.
+- `src/runtime/device-collector-script.test.ts`, including a launchd-like PATH case where `openclaw` is only discoverable from a recent fnm multishell directory and a timeout case where a stuck OpenClaw subprocess still yields a failed result.

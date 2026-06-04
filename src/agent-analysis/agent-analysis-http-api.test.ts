@@ -139,13 +139,35 @@ function createReport() {
   return {
     agentId: "fixture-mac:runtime:openclaw:agent:main",
     analysis: {
-      schemaVersion: "agent-analysis-v1",
-      promptKind: "daily_operation_review",
-      summary: "Queue triage dominated the day.",
-      taskTypeBreakdown: [],
-      typicalCases: [],
+      periodPerformance: {
+        completion: "多数任务完成。",
+        failurePattern: "暂无明显重复失败。",
+        latency: "耗时稳定。",
+        workload: "队列整理占主导。",
+      },
+      taskTypes: [{
+        cases: [{
+          id: "task_1",
+          outcome: "完成队列整理。",
+          reason: "代表本周期主要任务。",
+          signal: "positive",
+          title: "队列整理",
+        }],
+        countEstimate: 1,
+        description: "整理队列任务并输出结论。",
+        label: "队列整理",
+        satisfaction: {
+          evidenceIds: ["task_1"],
+          level: "positive",
+          reason: "用户确认结果可用。",
+        },
+      }],
       risks: [],
-      dataQualityNotes: ["Only sampled tasks were reviewed."],
+      actions: [{
+        evidenceIds: ["task_1"],
+        reason: "将稳定流程沉淀为模板。",
+        title: "沉淀任务模板",
+      }],
     },
     createdAt: new Date("2026-06-03T08:02:00.000Z"),
     deviceId: "fixture-mac",
@@ -170,7 +192,7 @@ function createReport() {
     periodEnd: new Date("2026-06-02T16:00:00.000Z"),
     periodStart: new Date("2026-06-01T16:00:00.000Z"),
     promptKind: "daily_operation_review",
-    promptVersion: "openclaw-agent-analysis-v1",
+    promptVersion: "openclaw-agent-operation-analysis-v2",
     runtimeId: "fixture-mac:runtime:openclaw",
     runtimeKind: "openclaw",
   };

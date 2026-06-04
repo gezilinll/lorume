@@ -10,7 +10,7 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.4";
+const COLLECTOR_VERSION = "0.1.5";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
@@ -1220,7 +1220,7 @@ function normalizeAgentAnalysisRequest(message, config, args) {
   if (message.deviceId !== device.id) return null;
   if (message.openclawAgentId !== "main") return null;
   if (message.promptKind !== "daily_operation_review") return null;
-  if (message.promptVersion !== "openclaw-agent-analysis-v1") return null;
+  if (message.promptVersion !== "openclaw-agent-operation-analysis-v2") return null;
   if (typeof message.runtimeId !== "string" || !message.runtimeId.includes(":runtime:openclaw")) return null;
   if (!isNonEmptyString(message.operationId) || !isNonEmptyString(message.jobId)) return null;
   if (!isNonEmptyString(message.agentId) || !isNonEmptyString(message.prompt)) return null;
@@ -1240,7 +1240,7 @@ function normalizeAgentAnalysisRequest(message, config, args) {
     periodStart: message.periodStart,
     prompt: message.prompt,
     promptKind: "daily_operation_review",
-    promptVersion: "openclaw-agent-analysis-v1",
+    promptVersion: "openclaw-agent-operation-analysis-v2",
     runtimeId: message.runtimeId,
     timeoutSeconds: Number.isFinite(timeoutSeconds) ? Math.max(1, Math.min(600, Math.trunc(timeoutSeconds))) : 120,
   };

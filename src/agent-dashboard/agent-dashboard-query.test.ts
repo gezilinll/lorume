@@ -19,7 +19,7 @@ const reportPayload = {
   periodStart: "2026-06-01T16:00:00.000Z",
   periodEnd: "2026-06-02T16:00:00.000Z",
   promptKind: "daily_operation_review",
-  promptVersion: "openclaw-agent-analysis-v1",
+  promptVersion: "openclaw-agent-operation-analysis-v2",
   hardMetrics: {
     duration: {
       basis: "trajectoryElapsed",
@@ -39,32 +39,39 @@ const reportPayload = {
     unknownCount: 3,
   },
   analysis: {
-    schemaVersion: "agent-analysis-v1",
-    promptKind: "daily_operation_review",
-    summary: "Queue triage dominated the day.",
-    satisfactionScore: 0.9,
-    taskTypeBreakdown: [{
-      type: "collector_ops",
+    periodPerformance: {
+      workload: "工作量稳定。",
+      completion: "多数任务闭环。",
+      latency: "耗时表现正常。",
+      failurePattern: "失败集中在设备环境差异。",
+    },
+    taskTypes: [{
       label: "collector / 设备运维",
       countEstimate: 14,
-      confidence: "high",
-      evidenceTaskIds: ["task_9bd3"],
-    }],
-    typicalCases: [{
-      taskId: "task_9bd3",
-      title: "真实设备分析执行失败排查",
-      whyTypical: "反映服务环境差异。",
-      outcome: "修复 collector 命令发现策略。",
-      status: "failed",
-      evidence: "PATH 中没有 openclaw。",
+      description: "主要处理 collector 与真实设备环境问题。",
+      satisfaction: {
+        level: "mixed",
+        reason: "问题推进但出现重复排查。",
+        evidenceIds: ["session_9bd3"],
+      },
+      cases: [{
+        id: "session_9bd3",
+        title: "真实设备分析执行失败排查",
+        signal: "mixed",
+        outcome: "修复 collector 命令发现策略。",
+        reason: "反映服务环境差异。",
+      }],
     }],
     risks: [{
       title: "collector 环境差异",
-      severity: "medium",
-      evidenceTaskIds: ["task_9bd3"],
       description: "服务进程 PATH 可能不同。",
+      evidenceIds: ["session_9bd3"],
     }],
-    dataQualityNotes: ["Only sampled tasks were reviewed."],
+    actions: [{
+      title: "补充环境诊断",
+      reason: "降低同类问题排查成本。",
+      evidenceIds: ["session_9bd3"],
+    }],
   },
   modelMetadata: {
     provider: "openai",
@@ -94,7 +101,7 @@ describe("agent dashboard query helpers", () => {
     expect(operationUrl.pathname).toBe("/api/operations/op_1");
   });
 
-  it("normalizes report list responses and removes satisfaction fields", () => {
+  it("normalizes v2 report list responses without exposing implementation fields", () => {
     const reports = normalizeAgentAnalysisReportsResponse({
       reports: [
         reportPayload,
@@ -110,18 +117,69 @@ describe("agent dashboard query helpers", () => {
       id: "agr_1",
       runtimeKind: "openclaw",
     });
-    expect(JSON.stringify(reports[0]?.analysis)).not.toContain("satisfaction");
-    expect(reports[0]?.analysis.taskTypeBreakdown[0]).toMatchObject({
-      confidence: "high",
+    expect(JSON.stringify(reports[0]?.analysis)).not.toContain("confidence");
+    expect(JSON.stringify(reports[0]?.analysis)).not.toContain("dataQuality");
+    expect(reports[0]?.analysis.taskTypes[0]).toMatchObject({
       countEstimate: 14,
       label: "collector / 设备运维",
+      satisfaction: { level: "mixed" },
     });
+    expect(reports[0]?.analysis.actions[0]?.title).toBe("补充环境诊断");
   });
 
   it("normalizes report detail responses", () => {
     expect(normalizeAgentAnalysisReportResponse({ report: reportPayload })?.id).toBe("agr_1");
     expect(normalizeAgentAnalysisReportResponse({ report: { ...reportPayload, analysis: {} } })).toBeNull();
     expect(normalizeAgentAnalysisReportsResponse({ reports: "invalid" })).toEqual([]);
+  });
+
+  it("maps legacy v1 reports to the productized dashboard model", () => {
+    const legacyReport = {
+      ...reportPayload,
+      promptVersion: "openclaw-agent-analysis-v1",
+      analysis: {
+        schemaVersion: "agent-analysis-v1",
+        promptKind: "daily_operation_review",
+        summary: "Queue triage dominated the day.",
+        taskTypeBreakdown: [{
+          type: "collector_ops",
+          label: "collector / 设备运维",
+          countEstimate: 14,
+          confidence: "high",
+          evidenceTaskIds: ["task_9bd3"],
+        }],
+        typicalCases: [{
+          taskId: "task_9bd3",
+          title: "真实设备分析执行失败排查",
+          whyTypical: "反映服务环境差异。",
+          outcome: "修复 collector 命令发现策略。",
+          status: "failed",
+          evidence: "PATH 中没有 openclaw。",
+        }],
+        risks: [{
+          title: "collector 环境差异",
+          severity: "medium",
+          evidenceTaskIds: ["task_9bd3"],
+          description: "服务进程 PATH 可能不同。",
+        }],
+        dataQualityNotes: ["Only sampled tasks were reviewed."],
+      },
+    };
+
+    const normalized = normalizeAgentAnalysisReportResponse({ report: legacyReport });
+
+    expect(normalized?.analysis.taskTypes[0]).toMatchObject({
+      countEstimate: 14,
+      label: "collector / 设备运维",
+      satisfaction: { level: "unknown" },
+    });
+    expect(normalized?.analysis.taskTypes[0]?.cases[0]).toMatchObject({
+      id: "task_9bd3",
+      signal: "unknown",
+      title: "真实设备分析执行失败排查",
+    });
+    expect(JSON.stringify(normalized?.analysis)).not.toContain("confidence");
+    expect(JSON.stringify(normalized?.analysis)).not.toContain("dataQualityNotes");
   });
 
   it("creates Agent analysis runs and returns operation/job summary", async () => {

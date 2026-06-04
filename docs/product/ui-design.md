@@ -105,7 +105,7 @@ Lorume 当前采用桌面 Web Console。当前可操作导航只暴露已经落�
 - 查看 Agent 会话任务：登录 -> Runs -> 按 Channel、状态和时间范围查看会话任务。
 - 查看定时任务：登录 -> 定时任务 -> 查看 Runtime 定时定义、下次运行和多次执行历史。
 - 查看 Skill 能力：登录 -> Skill 仓库，或从 Runtime Fleet 的 Runtime / Agent 行级入口跳转并自动带上筛选。
-- 查看 Agent 日常运转：登录 -> Agent 看板，或从 Runtime Fleet 的 Agent 行级/详情入口跳转，查看 OpenClaw `main` Agent 报告、硬指标、典型案例、风险和分析 Operation 状态。
+- 查看 Agent 日常运转：登录 -> Agent 看板，或从 Runtime Fleet 的 Agent 行级/详情入口跳转，查看 OpenClaw `main` Agent 报告、运行概览、任务类型、用户反馈、典型案例、风险建议和分析 Operation 状态。
 - 跟踪异步任务：登录 -> 右上角任务中心抽屉 -> 查看 Operation / Job 状态、失败原因和目标资源。
 - 查看通知：登录 -> 右上角通知中心抽屉 -> 查看未读/已读通知、同步、采集、审核和恢复类通知。
 - 管理组织：登录 -> 组织设置 -> 查看当前组织与成员身份，创建邀请链接。

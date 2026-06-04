@@ -35,7 +35,7 @@ const capabilityCards = [
     title: "Skill 仓库",
   },
   {
-    description: "展示 OpenClaw main Agent 的日报硬指标、Agent 自评、典型案例和风险说明。",
+    description: "展示 OpenClaw main Agent 的周期运行概览、任务类型、用户反馈、典型案例和风险建议。",
     href: "/agent-dashboard",
     icon: BarChart3,
     tone: "bg-[var(--blue-soft)] text-[var(--blue-foreground)]",

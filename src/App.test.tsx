@@ -123,38 +123,47 @@ function agentAnalysisReportResponse(snapshot = fleetSnapshot) {
   return {
     agentId,
     analysis: {
-      schemaVersion: "agent-analysis-v1",
-      promptKind: "daily_operation_review",
-      summary: "Queue triage dominated the day.",
-      taskTypeBreakdown: [
+      periodPerformance: {
+        completion: "多数需求在周期内完成，少量任务仍需补充结果证据。",
+        failurePattern: "失败集中在工具调用和验收信息不足的任务。",
+        latency: "常规任务响应稳定，复杂变更耗时更长。",
+        workload: "Queue triage dominated the day.",
+      },
+      taskTypes: [
         {
-          confidence: "high",
+          cases: [
+            {
+              id: "task_done_1",
+              outcome: "Delivered backend plan.",
+              reason: "Covers planning, backend and validation work.",
+              signal: "mixed",
+              title: "Collector upgrade analysis",
+            },
+          ],
           countEstimate: 6,
-          evidenceTaskIds: ["task_done_1"],
+          description: "围绕需求澄清、方案拆解和验收条件确认的任务。",
           label: "需求澄清",
-          type: "requirements",
-        },
-      ],
-      typicalCases: [
-        {
-          evidence: "User asked for implementation detail and acceptance checks.",
-          outcome: "Delivered backend plan.",
-          status: "done",
-          taskId: "task_done_1",
-          title: "Collector upgrade analysis",
-          whyTypical: "Covers planning, backend and validation work.",
+          satisfaction: {
+            evidenceIds: ["task_done_1"],
+            level: "mixed",
+            reason: "用户持续追问细节并推动方案调整，说明有推进也有返工。",
+          },
         },
       ],
       risks: [
         {
           description: "Some tasks still lack explicit outcome messages.",
-          evidenceTaskIds: ["task_done_1"],
-          severity: "medium",
+          evidenceIds: ["task_done_1"],
           title: "结果证据不足",
         },
       ],
-      dataQualityNotes: ["Agent 自评只基于 prompt 样本。"],
-      satisfactionScore: 97,
+      actions: [
+        {
+          evidenceIds: ["task_done_1"],
+          reason: "在复杂任务完成后补充清晰的验收结论。",
+          title: "补齐结果回执",
+        },
+      ],
     },
     createdAt: "2026-06-03T08:20:00.000Z",
     deviceId: snapshot.devices[0].id,
@@ -187,7 +196,7 @@ function agentAnalysisReportResponse(snapshot = fleetSnapshot) {
     periodEnd: "2026-06-03T16:00:00.000Z",
     periodStart: "2026-06-02T16:00:00.000Z",
     promptKind: "daily_operation_review",
-    promptVersion: "openclaw-agent-analysis-v1",
+    promptVersion: "openclaw-agent-operation-analysis-v2",
     runtimeId: snapshot.runtimes[0].id,
     runtimeKind: "openclaw",
   };
@@ -505,6 +514,7 @@ describe("Console shell", () => {
     expect(screen.getByRole("heading", { name: "Agent 看板" })).toBeInTheDocument();
     expect(document.querySelector('[data-console-layout-tier="data-dense"]')).toBeInTheDocument();
     expect(await screen.findByText("Queue triage dominated the day.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "用户反馈" })).toBeInTheDocument();
     expect(screen.queryByText("satisfactionScore")).not.toBeInTheDocument();
 
     await user.click(operationsButton);

@@ -225,7 +225,7 @@ export function createLorumeBackendServer(
     })
     : undefined;
   const agentAnalysisSchedulerEnabled = options.agentAnalysisSchedulerEnabled
-    ?? readBooleanEnv("LORUME_AGENT_ANALYSIS_SCHEDULER_ENABLED", true);
+    ?? readBooleanEnv("LORUME_AGENT_ANALYSIS_SCHEDULER_ENABLED", false);
   const agentAnalysisScheduler = agentAnalysisSchedulerEnabled && operationStore && agentAnalysisStore
     ? createAgentAnalysisScheduler({
       agentAnalysisStore,

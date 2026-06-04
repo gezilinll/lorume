@@ -246,7 +246,7 @@ describe("runtime control channel", () => {
       periodStart: "2026-06-01T16:00:00.000Z",
       prompt: "Return JSON only.",
       promptKind: "daily_operation_review",
-      promptVersion: "openclaw-agent-analysis-v1",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       protocolVersion: 1,
       runtimeId: "fixture-mac:runtime:openclaw",
       timeoutSeconds: 120,
@@ -263,7 +263,7 @@ describe("runtime control channel", () => {
       periodStart: "2026-06-01T16:00:00.000Z",
       prompt: "Return JSON only.",
       promptKind: "daily_operation_review",
-      promptVersion: "openclaw-agent-analysis-v1",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       protocolVersion: 1,
       runtimeId: "offline:runtime:openclaw",
       timeoutSeconds: 120,
@@ -279,7 +279,7 @@ describe("runtime control channel", () => {
       openclawAgentId: "main",
       operationId: "op_analysis",
       promptKind: "daily_operation_review",
-      promptVersion: "openclaw-agent-analysis-v1",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       protocolVersion: 1,
       runtimeId: "fixture-mac:runtime:openclaw",
       sentAt: "2026-06-03T08:30:00.000Z",
@@ -377,7 +377,37 @@ describe("runtime control channel", () => {
         provider: "openai",
         usage: { input: 1, output: 2, cacheRead: 0, total: 3 },
       },
-      analysis: { schemaVersion: "agent-analysis-v1" },
+      analysis: {
+        periodPerformance: {
+          completion: "Done.",
+          failurePattern: "No repeated failures.",
+          latency: "Stable.",
+          workload: "Light.",
+        },
+        taskTypes: [{
+          cases: [{
+            id: "session_1",
+            outcome: "Completed.",
+            reason: "Representative successful session.",
+            signal: "positive",
+            title: "Queue review",
+          }],
+          countEstimate: 1,
+          description: "Queue review work.",
+          label: "队列整理",
+          satisfaction: {
+            evidenceIds: ["session_1"],
+            level: "positive",
+            reason: "User confirmed the result.",
+          },
+        }],
+        risks: [],
+        actions: [{
+          evidenceIds: ["session_1"],
+          reason: "Keep this workflow documented.",
+          title: "沉淀流程",
+        }],
+      },
       observedAt: "2026-06-03T09:00:12.000Z",
     }));
 
@@ -393,7 +423,9 @@ describe("runtime control channel", () => {
     ]);
     expect(resultMessages).toEqual([
       expect.objectContaining({
-        analysis: { schemaVersion: "agent-analysis-v1" },
+        analysis: expect.objectContaining({
+          taskTypes: [expect.objectContaining({ label: "队列整理" })],
+        }),
         deviceId: "fixture-mac",
         durationMs: 10842,
         jobId: "opjob_analysis",

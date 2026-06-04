@@ -425,11 +425,11 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       taskSyncCachePath,
     }));
     writeFileSync(taskSyncCachePath, "{\"tasks\":{}}\n");
-    const packageFiles = createUpgradePackageFiles("0.1.5");
+    const packageFiles = createUpgradePackageFiles("0.1.6");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "upgrade-device",
       packageFiles,
-      targetVersion: "0.1.5",
+      targetVersion: "0.1.6",
     });
     const collector = createCollectorProcessTracker();
 
@@ -468,7 +468,7 @@ await import(${JSON.stringify(pathToFileURL(collectorScript).href)});
       expect(JSON.parse(readFileSync(path.join(installDir, "upgrade-state.json"), "utf8"))).toMatchObject({
         jobId: "opjob_upgrade",
         stage: "restart_pending",
-        targetVersion: "0.1.5",
+        targetVersion: "0.1.6",
       });
     } finally {
       await collector.stop();
@@ -498,13 +498,35 @@ console.log(JSON.stringify({
   result: {
     payloads: [{
       text: JSON.stringify({
-        schemaVersion: "agent-analysis-v1",
-        promptKind: "daily_operation_review",
-        summary: "Queue triage dominated the day.",
-        taskTypeBreakdown: [],
-        typicalCases: [],
+        periodPerformance: {
+          workload: "Queue triage dominated the day.",
+          completion: "Most sessions completed.",
+          latency: "Latency stayed within normal range.",
+          failurePattern: "No repeated failure pattern."
+        },
+        taskTypes: [{
+          label: "队列整理",
+          countEstimate: 1,
+          description: "整理任务队列并输出结论。",
+          satisfaction: {
+            level: "positive",
+            reason: "User confirmed the result.",
+            evidenceIds: ["session_1"]
+          },
+          cases: [{
+            id: "session_1",
+            title: "Queue triage",
+            signal: "positive",
+            outcome: "Completed.",
+            reason: "Representative successful session."
+          }]
+        }],
         risks: [],
-        dataQualityNotes: ["Only sampled tasks were reviewed."]
+        actions: [{
+          title: "沉淀流程",
+          reason: "Repeatable queue triage work can be documented.",
+          evidenceIds: ["session_1"]
+        }]
       })
     }],
     meta: {
@@ -570,8 +592,10 @@ console.log(JSON.stringify({
       expect(progressStages).toEqual(expect.arrayContaining(["accepted", "executing", "result_received"]));
       expect(result).toMatchObject({
         analysis: {
-          schemaVersion: "agent-analysis-v1",
-          summary: "Queue triage dominated the day.",
+          periodPerformance: expect.objectContaining({
+            workload: "Queue triage dominated the day.",
+          }),
+          taskTypes: [expect.objectContaining({ label: "队列整理" })],
         },
         deviceId: "analysis-device",
         durationMs: 10842,
@@ -626,7 +650,7 @@ console.log(JSON.stringify({
       deviceToken: "upgrade-token",
       installDir,
     }));
-    const packageFiles = createUpgradePackageFiles("0.1.5");
+    const packageFiles = createUpgradePackageFiles("0.1.6");
     const upgradeServer = await startCollectorUpgradeServer({
       deviceId: "unsafe-upgrade-device",
       manifestOverride: {
@@ -634,7 +658,7 @@ console.log(JSON.stringify({
         path: "../config.json",
       },
       packageFiles,
-      targetVersion: "0.1.5",
+      targetVersion: "0.1.6",
     });
     const collector = createCollectorProcessTracker();
 
@@ -1749,7 +1773,7 @@ async function startCollectorAnalysisServer(options: { deviceId: string }): Prom
           agentId: `${options.deviceId}:runtime:openclaw:agent:main`,
           openclawAgentId: "main",
           promptKind: "daily_operation_review",
-          promptVersion: "openclaw-agent-analysis-v1",
+          promptVersion: "openclaw-agent-operation-analysis-v2",
           periodStart: "2026-06-01T16:00:00.000Z",
           periodEnd: "2026-06-02T16:00:00.000Z",
           prompt: "Return JSON only.",

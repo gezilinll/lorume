@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import deviceStateFixture from "../../fixtures/runtime/runtime-fleet-device-state.sample.json";
 import { hashSecret } from "../auth/auth-crypto";
@@ -331,22 +331,41 @@ describeDb("standalone Lorume backend server with Postgres", () => {
         durationMs: 10842,
         modelMetadata: { model: "gpt-test", provider: "openai", usage: { input: 1, output: 2, cacheRead: 0, total: 3 } },
         analysis: {
-          schemaVersion: "agent-analysis-v1",
-          promptKind: "daily_operation_review",
-          summary: "Queue triage dominated the day.",
-          taskTypeBreakdown: [],
-          typicalCases: [
+          periodPerformance: {
+            workload: "任务量稳定。",
+            completion: "周期内已完成主要会话。",
+            latency: "耗时表现正常。",
+            failurePattern: "未发现集中失败。",
+          },
+          taskTypes: [
             {
-              taskId: "analysis-device:runtime:openclaw:agent:main:task:done",
-              title: "Queue triage",
-              whyTypical: "It is the sampled completed task.",
-              outcome: "Completed",
-              status: "done",
-              evidence: "The task asks for queue summarization.",
+              label: "队列整理",
+              countEstimate: 1,
+              description: "处理队列整理和摘要请求。",
+              satisfaction: {
+                level: "positive",
+                reason: "任务顺利闭环。",
+                evidenceIds: ["session_backend_1"],
+              },
+              cases: [
+                {
+                  id: "session_backend_1",
+                  title: "Queue triage",
+                  signal: "positive",
+                  outcome: "Completed",
+                  reason: "It is the completed session in the period.",
+                },
+              ],
             },
           ],
           risks: [],
-          dataQualityNotes: ["Only sampled tasks were reviewed."],
+          actions: [
+            {
+              title: "沉淀队列摘要模板",
+              reason: "减少重复说明成本。",
+              evidenceIds: ["session_backend_1"],
+            },
+          ],
         },
       }));
 
@@ -355,11 +374,12 @@ describeDb("standalone Lorume backend server with Postgres", () => {
         expect.objectContaining({
           agentId: "analysis-device:runtime:openclaw:agent:main",
           analysis: expect.objectContaining({
-            summary: "Queue triage dominated the day.",
+            taskTypes: [expect.objectContaining({ label: "队列整理" })],
           }),
           modelMetadata: expect.objectContaining({
             model: "gpt-test",
           }),
+          promptVersion: "openclaw-agent-operation-analysis-v2",
           runtimeKind: "openclaw",
         }),
       ]);
@@ -367,6 +387,36 @@ describeDb("standalone Lorume backend server with Postgres", () => {
       if (socket && socket.readyState === WebSocket.OPEN) socket.close();
       if (backend) await closeRegisteredBackend(backend);
       await database.drop();
+    }
+  });
+
+  it("does not start the Agent analysis scheduler unless explicitly enabled", async () => {
+    vi.useFakeTimers();
+    let schedulerTargetReads = 0;
+    const backend = createLorumeBackendServer({
+      agentAnalysisStore: {
+        close: async () => undefined,
+        hasReport: async () => false,
+        listOpenClawMainTargets: async () => {
+          schedulerTargetReads += 1;
+          return [];
+        },
+      } as never,
+      agentAnalysisSchedulerIntervalMs: 1,
+      host: "127.0.0.1",
+      operationRunnerIntervalMs: 1_000,
+      operationStore: {
+        close: async () => undefined,
+      } as never,
+      port: 0,
+    });
+    try {
+      await backend.listen();
+      await vi.advanceTimersByTimeAsync(1_200);
+      expect(schedulerTargetReads).toBe(0);
+    } finally {
+      await backend.close();
+      vi.useRealTimers();
     }
   });
 

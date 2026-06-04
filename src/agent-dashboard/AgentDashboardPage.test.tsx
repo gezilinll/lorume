@@ -97,7 +97,7 @@ const report = {
   periodStart: "2026-06-01T16:00:00.000Z",
   periodEnd: "2026-06-02T16:00:00.000Z",
   promptKind: "daily_operation_review",
-  promptVersion: "openclaw-agent-analysis-v1",
+  promptVersion: "openclaw-agent-operation-analysis-v2",
   hardMetrics: {
     duration: {
       basis: "trajectoryElapsed",
@@ -117,32 +117,39 @@ const report = {
     unknownCount: 3,
   },
   analysis: {
-    schemaVersion: "agent-analysis-v1",
-    promptKind: "daily_operation_review",
-    summary: "Queue triage dominated the day.",
-    satisfactionScore: 0.98,
-    taskTypeBreakdown: [{
-      confidence: "high",
-      countEstimate: 14,
-      evidenceTaskIds: ["task_9bd3"],
+    periodPerformance: {
+      workload: "工作量稳定。",
+      completion: "多数任务闭环。",
+      latency: "耗时表现正常。",
+      failurePattern: "失败集中在设备环境差异。",
+    },
+    taskTypes: [{
       label: "collector / 设备运维",
-      type: "collector_ops",
-    }],
-    typicalCases: [{
-      evidence: "PATH 中没有 openclaw。",
-      outcome: "修复 collector 命令发现策略。",
-      status: "failed",
-      taskId: "task_9bd3",
-      title: "真实设备分析执行失败排查",
-      whyTypical: "反映服务环境差异。",
+      countEstimate: 14,
+      description: "主要处理 collector 与真实设备环境问题。",
+      satisfaction: {
+        level: "mixed",
+        reason: "问题推进但出现重复排查。",
+        evidenceIds: ["session_9bd3"],
+      },
+      cases: [{
+        id: "session_9bd3",
+        title: "真实设备分析执行失败排查",
+        signal: "mixed",
+        outcome: "修复 collector 命令发现策略。",
+        reason: "反映服务环境差异。",
+      }],
     }],
     risks: [{
       description: "服务进程 PATH 可能不同。",
-      evidenceTaskIds: ["task_9bd3"],
-      severity: "medium",
+      evidenceIds: ["session_9bd3"],
       title: "collector 环境差异",
     }],
-    dataQualityNotes: ["Only sampled tasks were reviewed."],
+    actions: [{
+      title: "补充环境诊断",
+      reason: "降低同类问题排查成本。",
+      evidenceIds: ["session_9bd3"],
+    }],
   },
   modelMetadata: {
     model: "gpt-test",
@@ -153,25 +160,32 @@ const report = {
 };
 
 describe("AgentDashboardPage", () => {
-  it("renders hard metrics and Agent self-analysis from the latest report", async () => {
+  it("renders a productized operations dashboard from the latest v2 report", async () => {
     installDashboardFetch({ reports: [report] });
 
     render(<AgentDashboardPage initialAgentId={agentId} organizationId="org_1" />);
 
     expect(await screen.findByRole("heading", { name: "Agent 看板" })).toBeInTheDocument();
     expect(screen.getByText("OpenClaw main")).toBeInTheDocument();
-    expect(screen.getAllByText("系统计算").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "运行概览" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "任务类型" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "用户反馈" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "典型案例" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "风险与建议" })).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText("5 / 3")).toBeInTheDocument();
     expect(screen.getByText("18m 12s / 46m 03s")).toBeInTheDocument();
-    expect(screen.getByText("Agent 自评")).toBeInTheDocument();
-    expect(screen.getByText("Queue triage dominated the day.")).toBeInTheDocument();
     expect(screen.getAllByText("collector / 设备运维").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("分化明显").length).toBeGreaterThan(0);
     expect(screen.getByText("真实设备分析执行失败排查")).toBeInTheDocument();
     expect(screen.getByText("collector 环境差异")).toBeInTheDocument();
-    expect(screen.getByText("Only sampled tasks were reviewed.")).toBeInTheDocument();
+    expect(screen.getByText("补充环境诊断")).toBeInTheDocument();
+    expect(screen.queryByText("系统计算")).not.toBeInTheDocument();
+    expect(screen.queryByText("硬指标")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent 自评")).not.toBeInTheDocument();
+    expect(screen.queryByText("边界说明")).not.toBeInTheDocument();
+    expect(screen.queryByText("置信度")).not.toBeInTheDocument();
     expect(screen.queryByText(/satisfaction/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/0\.98/)).not.toBeInTheDocument();
   });
 
   it("creates an analysis run and displays Operation progress", async () => {
@@ -186,8 +200,9 @@ describe("AgentDashboardPage", () => {
         pathname: "/api/agent-analysis-runs",
       }), expect.objectContaining({ method: "POST" }));
     });
-    const operationPanel = await screen.findByLabelText("分析任务");
-    expect(within(operationPanel).getByText("executing")).toBeInTheDocument();
+    const operationPanel = (await screen.findByRole("heading", { name: "分析任务" })).closest("[data-slot='card']") as HTMLElement | null;
+    if (!operationPanel) throw new Error("analysis operation card was not rendered");
+    expect(within(operationPanel).getByText("分析中")).toBeInTheDocument();
     expect(within(operationPanel).getByText("执行中")).toBeInTheDocument();
     expect(within(operationPanel).queryByText(/nonce/i)).not.toBeInTheDocument();
   });
@@ -198,7 +213,7 @@ describe("AgentDashboardPage", () => {
     const { rerender } = render(<AgentDashboardPage initialAgentId={agentId} organizationId="org_1" />);
 
     expect(await screen.findByText("暂无分析报告")).toBeInTheDocument();
-    expect(screen.queryByText("Agent 自评")).not.toBeInTheDocument();
+    expect(screen.queryByText("用户反馈")).not.toBeInTheDocument();
 
     rerender(<AgentDashboardPage initialAgentId={codexAgentId} organizationId="org_1" />);
 

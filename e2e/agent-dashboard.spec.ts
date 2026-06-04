@@ -45,20 +45,27 @@ test.describe("Agent 看板", () => {
     await expect(page).toHaveURL(/\/agent-dashboard$/);
     await expect(page.getByRole("heading", { name: "Agent 看板" })).toBeVisible();
     await expect(page.getByText("Queue triage dominated the day.")).toBeVisible();
-    await expect(page.getByText("系统计算").first()).toBeVisible();
-    await expect(page.getByText("Agent 自评").first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "任务类型归纳" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "运行表现" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "任务类型" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "用户反馈" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "典型案例" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "风险与建议" })).toBeVisible();
     await expect(page.getByText("结果证据不足")).toBeVisible();
-    await expect(page.getByText("Agent 自评只基于 prompt 样本。")).toBeVisible();
+    await expect(page.getByText("补齐结果回执")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("系统计算");
+    await expect(page.locator("body")).not.toContainText("硬指标");
+    await expect(page.locator("body")).not.toContainText("Agent 自评");
+    await expect(page.locator("body")).not.toContainText("边界说明");
+    await expect(page.locator("body")).not.toContainText("置信度");
     await expect(page.locator("body")).not.toContainText("satisfactionScore");
+    await expect(page.locator("body")).not.toContainText("satisfaction");
     await expect(page.locator("body")).not.toContainText("nonce");
     await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "任务中心" })).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "通知中心" })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
 
     await page.getByRole("button", { name: "运行分析" }).click();
-    await expect(page.getByRole("complementary", { name: "报告和任务状态" })).toContainText("执行中");
+    await expect(page.getByRole("complementary", { name: "报告和任务状态" })).toContainText("分析中");
     await expect(page.getByRole("complementary", { name: "报告和任务状态" })).toContainText("fake collector executing analysis");
 
     await page.getByRole("button", { name: "Runtime Fleet" }).click();
@@ -108,38 +115,47 @@ function agentAnalysisReportResponse() {
   return {
     agentId: defaultAgentId,
     analysis: {
-      schemaVersion: "agent-analysis-v1",
-      promptKind: "daily_operation_review",
-      summary: "Queue triage dominated the day.",
-      taskTypeBreakdown: [
+      periodPerformance: {
+        completion: "多数任务完成，少量任务缺少清晰结果回执。",
+        failurePattern: "失败集中在工具调用和证据不足的任务。",
+        latency: "常规会话耗时稳定，复杂分析会拉高 P90。",
+        workload: "Queue triage dominated the day.",
+      },
+      taskTypes: [
         {
-          confidence: "high",
+          cases: [
+            {
+              id: fixture.tasks[0].id,
+              outcome: "Delivered a reviewed implementation path.",
+              reason: "Combines planning, backend work, and validation.",
+              signal: "mixed",
+              title: "Collector upgrade analysis",
+            },
+          ],
           countEstimate: 2,
-          evidenceTaskIds: [fixture.tasks[0].id],
+          description: "用户围绕实现方案、边界和验收方式反复确认。",
           label: "需求澄清",
-          type: "conversation",
-        },
-      ],
-      typicalCases: [
-        {
-          evidence: "The sampled task requested implementation and validation.",
-          outcome: "Delivered a reviewed implementation path.",
-          status: "done",
-          taskId: fixture.tasks[0].id,
-          title: "Collector upgrade analysis",
-          whyTypical: "Combines planning, backend work, and validation.",
+          satisfaction: {
+            evidenceIds: [fixture.tasks[0].id],
+            level: "mixed",
+            reason: "任务推进有效，但存在多轮补充和返工信号。",
+          },
         },
       ],
       risks: [
         {
           description: "Some sampled tasks have limited result evidence.",
-          evidenceTaskIds: [fixture.tasks[0].id],
-          severity: "medium",
+          evidenceIds: [fixture.tasks[0].id],
           title: "结果证据不足",
         },
       ],
-      dataQualityNotes: ["Agent 自评只基于 prompt 样本。"],
-      satisfactionScore: 97,
+      actions: [
+        {
+          evidenceIds: [fixture.tasks[0].id],
+          reason: "复杂任务完成后补充可检查的结果说明。",
+          title: "补齐结果回执",
+        },
+      ],
     },
     createdAt: "2026-06-03T08:20:00.000Z",
     deviceId: defaultDeviceId,
@@ -172,7 +188,7 @@ function agentAnalysisReportResponse() {
     periodEnd: "2026-06-03T16:00:00.000Z",
     periodStart: "2026-06-02T16:00:00.000Z",
     promptKind: "daily_operation_review",
-    promptVersion: "openclaw-agent-analysis-v1",
+    promptVersion: "openclaw-agent-operation-analysis-v2",
     runtimeId: defaultRuntimeId,
     runtimeKind: "openclaw",
   };

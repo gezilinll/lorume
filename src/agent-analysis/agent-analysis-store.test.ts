@@ -69,12 +69,6 @@ describeDb("Postgres agent analysis store", () => {
           taskTypeCounts: { conversation: 2, scheduled: 1 },
           totalTasks: 3,
         });
-        expect(metrics.sampledTasks.map((task) => task.id)).toEqual([
-          "fixture-mac:runtime:openclaw:agent:main:task:failed",
-          "fixture-mac:runtime:openclaw:agent:main:task:done",
-          "fixture-mac:runtime:openclaw:agent:main:task:running",
-        ]);
-
         const operation = await operationStore.createOperation({
           organizationId: organization.id,
           resourceId: "fixture-mac:runtime:openclaw:agent:main",
@@ -87,13 +81,35 @@ describeDb("Postgres agent analysis store", () => {
         const reportInput: Parameters<AgentAnalysisStore["upsertReport"]>[0] = {
           agentId: "fixture-mac:runtime:openclaw:agent:main",
           analysis: {
-            schemaVersion: "agent-analysis-v1",
-            promptKind: "daily_operation_review",
-            summary: "Queue triage dominated the day.",
-            taskTypeBreakdown: [],
-            typicalCases: [],
+            periodPerformance: {
+              completion: "多数任务完成。",
+              failurePattern: "少量工具失败需要关注。",
+              latency: "耗时集中在数分钟内。",
+              workload: "队列整理是主要工作。",
+            },
+            taskTypes: [{
+              cases: [{
+                id: "fixture-mac:runtime:openclaw:agent:main:task:done",
+                outcome: "完成队列总结。",
+                reason: "能代表本周期常见整理需求。",
+                signal: "positive",
+                title: "队列总结",
+              }],
+              countEstimate: 1,
+              description: "整理和总结队列中的任务。",
+              label: "队列整理",
+              satisfaction: {
+                evidenceIds: ["fixture-mac:runtime:openclaw:agent:main:task:done"],
+                level: "positive",
+                reason: "任务顺利完成并得到确认。",
+              },
+            }],
             risks: [],
-            dataQualityNotes: ["Only sampled tasks were reviewed."],
+            actions: [{
+              evidenceIds: ["fixture-mac:runtime:openclaw:agent:main:task:done"],
+              reason: "常见整理任务可沉淀复用流程。",
+              title: "沉淀队列整理流程",
+            }],
           },
           deviceId: "fixture-mac",
           hardMetrics: metrics.hardMetrics,
@@ -103,7 +119,7 @@ describeDb("Postgres agent analysis store", () => {
           periodEnd: "2026-06-02T16:00:00.000Z",
           periodStart: "2026-06-01T16:00:00.000Z",
           promptKind: "daily_operation_review",
-          promptVersion: "openclaw-agent-analysis-v1",
+          promptVersion: "openclaw-agent-operation-analysis-v2",
           runtimeId: "fixture-mac:runtime:openclaw",
           runtimeKind: "openclaw",
         };

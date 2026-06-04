@@ -4,14 +4,14 @@
 
 This spec covers the first backend-only Agent Dashboard loop for OpenClaw. It supports only `Runtime.kind=openclaw` and OpenClaw external Agent id `main`.
 
-Lorume creates an `agent_analysis` Operation manually through API or automatically through the backend scheduler. The Job Runner dispatches one restricted prompt over the authenticated collector WebSocket. The collector executes only the fixed OpenClaw Agent analysis command, returns structured JSON, and the backend validates the result before writing an internal report row.
+Lorume creates an `agent_analysis` Operation manually through API or through the explicitly enabled backend scheduler. The Job Runner dispatches one restricted prompt over the authenticated collector WebSocket. The collector executes only the fixed OpenClaw Agent analysis command, returns structured JSON, and the backend validates the result before writing an internal report row.
 
 Out of scope for this phase:
 
 - Frontend Dashboard pages or charts.
 - Slock, Codex, or non-OpenClaw Runtime analysis.
 - OpenClaw Agents other than `main`.
-- Satisfaction, NPS, rating, or user sentiment estimation.
+- Global satisfaction, NPS, ratings, or emotion scoring. The Agent may only return task-type-level user feedback tendency from conversation evidence.
 - Arbitrary command execution, message delivery, external task mutation, or schedule mutation.
 
 ## Operation and Job
@@ -35,7 +35,7 @@ The Job payload stores:
 - `periodStart`
 - `periodEnd`
 - `promptKind = daily_operation_review`
-- `promptVersion = openclaw-agent-analysis-v1`
+- `promptVersion = openclaw-agent-operation-analysis-v2`
 - `nonce`
 - `deadlineAt`
 - `timeoutSeconds`
@@ -94,62 +94,80 @@ The first hard metric set includes:
 
 ## Prompt Contract
 
-The backend prompt contains:
+The backend prompt is written in Chinese and contains:
 
 - hard metrics JSON
-- deterministic sampled Task summaries
-- output schema
+- the requested `periodStart` / `periodEnd`
+- the complete output JSON contract
+- instructions to analyze only records where `periodStart <= eventTime < periodEnd`
+- instructions to use session/conversation history as the primary analysis grain
+- instructions that cross-period sessions may use outside-window context only for light understanding, never as current-period evidence
+- instructions that the Agent must read its own history, trajectory, or equivalent records in its runtime environment
+- analysis steps for locating period sessions, understanding context, grouping task types, judging per-task-type user feedback, selecting cases, and producing risks/actions
 - explicit instruction to return raw JSON only
-- explicit instruction not to infer user approval, ratings, NPS, or equivalent subjective score
-- explicit instruction not to deliver messages, mutate external tasks, schedule work, or execute unrelated actions
+- explicit instruction not to add fields outside the JSON contract
+- explicit instruction not to deliver messages, mutate files, mutate external tasks, schedule work, or execute unrelated actions
+
+The backend does not send full sessions or sampled Task summaries to the Agent. Hard metrics are included only as compact context for workload, status, and duration.
 
 Agent JSON output:
 
 ```json
 {
-  "schemaVersion": "agent-analysis-v1",
-  "promptKind": "daily_operation_review",
-  "summary": "string",
-  "taskTypeBreakdown": [
+  "periodPerformance": {
+    "workload": "string",
+    "completion": "string",
+    "latency": "string",
+    "failurePattern": "string"
+  },
+  "taskTypes": [
     {
-      "type": "string",
       "label": "string",
       "countEstimate": 0,
-      "confidence": "high|medium|low",
-      "evidenceTaskIds": ["..."]
-    }
-  ],
-  "typicalCases": [
-    {
-      "taskId": "...",
-      "title": "string",
-      "whyTypical": "string",
-      "outcome": "string",
-      "status": "done|failed|cancelled|unknown",
-      "evidence": "string"
+      "description": "string",
+      "satisfaction": {
+        "level": "positive|mixed|negative|unknown",
+        "reason": "string",
+        "evidenceIds": ["..."]
+      },
+      "cases": [
+        {
+          "id": "...",
+          "title": "string",
+          "signal": "positive|mixed|negative|unknown",
+          "outcome": "string",
+          "reason": "string"
+        }
+      ]
     }
   ],
   "risks": [
     {
       "title": "string",
-      "severity": "high|medium|low",
-      "evidenceTaskIds": ["..."],
-      "description": "string"
+      "description": "string",
+      "evidenceIds": ["..."]
     }
   ],
-  "dataQualityNotes": ["string"]
+  "actions": [
+    {
+      "title": "string",
+      "reason": "string",
+      "evidenceIds": ["..."]
+    }
+  ]
 }
 ```
 
 Validation rules:
 
-- `schemaVersion` must be `agent-analysis-v1`.
-- `promptKind` must be `daily_operation_review`.
 - Markdown-wrapped output is invalid.
-- Top-level or nested satisfaction-related fields are invalid.
-- `typicalCases[].taskId` and evidence task ids must come from sampled Task ids in the prompt.
+- Top-level keys must be exactly `periodPerformance`, `taskTypes`, `risks`, and `actions`.
+- `taskTypes[].satisfaction.level` and `taskTypes[].cases[].signal` must be `positive`, `mixed`, `negative`, or `unknown`.
+- Global satisfaction fields such as `satisfaction`, `userSatisfaction`, `satisfactionScore`, `nps`, or rating fields are invalid.
+- `evidenceIds` arrays must contain at least one non-empty string because evidence comes from Agent-readable sessions, trajectories, Tasks, or stable history ids.
 - Text and array fields have bounded lengths.
 - Reports are written only after validation passes.
+- The backend may derive a global feedback tendency from `taskTypes[].satisfaction.level` weighted by `countEstimate`; the Agent must not output one.
 
 ## Backend API
 
@@ -181,11 +199,12 @@ Returns one member-visible report.
 
 ## Scheduler
 
-The standalone backend process includes a lightweight scheduler. It creates previous-day Asia/Shanghai `agent_analysis` Operations for OpenClaw `main` Agents.
+The standalone backend process includes a lightweight scheduler, but it is disabled by default. When explicitly enabled, it creates previous-day Asia/Shanghai `agent_analysis` Operations for OpenClaw `main` Agents.
 
 Controls:
 
-- `LORUME_AGENT_ANALYSIS_SCHEDULER_ENABLED=false` disables the scheduler.
+- `LORUME_AGENT_ANALYSIS_SCHEDULER_ENABLED=true` enables the scheduler.
+- Unset or `false` keeps the scheduler disabled.
 - `LORUME_AGENT_ANALYSIS_SCHEDULER_INTERVAL_MS` controls poll interval.
 
 Dedupe:
@@ -226,7 +245,7 @@ Allowed request values:
 - `runtimeId` for OpenClaw
 - `openclawAgentId = main`
 - `promptKind = daily_operation_review`
-- `promptVersion = openclaw-agent-analysis-v1`
+- `promptVersion = openclaw-agent-operation-analysis-v2`
 
 Fixed command:
 

@@ -139,16 +139,16 @@ Rules:
 
 ## Agent 看板
 
-Purpose: Show OpenClaw `main` Agent daily operation reports from backend Agent Analysis, separating system-calculated hard metrics from Agent self-analysis.
+Purpose: Show OpenClaw `main` Agent daily operation reports from backend Agent Analysis as a manager-facing operational dashboard.
 
 Rules:
 
 - The page uses the `data-dense` Console layout tier, the shared top workbar, a compact target/report control surface, a left report body, and a right report/status rail.
 - The first phase only supports `Runtime.kind=openclaw` and OpenClaw external Agent id `main`. Unsupported targets show `不支持分析` instead of pretending data is missing.
-- Hard metrics are labeled `系统计算` and come from backend-calculated Task data. Agent narrative sections are labeled `Agent 自评`.
-- Do not show `satisfaction`、`satisfactionScore`、NPS、用户情绪估计 or any user satisfaction estimate, even if an unexpected backend payload contains such fields.
-- The report body shows task totals, status distribution, failed/unknown counts, recent activity, done/failed duration metrics, task type breakdown, typical cases, risks, and data quality notes.
-- The side rail shows report history, current analysis Operation status, model/provider usage metadata when available, and a concise source boundary note.
+- The report body uses product modules: `运行概览`, `运行表现`, `任务类型`, `用户反馈`, `典型案例`, and `风险与建议`.
+- Do not show `系统计算`, `硬指标`, `Agent 自评`, `边界说明`, `置信度`, raw `satisfaction`, `satisfactionScore`, NPS, scores, or emotion labels. Per-task-type feedback may be shown only as localized product copy: `偏正向`, `分化明显`, `偏负向`, or `证据不足`.
+- The report body shows task totals, status distribution, failed/unknown counts, recent activity, done/failed duration metrics, task type breakdown, user feedback by task type, typical cases, risks, and suggested actions.
+- The side rail shows report history and current analysis Operation status without emphasizing Operation IDs.
 - `运行分析` creates an `agent_analysis` Operation through the backend API, then polls the Operation detail for progress. It does not directly contact collector or execute real-device commands from the browser.
 - The page must not display raw prompt text, nonce, backend raw payload, device token, session token, cookie, OpenClaw secret, or debug-only fields.
 

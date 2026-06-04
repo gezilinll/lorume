@@ -3,10 +3,10 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  Bot,
   CalendarDays,
   FileText,
   ListChecks,
+  MessageSquareText,
   Play,
   RefreshCw,
 } from "lucide-react";
@@ -249,9 +249,12 @@ export function AgentDashboardPage({ initialAgentId, organizationId }: AgentDash
               <HardMetricStrip hardMetrics={selectedReport.hardMetrics} />
               <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.36fr)]">
                 <div className="min-w-0 space-y-4">
-                  <HardMetricsCard hardMetrics={selectedReport.hardMetrics} />
-                  <AgentAnalysisCard analysis={selectedReport.analysis} />
-                  <TaskTypeTable analysis={selectedReport.analysis} hardMetrics={selectedReport.hardMetrics} />
+                  <PerformanceCard analysis={selectedReport.analysis} />
+                  <TaskTypesCard analysis={selectedReport.analysis} />
+                  <FeedbackCard analysis={selectedReport.analysis} />
+                  <CasesCard analysis={selectedReport.analysis} />
+                  <RisksAndActionsCard analysis={selectedReport.analysis} />
+                  <TaskStatusCard hardMetrics={selectedReport.hardMetrics} />
                 </div>
                 <aside className="min-w-0 space-y-4 xl:sticky xl:top-20" aria-label="报告和任务状态">
                   <OperationCard detail={operationDetail} report={selectedReport} />
@@ -260,7 +263,6 @@ export function AgentDashboardPage({ initialAgentId, organizationId }: AgentDash
                     selectedReportId={selectedReport.id}
                     onSelect={setSelectedReportId}
                   />
-                  <BoundaryCard modelMetadata={selectedReport.modelMetadata} />
                 </aside>
               </section>
             </>
@@ -357,25 +359,28 @@ function AgentTargetBar({
 
 function HardMetricStrip({ hardMetrics }: { hardMetrics: AgentDashboardHardMetrics }) {
   return (
-    <section className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="硬指标概览">
-      <MetricTile label="任务总数" meta="period 内 Task 总数" value={String(hardMetrics.totalTasks)} />
-      <MetricTile
-        label="失败 / Unknown"
-        meta="unknown 不参与平均耗时"
-        tone="warning"
-        value={`${hardMetrics.failedCount} / ${hardMetrics.unknownCount}`}
-      />
-      <MetricTile
-        label="Avg / P90 耗时"
-        meta="仅 done、failed 进入统计"
-        value={`${formatDuration(hardMetrics.duration.avgMs)} / ${formatDuration(hardMetrics.duration.p90Ms)}`}
-      />
-      <MetricTile
-        label="最近活跃"
-        meta="updated_source_at 最大值"
-        tone="success"
-        value={hardMetrics.lastActiveAt ? formatTimeOnly(hardMetrics.lastActiveAt) : "未上报"}
-      />
+    <section className="min-w-0 space-y-2" aria-labelledby="agent-dashboard-overview-title">
+      <h2 id="agent-dashboard-overview-title" className="text-sm font-bold text-foreground">运行概览</h2>
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MetricTile label="任务总数" meta="本周期内已采集任务" value={String(hardMetrics.totalTasks)} />
+        <MetricTile
+          label="失败 / 未知"
+          meta="需要关注的异常任务"
+          tone="warning"
+          value={`${hardMetrics.failedCount} / ${hardMetrics.unknownCount}`}
+        />
+        <MetricTile
+          label="平均 / P90 耗时"
+          meta="已完成和失败任务的执行耗时"
+          value={`${formatDuration(hardMetrics.duration.avgMs)} / ${formatDuration(hardMetrics.duration.p90Ms)}`}
+        />
+        <MetricTile
+          label="最近活跃"
+          meta="本周期最后一次任务更新"
+          tone="success"
+          value={hardMetrics.lastActiveAt ? formatTimeOnly(hardMetrics.lastActiveAt) : "未上报"}
+        />
+      </div>
     </section>
   );
 }
@@ -396,7 +401,7 @@ function MetricTile({
       <CardContent>
         <div className="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
           <span>{label}</span>
-          <Pill tone={tone === "warning" ? "orange" : tone === "success" ? "green" : "blue"}>系统计算</Pill>
+          <Pill tone={tone === "warning" ? "orange" : tone === "success" ? "green" : "blue"}>{tone === "warning" ? "关注" : tone === "success" ? "正常" : "概览"}</Pill>
         </div>
         <div className="mt-3 text-2xl font-black tracking-normal text-foreground">{value}</div>
         <p className="mt-2 text-xs text-muted-foreground">{meta}</p>
@@ -405,18 +410,18 @@ function MetricTile({
   );
 }
 
-function HardMetricsCard({ hardMetrics }: { hardMetrics: AgentDashboardHardMetrics }) {
+function TaskStatusCard({ hardMetrics }: { hardMetrics: AgentDashboardHardMetrics }) {
   const total = Math.max(1, hardMetrics.totalTasks);
   const doneCount = hardMetrics.statusCounts.done ?? 0;
   const failedCount = hardMetrics.statusCounts.failed ?? 0;
   const unknownCount = hardMetrics.statusCounts.unknown ?? 0;
   const cancelledCount = hardMetrics.statusCounts.cancelled ?? 0;
   return (
-    <Card aria-label="硬指标" size="sm">
+    <Card size="sm">
       <CardHeader className="border-b">
-        <CardTitle className="flex items-center justify-between gap-3">
-          <span className="inline-flex items-center gap-2"><BarChart3 className="size-4" aria-hidden="true" />硬指标</span>
-          <span className="text-xs font-normal text-muted-foreground">系统从已入库 OpenClaw Task 计算</span>
+        <CardTitle aria-label="任务状态" aria-level={2} className="flex items-center justify-between gap-3" role="heading">
+          <span className="inline-flex items-center gap-2"><BarChart3 className="size-4" aria-hidden="true" />任务状态</span>
+          <span className="text-xs font-normal text-muted-foreground">完成、失败和未知任务分布</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -450,132 +455,157 @@ function HardMetricsCard({ hardMetrics }: { hardMetrics: AgentDashboardHardMetri
   );
 }
 
-function AgentAnalysisCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
+function PerformanceCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
   return (
-    <Card aria-label="Agent 自评分析" size="sm">
+    <Card size="sm">
       <CardHeader className="border-b">
-        <CardTitle className="flex items-center gap-2">
-          <Bot className="size-4" aria-hidden="true" />
-          Agent 自评
+        <CardTitle aria-level={2} className="flex items-center gap-2" role="heading">
+          <Activity className="size-4" aria-hidden="true" />
+          运行表现
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="border-l-2 border-primary pl-3 text-sm leading-7 text-foreground">{analysis.summary}</p>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section>
-            <h3 className="mb-2 text-xs font-bold text-foreground">任务类型归纳</h3>
-            <div className="space-y-2">
-              {analysis.taskTypeBreakdown.length ? analysis.taskTypeBreakdown.map((item) => (
-                <div className="rounded-[10px] border bg-background p-3" key={`${item.type}-${item.label}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <strong className="min-w-0 truncate text-sm">{item.label}</strong>
-                    <Pill tone={confidenceTone(item.confidence)}>{item.countEstimate} {item.confidence}</Pill>
-                  </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">证据: {item.evidenceTaskIds.join(", ") || "无"}</p>
-                </div>
-              )) : <p className="text-sm text-muted-foreground">Agent 未返回任务类型归纳。</p>}
-            </div>
-          </section>
-          <section>
-            <h3 className="mb-2 text-xs font-bold text-foreground">数据质量说明</h3>
-            <div className="space-y-2">
-              {analysis.dataQualityNotes.length ? analysis.dataQualityNotes.map((note) => (
-                <p className="rounded-[10px] border border-dashed bg-muted/30 p-3 text-sm leading-6 text-muted-foreground" key={note}>{note}</p>
-              )) : <p className="text-sm text-muted-foreground">Agent 未返回数据质量说明。</p>}
-            </div>
-          </section>
+      <CardContent>
+        <div className="grid gap-3 md:grid-cols-2">
+          <InsightBlock label="工作量" text={analysis.periodPerformance.workload} />
+          <InsightBlock label="完成情况" text={analysis.periodPerformance.completion} />
+          <InsightBlock label="耗时表现" text={analysis.periodPerformance.latency} />
+          <InsightBlock label="异常模式" text={analysis.periodPerformance.failurePattern} />
         </div>
-        <section>
-          <h3 className="mb-2 text-xs font-bold text-foreground">典型案例</h3>
-          <div className="overflow-x-auto">
-            <Table aria-label="典型案例">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Task</TableHead>
-                  <TableHead>标题</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>为什么典型</TableHead>
-                  <TableHead>结果</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {analysis.typicalCases.length ? analysis.typicalCases.map((item) => (
-                  <TableRow key={item.taskId}>
-                    <TableCell className="font-mono text-xs">{item.taskId}</TableCell>
-                    <TableCell className="font-medium">{item.title}</TableCell>
-                    <TableCell><Pill tone={caseStatusTone(item.status)}>{item.status}</Pill></TableCell>
-                    <TableCell className="min-w-[220px] text-muted-foreground">{item.whyTypical}</TableCell>
-                    <TableCell className="min-w-[200px] text-muted-foreground">{item.outcome}</TableCell>
-                  </TableRow>
-                )) : (
-                  <TableRow><TableCell colSpan={5} className="text-muted-foreground">Agent 未返回典型案例。</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-        <section>
-          <h3 className="mb-2 text-xs font-bold text-foreground">风险</h3>
-          <div className="space-y-2">
-            {analysis.risks.length ? analysis.risks.map((risk) => (
-              <div className="rounded-[10px] border p-3" key={risk.title}>
-                <div className="flex items-center justify-between gap-2">
-                  <strong className="text-sm">{risk.title}</strong>
-                  <Pill tone={confidenceTone(risk.severity)}>{risk.severity}</Pill>
-                </div>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">{risk.description}</p>
-              </div>
-            )) : <p className="text-sm text-muted-foreground">Agent 未返回风险。</p>}
-          </div>
-        </section>
       </CardContent>
     </Card>
   );
 }
 
-function TaskTypeTable({
-  analysis,
-  hardMetrics,
-}: {
-  analysis: AgentDashboardAnalysis;
-  hardMetrics: AgentDashboardHardMetrics;
-}) {
+function TaskTypesCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
   return (
     <Card size="sm">
       <CardHeader className="border-b">
-        <CardTitle className="flex items-center justify-between gap-3">
-          <span className="inline-flex items-center gap-2"><ListChecks className="size-4" aria-hidden="true" />任务类型分布</span>
-          <span className="text-xs font-normal text-muted-foreground">hardMetrics.taskTypeCounts + Agent 自评归纳并列阅读</span>
+        <CardTitle aria-label="任务类型" aria-level={2} className="flex items-center justify-between gap-3" role="heading">
+          <span className="inline-flex items-center gap-2"><ListChecks className="size-4" aria-hidden="true" />任务类型</span>
+          <span className="text-xs font-normal text-muted-foreground">按本周期会话归纳</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
-          <Table aria-label="任务类型分布">
+          <Table aria-label="任务类型">
             <TableHeader>
               <TableRow>
-                <TableHead>系统 taskType</TableHead>
-                <TableHead>数量</TableHead>
-                <TableHead>Agent 归纳标签</TableHead>
-                <TableHead>置信度</TableHead>
-                <TableHead>证据任务</TableHead>
+                <TableHead>类型</TableHead>
+                <TableHead>数量估计</TableHead>
+                <TableHead>用户反馈</TableHead>
+                <TableHead>说明</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {Object.entries(hardMetrics.taskTypeCounts).map(([taskType, count]) => {
-                const analysisItem = analysis.taskTypeBreakdown.find((item) => item.type === taskType) ?? analysis.taskTypeBreakdown[0];
-                return (
-                  <TableRow key={taskType}>
-                    <TableCell className="font-mono text-xs">{taskType}</TableCell>
-                    <TableCell>{count}</TableCell>
-                    <TableCell>{analysisItem?.label ?? "未归纳"}</TableCell>
-                    <TableCell>{analysisItem ? <Pill tone={confidenceTone(analysisItem.confidence)}>{analysisItem.confidence}</Pill> : "无"}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{analysisItem?.evidenceTaskIds.join(", ") || "无"}</TableCell>
-                  </TableRow>
-                );
-              })}
+              {analysis.taskTypes.length ? analysis.taskTypes.map((taskType) => (
+                <TableRow key={taskType.label}>
+                  <TableCell className="font-medium">{taskType.label}</TableCell>
+                  <TableCell>{taskType.countEstimate}</TableCell>
+                  <TableCell><Pill tone={satisfactionTone(taskType.satisfaction.level)}>{satisfactionLabel(taskType.satisfaction.level)}</Pill></TableCell>
+                  <TableCell className="min-w-[240px] text-muted-foreground">{taskType.description}</TableCell>
+                </TableRow>
+              )) : (
+                <TableRow><TableCell colSpan={4} className="text-muted-foreground">暂无任务类型归纳。</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FeedbackCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
+  return (
+    <Card size="sm">
+      <CardHeader className="border-b">
+        <CardTitle aria-level={2} className="flex items-center gap-2" role="heading"><MessageSquareText className="size-4" aria-hidden="true" />用户反馈</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3 md:grid-cols-2">
+        {analysis.taskTypes.length ? analysis.taskTypes.map((taskType) => (
+          <div className="rounded-[10px] border bg-background p-3" key={taskType.label}>
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <strong className="truncate text-sm">{taskType.label}</strong>
+              <Pill tone={satisfactionTone(taskType.satisfaction.level)}>{satisfactionLabel(taskType.satisfaction.level)}</Pill>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{taskType.satisfaction.reason || "暂无可读反馈判断。"}</p>
+            {taskType.satisfaction.evidenceIds.length ? (
+              <p className="mt-2 truncate font-mono text-xs text-muted-foreground">证据: {taskType.satisfaction.evidenceIds.join(", ")}</p>
+            ) : null}
+          </div>
+        )) : <p className="text-sm text-muted-foreground">暂无用户反馈归纳。</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CasesCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
+  const cases = analysis.taskTypes.flatMap((taskType) =>
+    taskType.cases.map((item) => ({ ...item, taskTypeLabel: taskType.label }))
+  );
+  return (
+    <Card size="sm">
+      <CardHeader className="border-b">
+        <CardTitle aria-level={2} className="flex items-center gap-2" role="heading"><FileText className="size-4" aria-hidden="true" />典型案例</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table aria-label="典型案例">
+            <TableHeader>
+              <TableRow>
+                <TableHead>类型</TableHead>
+                <TableHead>案例</TableHead>
+                <TableHead>反馈</TableHead>
+                <TableHead>结果</TableHead>
+                <TableHead>原因</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cases.length ? cases.map((item) => (
+                <TableRow key={`${item.taskTypeLabel}-${item.id}`}>
+                  <TableCell>{item.taskTypeLabel}</TableCell>
+                  <TableCell>
+                    <span className="block font-medium">{item.title}</span>
+                    <span className="block font-mono text-xs text-muted-foreground">{item.id}</span>
+                  </TableCell>
+                  <TableCell><Pill tone={satisfactionTone(item.signal)}>{satisfactionLabel(item.signal)}</Pill></TableCell>
+                  <TableCell className="min-w-[180px] text-muted-foreground">{item.outcome}</TableCell>
+                  <TableCell className="min-w-[220px] text-muted-foreground">{item.reason}</TableCell>
+                </TableRow>
+              )) : (
+                <TableRow><TableCell colSpan={5} className="text-muted-foreground">暂无典型案例。</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RisksAndActionsCard({ analysis }: { analysis: AgentDashboardAnalysis }) {
+  return (
+    <Card size="sm">
+      <CardHeader className="border-b">
+        <CardTitle aria-level={2} className="flex items-center gap-2" role="heading"><AlertTriangle className="size-4" aria-hidden="true" />风险与建议</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4 lg:grid-cols-2">
+        <section>
+          <h3 className="mb-2 text-xs font-bold text-foreground">风险</h3>
+          <div className="space-y-2">
+            {analysis.risks.length ? analysis.risks.map((risk) => (
+              <EvidenceBlock description={risk.description} evidenceIds={risk.evidenceIds} key={risk.title} title={risk.title} />
+            )) : <p className="text-sm text-muted-foreground">暂无明显风险。</p>}
+          </div>
+        </section>
+        <section>
+          <h3 className="mb-2 text-xs font-bold text-foreground">建议</h3>
+          <div className="space-y-2">
+            {analysis.actions.length ? analysis.actions.map((action) => (
+              <EvidenceBlock description={action.reason} evidenceIds={action.evidenceIds} key={action.title} title={action.title} />
+            )) : <p className="text-sm text-muted-foreground">暂无建议动作。</p>}
+          </div>
+        </section>
       </CardContent>
     </Card>
   );
@@ -591,9 +621,9 @@ function OperationCard({
   const job = detail?.jobs[0] ?? null;
   const stage = typeof job?.payload.stage === "string" ? job.payload.stage : undefined;
   return (
-    <Card aria-label="分析任务" size="sm">
+    <Card size="sm">
       <CardHeader className="border-b">
-        <CardTitle className="flex items-center justify-between gap-3">
+        <CardTitle aria-label="分析任务" aria-level={2} className="flex items-center justify-between gap-3" role="heading">
           <span className="inline-flex items-center gap-2"><Activity className="size-4" aria-hidden="true" />分析任务</span>
           <StatusBadge tone={detail?.operation.status === "failed" ? "danger" : detail?.operation.status === "running" ? "warning" : "success"}>
             {operationStatusLabels[detail?.operation.status ?? "succeeded"]}
@@ -601,10 +631,10 @@ function OperationCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <TimelineItem active={Boolean(detail)} label="accepted" text="collector 接收请求，请求校验通过" />
-        <TimelineItem active={stage === "executing" || detail?.operation.status === "running"} label="executing" text={typeof job?.payload.message === "string" ? job.payload.message : "运行 openclaw agent --json，无 --deliver"} />
-        <TimelineItem active={!detail || detail.operation.status === "succeeded"} label="result_received" text="JSON 校验通过，report 已入库" />
-        <p className="border-t pt-3 text-xs text-muted-foreground">当前报告 Operation: <span className="font-mono">{detail?.operation.id ?? report.operationId}</span></p>
+        <TimelineItem active={Boolean(detail)} label="已接收" text="设备已接收分析请求" />
+        <TimelineItem active={stage === "executing" || detail?.operation.status === "running"} label="分析中" text={typeof job?.payload.message === "string" ? job.payload.message : "正在生成本周期分析报告"} />
+        <TimelineItem active={!detail || detail.operation.status === "succeeded"} label="已生成" text="报告已完成并入库" />
+        <p className="border-t pt-3 text-xs text-muted-foreground">报告生成时间：{formatDateTime(report.createdAt)}</p>
       </CardContent>
     </Card>
   );
@@ -622,7 +652,7 @@ function ReportHistory({
   return (
     <Card size="sm">
       <CardHeader className="border-b">
-        <CardTitle className="flex items-center justify-between gap-3">
+        <CardTitle aria-label="报告历史" aria-level={2} className="flex items-center justify-between gap-3" role="heading">
           <span className="inline-flex items-center gap-2"><FileText className="size-4" aria-hidden="true" />报告历史</span>
           <span className="text-xs font-normal text-muted-foreground">最近 {reports.length} 份</span>
         </CardTitle>
@@ -638,28 +668,10 @@ function ReportHistory({
           >
             <span className="min-w-0">
               <span className="block text-sm font-semibold">{formatPeriodLabel(report.periodStart, report.periodEnd)}</span>
-              <span className="block text-xs text-muted-foreground">{report.hardMetrics.totalTasks} tasks / avg {formatDuration(report.hardMetrics.duration.avgMs)} / {report.operationId}</span>
+              <span className="block text-xs text-muted-foreground">{report.hardMetrics.totalTasks} 个任务 / 平均 {formatDuration(report.hardMetrics.duration.avgMs)}</span>
             </span>
           </Button>
         )) : <p className="text-sm text-muted-foreground">暂无报告历史。</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function BoundaryCard({ modelMetadata }: { modelMetadata: AgentDashboardReport["modelMetadata"] }) {
-  return (
-    <Card size="sm">
-      <CardHeader className="border-b">
-        <CardTitle className="flex items-center gap-2"><AlertTriangle className="size-4" aria-hidden="true" />边界说明</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <BoundaryNote>硬指标只来自 Lorume 后端已经入库的 Task，不接受 Agent 自报。</BoundaryNote>
-        <BoundaryNote>Agent 自评用于类型归纳、典型案例、风险和数据质量，不展示满意度估计。</BoundaryNote>
-        <BoundaryNote>一期只支持 Runtime.kind=openclaw 且 OpenClaw agent=main。</BoundaryNote>
-        {modelMetadata.model || modelMetadata.provider ? (
-          <p className="pt-2 text-xs text-muted-foreground">Model: {[modelMetadata.provider, modelMetadata.model].filter(Boolean).join(" / ")}</p>
-        ) : null}
       </CardContent>
     </Card>
   );
@@ -682,7 +694,7 @@ function EmptyReportState() {
       <CardContent className="py-10 text-center">
         <CalendarDays className="mx-auto size-8 text-muted-foreground" aria-hidden="true" />
         <h2 className="mt-3 text-base font-semibold">暂无分析报告</h2>
-        <p className="mt-2 text-sm text-muted-foreground">可以手动运行一次分析，或等待后端定时任务生成上一自然日报告。</p>
+        <p className="mt-2 text-sm text-muted-foreground">可以手动运行一次分析，生成本 Agent 的周期报告。</p>
       </CardContent>
     </Card>
   );
@@ -745,8 +757,33 @@ function TimelineItem({ active, label, text }: { active: boolean; label: string;
   );
 }
 
-function BoundaryNote({ children }: { children: string }) {
-  return <p className="rounded-[10px] border border-dashed bg-muted/20 p-3 text-sm leading-6 text-muted-foreground">{children}</p>;
+function InsightBlock({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="rounded-[10px] border bg-background p-3">
+      <h3 className="text-xs font-bold text-foreground">{label}</h3>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{text || "暂无判断。"}</p>
+    </div>
+  );
+}
+
+function EvidenceBlock({
+  description,
+  evidenceIds,
+  title,
+}: {
+  description: string;
+  evidenceIds: string[];
+  title: string;
+}) {
+  return (
+    <div className="rounded-[10px] border p-3">
+      <strong className="text-sm">{title}</strong>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+      {evidenceIds.length ? (
+        <p className="mt-2 truncate font-mono text-xs text-muted-foreground">证据: {evidenceIds.join(", ")}</p>
+      ) : null}
+    </div>
+  );
 }
 
 function listAgentAnalysisTargets(snapshot: RuntimeFleetSnapshot): AgentAnalysisTarget[] {
@@ -773,17 +810,18 @@ function openclawAgentIdFromAgentId(agentId: string, agentName = ""): string {
   return agentId.split(":agent:").at(-1) || agentName;
 }
 
-function confidenceTone(value: string): PillTone {
-  if (value === "high") return "blue";
-  if (value === "medium") return "purple";
-  return "muted";
+function satisfactionLabel(value: string): string {
+  if (value === "positive") return "偏正向";
+  if (value === "mixed") return "分化明显";
+  if (value === "negative") return "偏负向";
+  return "证据不足";
 }
 
-function caseStatusTone(value: string): PillTone {
-  if (value === "done") return "green";
-  if (value === "failed") return "orange";
-  if (value === "cancelled") return "muted";
-  return "yellow";
+function satisfactionTone(value: string): PillTone {
+  if (value === "positive") return "green";
+  if (value === "mixed") return "orange";
+  if (value === "negative") return "danger";
+  return "muted";
 }
 
 function formatDuration(value?: number): string {

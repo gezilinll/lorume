@@ -37,19 +37,20 @@ describe("agent analysis operation handler", () => {
       openclawAgentId: "main",
       operationId: "op_analysis",
       promptKind: "daily_operation_review",
-      promptVersion: "openclaw-agent-analysis-v1",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       runtimeId: "fixture-mac:runtime:openclaw",
       timeoutSeconds: 120,
     });
     expect(requests[0]?.prompt).toContain("\"hardMetrics\"");
+    expect(requests[0]?.prompt).toContain("以会话/session 为主要分析粒度");
     expect(requests[0]?.prompt).not.toContain("--deliver");
     expect(payloadPatches[0]).toMatchObject({
-      allowedTaskIds: ["task_done"],
       dispatchedAt: "2026-06-03T08:00:00.000Z",
-      promptVersion: "openclaw-agent-analysis-v1",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       stage: "dispatched",
       status: "running",
     });
+    expect(payloadPatches[0]).not.toHaveProperty("allowedTaskIds");
   });
 
   it("validates result JSON, writes a report, and completes the external Job", async () => {
@@ -76,39 +77,49 @@ describe("agent analysis operation handler", () => {
           return null;
         },
         listJobs: async () => [createAnalysisJob({
-          allowedTaskIds: ["task_done"],
           hardMetrics: createHardMetrics(),
-          promptVersion: "openclaw-agent-analysis-v1",
+          promptVersion: "openclaw-agent-operation-analysis-v2",
           stage: "dispatched",
           status: "running",
         })],
       } as unknown as OperationStore,
     }, {
       analysis: {
-        schemaVersion: "agent-analysis-v1",
-        promptKind: "daily_operation_review",
-        summary: "Queue triage dominated the day.",
-        taskTypeBreakdown: [
+        periodPerformance: {
+          workload: "任务量稳定。",
+          completion: "多数任务已完成。",
+          latency: "耗时集中在 20 分钟内。",
+          failurePattern: "未发现集中失败。",
+        },
+        taskTypes: [
           {
-            type: "triage",
-            label: "Triage",
+            label: "队列整理",
             countEstimate: 1,
-            confidence: "high",
-            evidenceTaskIds: ["task_done"],
-          },
-        ],
-        typicalCases: [
-          {
-            taskId: "task_done",
-            title: "Queue triage",
-            whyTypical: "It reflects the main work pattern.",
-            outcome: "Completed",
-            status: "done",
-            evidence: "The sampled task asks for queue summarization.",
+            description: "处理队列整理和摘要请求。",
+            satisfaction: {
+              level: "positive",
+              reason: "用户目标清晰且任务闭环。",
+              evidenceIds: ["session_1"],
+            },
+            cases: [
+              {
+                id: "session_1",
+                title: "Queue triage",
+                signal: "positive",
+                outcome: "Completed",
+                reason: "It reflects the main work pattern.",
+              },
+            ],
           },
         ],
         risks: [],
-        dataQualityNotes: ["Only sampled tasks were reviewed."],
+        actions: [
+          {
+            title: "沉淀队列摘要模板",
+            reason: "减少重复说明成本。",
+            evidenceIds: ["session_1"],
+          },
+        ],
       },
       deviceId: "fixture-mac",
       durationMs: 10842,
@@ -127,6 +138,7 @@ describe("agent analysis operation handler", () => {
       deviceId: "fixture-mac",
       modelMetadata: { model: "gpt-test", provider: "openai" },
       operationId: "op_analysis",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       runtimeKind: "openclaw",
     });
     expect(completions[0]).toMatchObject({
@@ -166,15 +178,6 @@ function createAgentAnalysisStore(): AgentAnalysisStore {
     close: async () => undefined,
     computeOpenClawAgentMetrics: async () => ({
       hardMetrics: createHardMetrics(),
-      sampledTasks: [
-        {
-          id: "task_done",
-          status: "done",
-          taskType: "conversation",
-          updatedSourceAt: "2026-06-01T18:02:00.000Z",
-          userMessage: "Summarize the queue.",
-        },
-      ],
     }),
   } as unknown as AgentAnalysisStore;
 }
@@ -196,6 +199,7 @@ function createAnalysisJob(payloadPatch: Record<string, unknown> = {}): Operatio
       periodEnd: "2026-06-02T16:00:00.000Z",
       periodStart: "2026-06-01T16:00:00.000Z",
       promptKind: "daily_operation_review",
+      promptVersion: "openclaw-agent-operation-analysis-v2",
       runtimeId: "fixture-mac:runtime:openclaw",
       runtimeKind: "openclaw",
       timeoutSeconds: 120,

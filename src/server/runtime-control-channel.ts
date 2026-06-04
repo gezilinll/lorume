@@ -74,7 +74,7 @@ export interface AgentAnalysisRequestMessage {
   readonly agentId: string;
   readonly openclawAgentId: "main";
   readonly promptKind: "daily_operation_review";
-  readonly promptVersion: "openclaw-agent-analysis-v1";
+  readonly promptVersion: "openclaw-agent-operation-analysis-v2";
   readonly periodStart: string;
   readonly periodEnd: string;
   readonly prompt: string;

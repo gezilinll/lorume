@@ -79,7 +79,6 @@ export async function dispatchAgentAnalysisJob(
     hardMetrics: metrics.hardMetrics,
     promptKind: agentAnalysisPromptKind,
     promptVersion: agentAnalysisPromptVersion,
-    sampledTasks: metrics.sampledTasks,
   });
   const request: AgentAnalysisRequestMessage = {
     agentId: payload.agentId,
@@ -107,7 +106,6 @@ export async function dispatchAgentAnalysisJob(
     jobId: job.id,
     now: currentTime,
     payloadPatch: {
-      allowedTaskIds: metrics.sampledTasks.map((task) => task.id),
       dispatchedAt: currentTime.toISOString(),
       hardMetrics: metrics.hardMetrics,
       message: "Agent analysis request dispatched",
@@ -177,8 +175,7 @@ export async function applyAgentAnalysisResult(
     await completeInvalidResult(options.operationStore, job.id, now(), "Agent analysis hard metrics missing from Job payload");
     return { status: "completed" };
   }
-  const allowedTaskIds = new Set(readStringList(job.payload.allowedTaskIds));
-  const validation = validateAgentAnalysisResult(result.analysis, { allowedTaskIds });
+  const validation = validateAgentAnalysisResult(result.analysis);
   if (!validation.ok) {
     await completeInvalidResult(options.operationStore, job.id, now(), validation.error);
     return { status: "completed" };
@@ -338,11 +335,6 @@ function readHardMetrics(payload: Record<string, unknown>): OpenClawHardMetrics 
   if (duration.basis !== "trajectoryElapsed") return null;
   if (!Array.isArray(duration.includedStatuses)) return null;
   return hardMetrics as unknown as OpenClawHardMetrics;
-}
-
-function readStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

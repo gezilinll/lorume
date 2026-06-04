@@ -6,7 +6,7 @@
 
 Agent 看板是 Lorume Console 的数据密集型运行观察页。一期只展示后端已落地的 OpenClaw `main` Agent Analysis 报告，不新增后端实体，不直接访问 collector，不把真实设备执行作为前端测试条件。
 
-页面目标是让操作者看到某个 Agent 在一个报告周期内的日常运转：系统计算的硬指标、Agent 自评的任务类型归纳、典型案例、风险和数据质量说明，并能手动创建一次新的分析 Operation。
+页面目标是让操作者看到某个 Agent 在一个报告周期内的日常运转：运行概览、运行表现、任务类型、用户反馈、典型案例、风险与建议，并能手动创建一次新的分析 Operation。
 
 ## Scope
 
@@ -15,13 +15,13 @@ Agent 看板是 Lorume Console 的数据密集型运行观察页。一期只展�
 - `Runtime.kind=openclaw`
 - OpenClaw 外部 Agent id 为 `main`
 - 报告类型 `promptKind=daily_operation_review`
-- 报告版本 `promptVersion=openclaw-agent-analysis-v1`
+- 报告版本 `promptVersion=openclaw-agent-operation-analysis-v2`
 
 一期不支持：
 
 - Slock、Codex 或其他 Runtime 的 Agent 分析展示。
 - 多 Agent 横向对比。
-- 满意度、NPS、用户情绪或用户评价估计。
+- 全局满意度、NPS、评分、情绪判断或跨 Agent 对比。
 - 前端新增 chart 依赖。
 - 前端直接读取数据库、调用 collector 或执行真实设备命令。
 
@@ -45,7 +45,7 @@ Agent 看板是 Lorume Console 的数据密集型运行观察页。一期只展�
 - `POST /api/agent-analysis-runs`
 - `GET /api/operations/:operationId`
 
-前端 API adapter 必须归一化后端响应，并过滤不属于页面契约的字段。即使后端异常返回 `satisfaction`、`satisfactionScore`、`nps` 或类似字段，页面也不得展示。
+前端 API adapter 必须归一化后端响应，并过滤不属于页面契约的字段。即使后端异常返回 `satisfactionScore`、`nps`、raw prompt、nonce 或类似字段，页面也不得展示。任务类型内的 `satisfaction.level` 只能转译为用户可读的反馈倾向文案。
 
 ## Layout
 
@@ -53,32 +53,34 @@ Agent 看板是 Lorume Console 的数据密集型运行观察页。一期只展�
 
 - 左侧主导航。
 - 顶部 Workbar 显示页面标题、当前 Device / Runtime / Agent / period 摘要和刷新动作。
-- 主体为数据密集双栏布局：左侧报告主体，右侧报告历史、Operation 状态和边界说明。
+- 主体为数据密集双栏布局：左侧报告主体，右侧报告历史和分析任务状态。
 - 不渲染 hero、营销文案、大型装饰背景或重复页面标题块。
 
 ## Content Rules
 
-硬指标区必须标记为 `系统计算`，并展示：
+`运行概览` 必须展示：
 
 - Task 总数。
 - 状态分布。
 - `failed`、`unknown` 数。
 - 最近活跃时间。
 - `done` / `failed` 任务的平均、p50、p90 耗时。
-- 任务类型分布。
+- 当前报告周期。
 
-Agent 返回内容必须标记为 `Agent 自评`，并展示：
+报告主体必须拆成面向管理者的模块：
 
-- summary。
-- 任务类型归纳。
-- 典型案例。
-- 风险。
-- 数据质量说明。
+- `运行表现`：工作量、完成情况、耗时表现、异常模式。
+- `任务类型`：类型名称、数量估计、反馈倾向、说明。
+- `用户反馈`：按任务类型展示 `positive | mixed | negative | unknown` 的中文含义：`偏正向`、`分化明显`、`偏负向`、`证据不足`。
+- `典型案例`：案例标题、结果、反馈信号、原因、证据 id。
+- `风险与建议`：风险和建议分块展示。
+- `历史报告`：只展示日期、状态或任务量，不突出 Operation ID。
 
 文案边界：
 
-- 不把 Agent 自评展示成系统事实统计。
+- 不展示 `系统计算`、`硬指标`、`Agent 自评`、`边界说明`、`置信度` 等内部实现或校验措辞。
 - 不展示 raw backend payload、prompt 全文、nonce、device token、session token、cookie、OpenClaw secret 或调试字段。
+- 不展示全局满意度、NPS、评分或用户情绪判断。
 - 非 OpenClaw 或非 `main` Agent 明确显示 `不支持分析`，不误导为数据缺失。
 - 空报告状态显示 `暂无分析报告`，并保留可支持目标的手动 `运行分析` 动作。
 
@@ -107,9 +109,10 @@ Agent 返回内容必须标记为 `Agent 自评`，并展示：
   - 报告列表/详情归一化。
   - 无效 payload 回退。
   - run API 返回 Operation / Job。
-  - 过滤满意度类字段。
+  - v2 报告归一化，旧 v1 报告可降级展示且不暴露 raw payload。
 - `src/agent-dashboard/AgentDashboardPage.test.tsx`
-  - 展示硬指标、Agent 自评、类型归纳、典型案例、风险、数据质量说明、报告历史。
+  - 展示运行概览、运行表现、任务类型、用户反馈、典型案例、风险与建议、报告历史。
+  - 页面不出现 `系统计算`、`硬指标`、`Agent 自评`、`边界说明`、`置信度`。
   - 覆盖空报告、unsupported target、running/succeeded/failed、创建请求失败。
 - `src/App.test.tsx`
   - 主导航出现 `Agent 看板`。
@@ -122,7 +125,7 @@ E2E：
   - 只验证前端导航、响应式和接口展示。
   - 不触发真实 collector。
   - 检查 1440px、1185px、390px 下无 body 横向溢出。
-  - 检查页面不出现满意度字段、不暴露 raw payload、不把 Operation 抽屉变成主导航页面。
+  - 检查页面不出现技术字段、评分/NPS、raw payload，不把 Operation 抽屉变成主导航页面。
 
 推荐命令：
 

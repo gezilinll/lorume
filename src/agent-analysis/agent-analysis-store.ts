@@ -4,7 +4,6 @@ import {
   computeOpenClawHardMetrics,
   type AgentAnalysisResult,
   type AgentAnalysisTaskRow,
-  type AgentAnalysisTaskSample,
   type OpenClawHardMetrics,
 } from "./agent-analysis-model";
 
@@ -66,7 +65,6 @@ export interface AgentAnalysisStore {
   listOpenClawMainTargets: (input: { organizationId?: string; limit?: number }) => Promise<AgentAnalysisTarget[]>;
   computeOpenClawAgentMetrics: (input: AgentAnalysisMetricsInput) => Promise<{
     hardMetrics: OpenClawHardMetrics;
-    sampledTasks: AgentAnalysisTaskSample[];
   }>;
   upsertReport: (input: AgentAnalysisReportInput) => Promise<AgentAnalysisReportRow>;
   listReports: (input: { organizationId: string; agentId?: string; limit?: number }) => Promise<AgentAnalysisReportRow[]>;

@@ -28,35 +28,42 @@ export interface AgentDashboardHardMetrics {
   unknownCount: number;
 }
 
-export type AgentDashboardConfidence = "high" | "medium" | "low";
-export type AgentDashboardCaseStatus = "done" | "failed" | "cancelled" | "unknown";
+export type AgentDashboardSatisfactionLevel = "positive" | "mixed" | "negative" | "unknown";
 
 export interface AgentDashboardAnalysis {
-  schemaVersion: "agent-analysis-v1";
-  promptKind: "daily_operation_review";
-  summary: string;
-  taskTypeBreakdown: Array<{
-    confidence: AgentDashboardConfidence;
+  periodPerformance: {
+    completion: string;
+    failurePattern: string;
+    latency: string;
+    workload: string;
+  };
+  taskTypes: Array<{
+    cases: Array<{
+      id: string;
+      outcome: string;
+      reason: string;
+      signal: AgentDashboardSatisfactionLevel;
+      title: string;
+    }>;
     countEstimate: number;
-    evidenceTaskIds: string[];
+    description: string;
     label: string;
-    type: string;
-  }>;
-  typicalCases: Array<{
-    evidence: string;
-    outcome: string;
-    status: AgentDashboardCaseStatus;
-    taskId: string;
-    title: string;
-    whyTypical: string;
+    satisfaction: {
+      evidenceIds: string[];
+      level: AgentDashboardSatisfactionLevel;
+      reason: string;
+    };
   }>;
   risks: Array<{
     description: string;
-    evidenceTaskIds: string[];
-    severity: AgentDashboardConfidence;
+    evidenceIds: string[];
     title: string;
   }>;
-  dataQualityNotes: string[];
+  actions: Array<{
+    evidenceIds: string[];
+    reason: string;
+    title: string;
+  }>;
 }
 
 export interface AgentDashboardModelMetadata {
@@ -138,8 +145,7 @@ const operationStatuses: AgentDashboardOperationStatus[] = [
   "unsupported",
 ];
 
-const confidenceValues: AgentDashboardConfidence[] = ["high", "medium", "low"];
-const caseStatuses: AgentDashboardCaseStatus[] = ["done", "failed", "cancelled", "unknown"];
+const satisfactionLevels: AgentDashboardSatisfactionLevel[] = ["positive", "mixed", "negative", "unknown"];
 
 export function createAgentAnalysisReportsUrl(
   origin: string,
@@ -292,54 +298,81 @@ function normalizeHardMetrics(value: unknown): AgentDashboardHardMetrics | null 
 function normalizeAnalysis(value: unknown): AgentDashboardAnalysis | null {
   const record = asRecord(value);
   if (!record) return null;
-  if (record.schemaVersion !== "agent-analysis-v1" || record.promptKind !== "daily_operation_review") return null;
-  const summary = readString(record.summary);
-  if (!summary) return null;
+  const v2 = normalizeV2Analysis(record);
+  if (v2) return v2;
+  return normalizeLegacyV1Analysis(record);
+}
+
+function normalizeV2Analysis(record: Record<string, unknown>): AgentDashboardAnalysis | null {
+  const periodPerformance = normalizePeriodPerformance(record.periodPerformance);
+  if (!periodPerformance) return null;
   return {
-    dataQualityNotes: normalizeStringArray(record.dataQualityNotes),
-    promptKind: "daily_operation_review",
+    actions: normalizeActions(record.actions),
+    periodPerformance,
     risks: normalizeRisks(record.risks),
-    schemaVersion: "agent-analysis-v1",
-    summary,
-    taskTypeBreakdown: normalizeTaskTypeBreakdown(record.taskTypeBreakdown),
-    typicalCases: normalizeTypicalCases(record.typicalCases),
+    taskTypes: normalizeTaskTypes(record.taskTypes),
   };
 }
 
-function normalizeTaskTypeBreakdown(value: unknown): AgentDashboardAnalysis["taskTypeBreakdown"] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => {
-    const record = asRecord(item);
-    const confidence = normalizeConfidence(record?.confidence);
-    if (!record || !confidence) return null;
-    return {
-      confidence,
-      countEstimate: readNumber(record.countEstimate) ?? 0,
-      evidenceTaskIds: normalizeStringArray(record.evidenceTaskIds),
-      label: readString(record.label),
-      type: readString(record.type),
-    };
-  }).filter((item): item is AgentDashboardAnalysis["taskTypeBreakdown"][number] =>
-    Boolean(item && item.label && item.type)
-  );
+function normalizeLegacyV1Analysis(record: Record<string, unknown>): AgentDashboardAnalysis | null {
+  if (record.schemaVersion !== "agent-analysis-v1" || record.promptKind !== "daily_operation_review") return null;
+  return {
+    actions: [],
+    periodPerformance: {
+      completion: readString(record.summary) || "旧版报告未提供完成情况判断。",
+      failurePattern: "旧版报告未提供异常模式判断。",
+      latency: "旧版报告未提供耗时表现判断。",
+      workload: readString(record.summary) || "旧版报告未提供工作量判断。",
+    },
+    risks: normalizeLegacyRisks(record.risks),
+    taskTypes: normalizeLegacyTaskTypes(record.taskTypeBreakdown, record.typicalCases),
+  };
 }
 
-function normalizeTypicalCases(value: unknown): AgentDashboardAnalysis["typicalCases"] {
+function normalizePeriodPerformance(value: unknown): AgentDashboardAnalysis["periodPerformance"] | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const workload = readString(record.workload);
+  const completion = readString(record.completion);
+  const latency = readString(record.latency);
+  const failurePattern = readString(record.failurePattern);
+  return workload && completion && latency && failurePattern
+    ? { completion, failurePattern, latency, workload }
+    : null;
+}
+
+function normalizeTaskTypes(value: unknown): AgentDashboardAnalysis["taskTypes"] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
     const record = asRecord(item);
-    const status = normalizeCaseStatus(record?.status);
-    if (!record || !status) return null;
+    if (!record) return null;
+    const label = readString(record.label);
+    if (!label) return null;
     return {
-      evidence: readString(record.evidence),
-      outcome: readString(record.outcome),
-      status,
-      taskId: readString(record.taskId),
-      title: readString(record.title),
-      whyTypical: readString(record.whyTypical),
+      cases: normalizeCases(record.cases),
+      countEstimate: readNumber(record.countEstimate) ?? 0,
+      description: readString(record.description),
+      label,
+      satisfaction: normalizeSatisfaction(record.satisfaction),
     };
-  }).filter((item): item is AgentDashboardAnalysis["typicalCases"][number] =>
-    Boolean(item && item.taskId && item.title)
+  }).filter((item): item is AgentDashboardAnalysis["taskTypes"][number] => Boolean(item));
+}
+
+function normalizeCases(value: unknown): AgentDashboardAnalysis["taskTypes"][number]["cases"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = asRecord(item);
+    const signal = normalizeSatisfactionLevel(record?.signal);
+    if (!record || !signal) return null;
+    return {
+      id: readString(record.id),
+      outcome: readString(record.outcome),
+      reason: readString(record.reason),
+      signal,
+      title: readString(record.title),
+    };
+  }).filter((item): item is AgentDashboardAnalysis["taskTypes"][number]["cases"][number] =>
+    Boolean(item && item.id && item.title)
   );
 }
 
@@ -347,12 +380,90 @@ function normalizeRisks(value: unknown): AgentDashboardAnalysis["risks"] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
     const record = asRecord(item);
-    const severity = normalizeConfidence(record?.severity);
-    if (!record || !severity) return null;
+    if (!record) return null;
     return {
       description: readString(record.description),
-      evidenceTaskIds: normalizeStringArray(record.evidenceTaskIds),
-      severity,
+      evidenceIds: normalizeStringArray(record.evidenceIds),
+      title: readString(record.title),
+    };
+  }).filter((item): item is AgentDashboardAnalysis["risks"][number] => Boolean(item && item.title));
+}
+
+function normalizeActions(value: unknown): AgentDashboardAnalysis["actions"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = asRecord(item);
+    if (!record) return null;
+    return {
+      evidenceIds: normalizeStringArray(record.evidenceIds),
+      reason: readString(record.reason),
+      title: readString(record.title),
+    };
+  }).filter((item): item is AgentDashboardAnalysis["actions"][number] => Boolean(item && item.title));
+}
+
+function normalizeSatisfaction(value: unknown): AgentDashboardAnalysis["taskTypes"][number]["satisfaction"] {
+  const record = asRecord(value);
+  return {
+    evidenceIds: normalizeStringArray(record?.evidenceIds),
+    level: normalizeSatisfactionLevel(record?.level) ?? "unknown",
+    reason: readString(record?.reason),
+  };
+}
+
+function normalizeLegacyTaskTypes(
+  value: unknown,
+  casesValue: unknown,
+): AgentDashboardAnalysis["taskTypes"] {
+  const legacyCases = normalizeLegacyCases(casesValue);
+  if (!Array.isArray(value)) return [];
+  const taskTypes: AgentDashboardAnalysis["taskTypes"] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const label = readString(record?.label);
+    if (!record || !label) continue;
+    const evidenceIds = normalizeStringArray(record.evidenceTaskIds);
+    taskTypes.push({
+      cases: legacyCases,
+      countEstimate: readNumber(record.countEstimate) ?? 0,
+      description: "旧版报告未提供任务类型说明。",
+      label,
+      satisfaction: {
+        evidenceIds,
+        level: "unknown",
+        reason: "旧版报告未提供用户反馈判断。",
+      },
+    });
+  }
+  return taskTypes;
+}
+
+function normalizeLegacyCases(value: unknown): AgentDashboardAnalysis["taskTypes"][number]["cases"] {
+  if (!Array.isArray(value)) return [];
+  const cases: AgentDashboardAnalysis["taskTypes"][number]["cases"] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const legacyCase: AgentDashboardAnalysis["taskTypes"][number]["cases"][number] = {
+      id: readString(record.taskId),
+      outcome: readString(record.outcome),
+      reason: readString(record.whyTypical),
+      signal: "unknown",
+      title: readString(record.title),
+    };
+    if (legacyCase.id && legacyCase.title) cases.push(legacyCase);
+  }
+  return cases;
+}
+
+function normalizeLegacyRisks(value: unknown): AgentDashboardAnalysis["risks"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = asRecord(item);
+    if (!record) return null;
+    return {
+      description: readString(record.description),
+      evidenceIds: normalizeStringArray(record.evidenceTaskIds),
       title: readString(record.title),
     };
   }).filter((item): item is AgentDashboardAnalysis["risks"][number] => Boolean(item && item.title));
@@ -438,15 +549,9 @@ function normalizeOperationStatus(value: unknown): AgentDashboardOperationStatus
     : null;
 }
 
-function normalizeConfidence(value: unknown): AgentDashboardConfidence | null {
-  return typeof value === "string" && confidenceValues.includes(value as AgentDashboardConfidence)
-    ? value as AgentDashboardConfidence
-    : null;
-}
-
-function normalizeCaseStatus(value: unknown): AgentDashboardCaseStatus | null {
-  return typeof value === "string" && caseStatuses.includes(value as AgentDashboardCaseStatus)
-    ? value as AgentDashboardCaseStatus
+function normalizeSatisfactionLevel(value: unknown): AgentDashboardSatisfactionLevel | null {
+  return typeof value === "string" && satisfactionLevels.includes(value as AgentDashboardSatisfactionLevel)
+    ? value as AgentDashboardSatisfactionLevel
     : null;
 }
 

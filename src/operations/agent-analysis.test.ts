@@ -39,7 +39,7 @@ describe("agent analysis operation handler", () => {
       promptKind: "daily_operation_review",
       promptVersion: "openclaw-agent-operation-analysis-v2",
       runtimeId: "fixture-mac:runtime:openclaw",
-      timeoutSeconds: 120,
+      timeoutSeconds: 300,
     });
     expect(requests[0]?.prompt).toContain("\"hardMetrics\"");
     expect(requests[0]?.prompt).toContain("以会话/session 为主要分析粒度");
@@ -202,7 +202,7 @@ function createAnalysisJob(payloadPatch: Record<string, unknown> = {}): Operatio
       promptVersion: "openclaw-agent-operation-analysis-v2",
       runtimeId: "fixture-mac:runtime:openclaw",
       runtimeKind: "openclaw",
-      timeoutSeconds: 120,
+      timeoutSeconds: 300,
       ...payloadPatch,
     },
     runAfter: new Date("2026-06-03T08:00:00.000Z"),

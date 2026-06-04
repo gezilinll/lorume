@@ -6,6 +6,8 @@ import {
 } from "./agent-analysis-model";
 import type { AgentAnalysisStore, AgentAnalysisTarget } from "./agent-analysis-store";
 
+export const defaultAgentAnalysisTimeoutSeconds = 300;
+
 export interface AgentAnalysisRunInput {
   agentId: string;
   organizationId: string;
@@ -82,7 +84,7 @@ export async function createAgentAnalysisRunForTarget(
       runtimeKind: "openclaw",
     },
   });
-  const timeoutSeconds = 120;
+  const timeoutSeconds = defaultAgentAnalysisTimeoutSeconds;
   const job = await options.operationStore.enqueueJob({
     operationId: operation.id,
     organizationId: input.organizationId,

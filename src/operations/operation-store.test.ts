@@ -146,6 +146,76 @@ describeDb("Postgres operation store", () => {
     }
   });
 
+  it("does not reclaim an externally running Agent analysis job before its deadline", async () => {
+    const database = await createTemporaryPostgresDatabase();
+    try {
+      runDatabaseSchemaScript(database.url);
+      const authStore = createPostgresAuthStore({ connectionString: database.url });
+      const operationStore = createPostgresOperationStore({ connectionString: database.url });
+      try {
+        const user = await authStore.upsertUserForEmail("ops-agent-analysis@example.com");
+        const organization = await authStore.createOrganization({
+          createdByUserId: user.id,
+          name: "Agent Analysis Team",
+          slug: "agent-analysis-team",
+        });
+        const operation = await operationStore.createOperation({
+          organizationId: organization.id,
+          requestedByUserId: user.id,
+          resourceId: "fixture-mac:runtime:openclaw:agent:main",
+          resourceType: "agent",
+          summary: "Analyze OpenClaw Agent daily operation",
+          targetId: "fixture-mac",
+          targetType: "device",
+          type: "agent_analysis",
+        });
+        const job = await operationStore.enqueueJob({
+          operationId: operation.id,
+          organizationId: organization.id,
+          payload: {
+            deadlineAt: "2026-06-03T08:05:00.000Z",
+            deviceId: "fixture-mac",
+            stage: "executing",
+          },
+          runAfter: new Date("2026-06-03T07:59:00.000Z"),
+          type: "agent_analysis_openclaw",
+        });
+
+        const firstClaim = await operationStore.claimNextJob({
+          leaseMs: 1_000,
+          now: new Date("2026-06-03T08:00:00.000Z"),
+          runnerId: "runner-a",
+        });
+        const earlyReclaim = await operationStore.claimNextJob({
+          leaseMs: 1_000,
+          now: new Date("2026-06-03T08:00:02.000Z"),
+          runnerId: "runner-b",
+        });
+        const deadlineReclaim = await operationStore.claimNextJob({
+          leaseMs: 1_000,
+          now: new Date("2026-06-03T08:05:01.000Z"),
+          runnerId: "runner-b",
+        });
+
+        expect(firstClaim).toMatchObject({
+          attemptCount: 1,
+          id: job.id,
+          status: "running",
+        });
+        expect(earlyReclaim).toBeNull();
+        expect(deadlineReclaim).toMatchObject({
+          attemptCount: 2,
+          id: job.id,
+          status: "running",
+        });
+      } finally {
+        await Promise.all([authStore.close(), operationStore.close()]);
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it("lets a job move the owning operation into a manual-step state", async () => {
     const database = await createTemporaryPostgresDatabase();
     try {

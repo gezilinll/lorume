@@ -257,6 +257,11 @@ export function createPostgresOperationStore(options: PostgresOperationStoreOpti
                 status = 'running'
                 AND locked_until IS NOT NULL
                 AND locked_until <= $2
+                AND (
+                  type <> 'agent_analysis_openclaw'
+                  OR COALESCE(payload->>'stage', '') NOT IN ('dispatched', 'accepted', 'executing', 'result_received')
+                  OR (payload->>'deadlineAt')::timestamptz <= $2
+                )
               )
             ORDER BY run_after ASC, created_at ASC
             LIMIT 1

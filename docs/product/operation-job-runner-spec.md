@@ -84,14 +84,14 @@ Job 状态：
 规则：
 
 - Runner claim Job 时必须使用数据库行锁和 lease，避免并发 runner 重复执行同一个 Job。
-- `lockedUntil` 过期的 `running` Job 可以被重新 claim。
+- `lockedUntil` 过期的 `running` Job 可以被重新 claim；外部完成型 Job 可以定义更窄的 reclaim 条件。
 - 每次执行失败增加 `attemptCount`，未到 `maxAttempts` 时回到 `queued` 并设置 `runAfter`。
 - Job handler 必须具备幂等性：重复执行同一个 Job 不应造成重复通知或重复外部状态变更。
 - Operation 的最终状态由必要 Job 的结果汇总产生。
 - 任一必要 Job 进入 `requires_manual_step` 时，Operation 进入 `requires_manual_step` 并保留 `manualInstruction`。
 - Operation 状态变化必须可以创建 Notification Event。
 - `collector_upgrade_device` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限升级请求，Job 保持 `running`；collector progress、目标版本 heartbeat 或超时检查负责把 Job 推进到最终状态。
-- `agent_analysis_openclaw` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限 OpenClaw Agent 分析请求，Job 保持 `running`；collector progress/result 负责把 Job 推进到最终状态，后端必须先校验并写入 report 后才可标记成功。
+- `agent_analysis_openclaw` 是外部完成型 Job：runner claim 后向已认证设备 socket 发送受限 OpenClaw Agent 分析请求，Job 保持 `running`；collector progress/result 负责把 Job 推进到最终状态，后端必须先校验并写入 report 后才可标记成功。该 Job 在 `dispatched`、`accepted`、`executing` 或 `result_received` 且未到 `deadlineAt` 时不能因 lease 过期被重复 claim；到达 `deadlineAt` 后才可 reclaim 并按超时失败处理。
 
 ## 当前实现策略
 
@@ -138,6 +138,7 @@ Job 状态：
 - Store 能创建 Operation、入队 Job、claim due Job、完成 Job、失败重试和标记最终 Operation 状态。
 - Lease 未过期的 Job 不会被重复 claim。
 - Lease 过期的 running Job 可以被重新 claim。
+- 外部运行中的 `agent_analysis_openclaw` Job 在 deadline 前不会被重复 claim 或重复下发。
 - Job 成功后 Operation 进入 `succeeded`。
 - Job 达到重试上限后 Operation 进入 `failed`。
 - 不支持 Job 会让 Operation 进入 `unsupported`。

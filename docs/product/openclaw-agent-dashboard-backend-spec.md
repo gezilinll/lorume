@@ -41,7 +41,7 @@ The Job payload stores:
 - `timeoutSeconds`
 - `stage`
 
-The Job remains externally running after WS dispatch. Collector progress updates patch Job payload stage/status. Collector result completion writes the report first, then completes the Job and refreshes Operation status.
+The Job remains externally running after WS dispatch. Collector progress updates patch Job payload stage/status. Collector result completion writes the report first, then completes the Job and refreshes Operation status. While an `agent_analysis_openclaw` Job is externally running in `dispatched`, `accepted`, `executing`, or `result_received`, the runner must not re-dispatch it before `deadlineAt`; this avoids duplicate prompt execution while still allowing deadline-based failure recovery.
 
 ## Report Persistence
 
@@ -104,11 +104,13 @@ The backend prompt is written in Chinese and contains:
 - instructions that cross-period sessions may use outside-window context only for light understanding, never as current-period evidence
 - instructions that the Agent must read its own history, trajectory, or equivalent records in its runtime environment
 - analysis steps for locating period sessions, understanding context, grouping task types, judging per-task-type user feedback, selecting cases, and producing risks/actions
+- bounded analysis instructions: do not exhaustively scan all history, deep-read at most 12 representative sessions, and use hard metrics to estimate workload when the period has more records
+- bounded output instructions: at most 6 task types, 3 cases per task type, 5 risks, and 5 actions
 - explicit instruction to return raw JSON only
 - explicit instruction not to add fields outside the JSON contract
 - explicit instruction not to deliver messages, mutate files, mutate external tasks, schedule work, or execute unrelated actions
 
-The backend does not send full sessions or sampled Task summaries to the Agent. Hard metrics are included only as compact context for workload, status, and duration.
+The backend does not send full sessions or sampled Task summaries to the Agent. Hard metrics are included only as compact context for workload, status, and duration. Default OpenClaw analysis timeout is 300 seconds, with collector-side request normalization clamped to the supported protocol range.
 
 Agent JSON output:
 

@@ -10,7 +10,7 @@ import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import { normalizeLocalIpsForDisplay } from "./local-ip-normalization.mjs";
 
-const COLLECTOR_VERSION = "0.1.7";
+const COLLECTOR_VERSION = "0.1.8";
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_COLLECTION_TIMEOUT_MS = 240_000;
 const DEFAULT_PROBE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
@@ -1294,6 +1294,7 @@ async function runOpenClawAgentAnalysis(request) {
 function spawnForJson(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
+      detached: process.platform !== "win32",
       env: commandExecutionEnv(command),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -1303,9 +1304,9 @@ function spawnForJson(command, args, timeoutMs) {
     let forceKillTimer;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killSpawnedChild(child, "SIGTERM");
       forceKillTimer = setTimeout(() => {
-        child.kill("SIGKILL");
+        killSpawnedChild(child, "SIGKILL");
       }, CHILD_FORCE_KILL_DELAY_MS);
     }, timeoutMs);
     child.stdout.setEncoding("utf8");
@@ -1335,6 +1336,21 @@ function spawnForJson(command, args, timeoutMs) {
       resolve({ stdout, stderr });
     });
   });
+}
+
+function killSpawnedChild(child, signal) {
+  if (typeof child.pid === "number" && process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (error?.code !== "ESRCH") {
+        child.kill(signal);
+      }
+      return;
+    }
+  }
+  child.kill(signal);
 }
 
 function parseJson(value, errorMessage) {

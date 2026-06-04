@@ -277,7 +277,7 @@ The collector parses OpenClaw `--json` output `result.payloads[0].text` as raw A
 
 Duplicate requests for the same running `jobId` must not start another OpenClaw process; the collector only reports running progress.
 
-If the OpenClaw subprocess exceeds `timeoutSeconds`, the collector must terminate it, force-kill it when it does not exit promptly, and send a failed `agent.analysis.result` instead of leaving the backend to infer failure only from `deadlineAt`.
+If the OpenClaw subprocess exceeds `timeoutSeconds`, the collector must terminate the OpenClaw process group, force-kill it when it does not exit promptly, and send a failed `agent.analysis.result` instead of leaving the backend to infer failure only from `deadlineAt`. This covers wrapper processes that spawn an `openclaw-agent` child and keep stdout/stderr open after the top-level CLI exits.
 
 ## Harness
 
@@ -295,4 +295,4 @@ Focused harnesses include:
 - `src/agent-analysis/agent-analysis-store.test.ts`
 - `src/operations/agent-analysis.test.ts`
 - `src/server/runtime-control-channel.test.ts`
-- `src/runtime/device-collector-script.test.ts`, including a launchd-like PATH case where `openclaw` is only discoverable from a recent fnm multishell directory and a timeout case where a stuck OpenClaw subprocess still yields a failed result.
+- `src/runtime/device-collector-script.test.ts`, including a launchd-like PATH case where `openclaw` is only discoverable from a recent fnm multishell directory, a timeout case where a stuck OpenClaw subprocess still yields a failed result, and a wrapper/child-process timeout case that proves the collector kills the process group.

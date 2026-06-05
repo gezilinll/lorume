@@ -79,6 +79,8 @@ describe("agent analysis HTTP API", () => {
             periodStart: expect.any(String),
             promptKind: "daily_operation_review",
             runtimeKind: "openclaw",
+            timeoutSeconds: 600,
+            deadlineAt: expect.any(String),
           }),
         }),
       },

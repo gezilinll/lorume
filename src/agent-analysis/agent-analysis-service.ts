@@ -6,7 +6,7 @@ import {
 } from "./agent-analysis-model";
 import type { AgentAnalysisStore, AgentAnalysisTarget } from "./agent-analysis-store";
 
-export const defaultAgentAnalysisTimeoutSeconds = 300;
+export const defaultAgentAnalysisTimeoutSeconds = 600;
 
 export interface AgentAnalysisRunInput {
   agentId: string;

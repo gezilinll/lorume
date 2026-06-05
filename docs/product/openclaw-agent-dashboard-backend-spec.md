@@ -112,7 +112,7 @@ The backend prompt is written in Chinese and contains:
 - explicit instruction not to add fields outside the JSON contract
 - explicit instruction not to deliver messages, mutate files, mutate external tasks, schedule work, or execute unrelated actions
 
-The backend does not send full sessions or sampled Task summaries to the Agent. Hard metrics are included only as compact context for workload, status, and duration. Default OpenClaw analysis timeout is 300 seconds, with collector-side request normalization clamped to the supported protocol range.
+The backend does not send full sessions or sampled Task summaries to the Agent. Hard metrics are included only as compact context for workload, status, and duration. Default OpenClaw analysis timeout is 600 seconds, with collector-side request normalization clamped to the supported protocol range.
 
 Agent JSON output:
 
